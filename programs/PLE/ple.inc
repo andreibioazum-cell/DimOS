@@ -1,5 +1,5 @@
 ; ========================================================================
-; ple.inc -- PLE (PRos Large Executable) header generator for x16-PRos
+; ple.inc -- PLE (DimOS Large Executable) header generator for DimOS
 ; ========================================================================
 ; Usage:
 ;   %include "ple.inc"

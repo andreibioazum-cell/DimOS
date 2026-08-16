@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- GREP. grep utility for x16-PRos
+; DimOS -- GREP. grep utility for DimOS
 ; Copyright (C) 2025 PRoX2011
 ; 
 ; Usage: grep <filename> <search_string>

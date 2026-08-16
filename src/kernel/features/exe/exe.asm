@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - MZ EXE file loader for x16-PRos kernel
+; DimOS - MZ EXE file loader for DimOS kernel
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

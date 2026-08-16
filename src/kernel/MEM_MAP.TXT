@@ -1,4 +1,4 @@
-x16-PRos Memory Map
+DimOS Memory Map
 
 physical address = segment * 16 + offset
 

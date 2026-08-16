@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- PROCENTC. Precentages calculator.
+; DimOS -- PROCENTC. Precentages calculator.
 ;
 ; Made by Gabriel
 ; =================================================================

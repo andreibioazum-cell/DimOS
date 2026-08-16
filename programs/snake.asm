@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- SNAKE. Simple snake game.
+; DimOS -- SNAKE. Simple snake game.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- HEXEDIT. Hex editor for x16-PRos
+; DimOS -- HEXEDIT. Hex editor for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Usage: hexedit <filename>

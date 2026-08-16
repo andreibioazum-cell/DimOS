@@ -1,6 +1,6 @@
-# Contributing to x16-PRos
+# Contributing to DimOS
 
-Thank you for your interest in contributing to x16-PRos! This document provides guidelines for developing programs and contributing to the operating system.
+Thank you for your interest in contributing to DimOS! This document provides guidelines for developing programs and contributing to the operating system.
 
 ---
 
@@ -88,7 +88,7 @@ mov dx, ax
 
 ---
 
-## Writing Programs for x16-PRos
+## Writing Programs for DimOS
 
 ### Program Structure
 
@@ -96,7 +96,7 @@ All programs must:
 
 1. Be written in NASM assembly
 2. Use `ORG 0x8000` as the load address
-3. Call PRos kernel API functions (see [API.md](docs/API.md))
+3. Call DimOS kernel API functions (see [API.md](docs/API.md))
 4. End with `ret` to return control to the terminal
 5. Be compiled to `.BIN` format
 
@@ -112,7 +112,7 @@ start:
     int 0x21
     ret
 
-hello_msg db 'Hello, PRos!', 10, 13, 0
+hello_msg db 'Hello, DimOS!', 10, 13, 0
 ```
 
 ### Testing Your Program
@@ -166,7 +166,7 @@ What should happen
 What actually happens
 
 **Environment:**
-- x16-PRos version: 0.5.9s
+- DimOS version: 0.5.9s
 - Emulator: QEMU 8.0
 ```
 
@@ -236,13 +236,13 @@ Instead:
 
 ## License
 
-By contributing to x16-PRos, you agree that your contributions will be licensed under the MIT License.
+By contributing to DimOS, you agree that your contributions will be licensed under the MIT License.
 
 ---
 
 <div align="center">
 
-**Thank you for contributing to x16-PRos!**
+**Thank you for contributing to DimOS!**
 
 Made with ❤️ by PRoX
 

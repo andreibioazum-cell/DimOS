@@ -1,6 +1,6 @@
 ; ==================================================================
-; x16-PRos - Compatibility layer with MS DOS programs.
-;            Emulates MS DOS system calls through PRos kernel functions
+; DimOS - Compatibility layer with MS DOS programs.
+;            Emulates MS DOS system calls through DimOS kernel functions
 ;
 ; https://wiki.osdev.org/COM
 ; https://en.wikipedia.org/wiki/COM_file

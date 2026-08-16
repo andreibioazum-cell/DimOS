@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- The x16-PRos Operating System kernel
+; DimOS -- The DimOS Operating System kernel
 ; Copyright (C) 2025 PRoX2011
 ;
 ; This is loaded from disk by BOOT.BIN as KERNEL.BIN
@@ -84,7 +84,7 @@ start:
     call fs_list_drives        ; List drives
     call load_timezone_cfg     ; It is necessary after completion of SETUP.BIN so that the time zone is updated to the user one
     call load_and_apply_theme  ; Load and aply theme from THEME.CFG file
-    call shell                 ; Start PRos terminal
+    call shell                 ; Start DimOS terminal
 
     jmp $
 
@@ -2150,7 +2150,7 @@ rip_terry:
 
 .rip_terry db "Rest in peace Terry A. Devis (1969 - 2018)", 0
 
-%INCLUDE "src/kernel/init.asm"                      ; x16-PRos initialisation
+%INCLUDE "src/kernel/init.asm"                      ; DimOS initialisation
 %INCLUDE "src/kernel/log.asm"                       ; Log functions
 %INCLUDE "src/kernel/features/fs.asm"               ; FAT12 filesystem functions
 %INCLUDE "src/kernel/features/string.asm"           ; String functions
@@ -2176,7 +2176,7 @@ rip_terry:
 ; ===================== Data Section =====================
 section .data
 ; ------ Header ------
-header db 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xDB, 0xDB, ' ', 'x16 PRos v0.9', ' ', 0xDB, 0xDB, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0
+header db 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xDB, 0xDB, ' ', 'DimOS v0.9', ' ', 0xDB, 0xDB, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB2, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB1, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0
 
 ; ------ Help ------
 kshell_comands db 'HELP               - get list of commands', 10, 13
@@ -2204,17 +2204,17 @@ kshell_comands db 'HELP               - get list of commands', 10, 13
 ; ------ About OS ------
 info db 10, 13
      db 20 dup(0xC4), ' INFO ', 21 dup(0xC4), 10, 13
-     db '  x16 PRos is the simple 16 bit operating', 10, 13
+     db '  DimOS is the simple 16 bit operating', 10, 13
      db '  system written in NASM for x86 PC`s ', 10, 13
      db 47 dup(0xC4), 10, 13
      db '  Author:           PRoX   (https://github.com/PRoX2011)', 10, 13
      db '  Support project:  DALink (https://dalink.to/PRoXdev)', 10, 13
-     db '  Source code:      GitHub (https://github.com/PRoX2011/x16-PRos)', 10, 13
+     db '  Source code:      DimOS source tree', 10, 13
      db '  License:          MIT', 10, 13
      db '  OS version:       0.9', 10, 13
      db 0
 
-version_msg db 'PRos Terminal v0.3', 10, 13, 0
+version_msg db 'DimOS Terminal v0.3', 10, 13, 0
 
 ; ------ Commands ------
 exit_string    db 'EXIT', 0

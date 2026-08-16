@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- DLIST. Drive listing utility for x16-PRos
+; DimOS -- DLIST. Drive listing utility for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - timezone support for x16-PRos kernel
+; DimOS - timezone support for DimOS kernel
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

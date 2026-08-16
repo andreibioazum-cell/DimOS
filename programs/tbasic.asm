@@ -1,6 +1,6 @@
 ; ==================================================================
-; x16-PRos -- TYNY BASIC 86
-; Conversion for x16PRos
+; DimOS -- TYNY BASIC 86
+; Conversion for DimOS
 ; by Aleksey Shilo chiefexb
 ;
 ; Original source TINY8086 https://github.com/Honneamise/TINY8086
@@ -1538,7 +1538,7 @@ ILM_NEG:
 
 
 ILM_NLINE:
-  mov ah,0x05     ; PRos: print newline (CR+LF)
+  mov ah,0x05     ; DimOS: print newline (CR+LF)
   int 0x21
   ret
 
@@ -2245,7 +2245,7 @@ ILM_XINIT:
 ;==============================================================================
 ;welcome string
 STR_WELCOME		db "TINY BASIC 8086",0Ah,0Dh,"Vers.2023 by Honny",10,13
-              db "Conversion for x16PRos by Aleksey Shilo in 2026",00h
+              db "Conversion for DimOS by Aleksey Shilo in 2026",00h
 
 ;list of language keywords
 STR_EXIT    db "EXIT",00h

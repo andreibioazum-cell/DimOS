@@ -237,7 +237,7 @@ build_default_prompt:
     mov di, final_prompt
     call parse_prompt
     ret
-.template db '[$username@PRos] > ', 0
+.template db '[$username@DimOS] > ', 0
 
 handle_password_check:
     mov si, password_cfg_load_msg

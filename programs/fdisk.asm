@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- FDISK. Floppy disk format utility for x16-PRos
+; DimOS -- FDISK. Floppy disk format utility for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Usage: fdisk <drive_letter>
@@ -440,7 +440,7 @@ msg_disk_error  db 'Disk error! Format aborted.', 0
 ; FAT12 boot sector template (512 bytes)
 fat12_boot_sector:
     db 0xEB, 0x3C, 0x90        ; JMP SHORT 0x3E + NOP
-    db 'x16-PROS'              ; OEM name (8 bytes)
+    db 'DIMOS   '           ; OEM name (8 bytes)
     dw 512                     ; Bytes per sector
     db 1                       ; Sectors per cluster
     dw 1                       ; Reserved sectors
@@ -456,8 +456,8 @@ fat12_boot_sector:
     db 0x00                    ; BIOS drive number
     db 0                       ; Reserved
     db 0x29                    ; Extended boot signature
-    dd 0x50524F53              ; Volume serial number ('PROS')
-    db "x16-PROS   "           ; Volume label (11 bytes)
+    dd 0x4F4D4944              ; Volume serial number ('DIMO')
+    db "DIMOS      "        ; Volume label (11 bytes)
     db 'FAT12   '              ; Filesystem type (8 bytes)
     times 448 db 0             ; Boot code area (empty)
     dw 0xAA55

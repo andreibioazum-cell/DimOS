@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- MINE. Minesweeper game.
+; DimOS -- MINE. Minesweeper game.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -310,7 +310,7 @@ ExitGame:
   ret
 
 help_msg    db 0xC9, 51 dup(0xCD), 0xBB, 10, 13
-            db 0xBA, '  PRos minesweeper                                 ', 0xBA, 10, 13
+            db 0xBA, '  DimOS minesweeper                                 ', 0xBA, 10, 13
             db 0xC3, 51 dup(0xC4), 0xB4, 10, 13
             db 0xBA, '  ARROWS   - move the cursor                       ', 0xBA, 10, 13
             db 0xBA, '  SPACE    - open the cage on the field            ', 0xBA, 10, 13

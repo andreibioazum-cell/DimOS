@@ -2,10 +2,10 @@
 |                          User Applications                                |
 |                                                                           |
 |   +----------------------------+   +---------------------------------+    |
-|   |        DOS Programs        |   |      Native PRos Programs       |    |
+|   |        DOS Programs        |   |      Native DimOS Programs       |    |
 |   |       (.COM / .EXE)        |   |            (.BIN)               |    |
 |   |                            |   |                                 |    |
-|   |  INT 20h / INT 21h DOS API |   |  PRos Native API (INT 0x21,22)  |    |
+|   |  INT 20h / INT 21h DOS API |   |  DimOS Native API (INT 0x21,22)  |    |
 |   |  PSP-style environment     |   |                                 |    |
 |   +-------------+--------------+   +--------------+------------------+    |
 |                 |                                 |                       |
@@ -23,9 +23,9 @@
                   | API Switch                     | API Switch
                   v                                v
 +-------------------------------+     +-------------------------------------+
-|     DOS Compatibility Mode    |     |        Native PRos Mode             |
+|     DOS Compatibility Mode    |     |        Native DimOS Mode             |
 |                               |     |                                     |
-|  - INT 21h Dispatcher         |     |  - PRos API Interface               |
+|  - INT 21h Dispatcher         |     |  - DimOS API Interface               |
 |  - INT 20h Termination        |     |                                     |
 |                               |     |                                     |
 +---------------+---------------+     +---------------+---------------------+

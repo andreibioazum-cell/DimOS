@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - Kernel Output API (Interrupt-Driven)
+; DimOS - Kernel Output API (Interrupt-Driven)
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Provides output functions via INT 0x21

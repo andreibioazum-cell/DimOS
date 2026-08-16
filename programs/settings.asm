@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- SETTINGS. System configuration editor for x16-PRos
+; DimOS -- SETTINGS. System configuration editor for DimOS
 ; Copyright (C) 2026 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -1594,7 +1594,7 @@ draw_setting_icon:
 ; ==================================================================
 section .data
 
-title_str         db ' x16-PRos System Settings', 0
+title_str         db ' DimOS System Settings', 0
 shortcut_str      db ' ', 24, 25, ' Select   Enter Edit   Esc Exit', 0
 list_title        db 9 dup(0xC4), ' Settings ', 11 dup(0xC4), 0
 info_title        db 12 dup(0xC4), ' Info ', 24 dup(0xC4), 0
@@ -1724,7 +1724,7 @@ key_logo         db 'LOGO=', 0
 key_stretch      db 'LOGO_STRETCH=', 0
 key_sound        db 'START_SOUND=', 0
 
-sys_tpl_1        db '# x16-PRos System Configuration', 10
+sys_tpl_1        db '# DimOS System Configuration', 10
                  db '# This file controls startup settings', 10, 10
                  db '# Logo file to display at boot', 10
                  db '# Set to FALSE to disable logo display', 10

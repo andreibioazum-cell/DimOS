@@ -1,10 +1,10 @@
 ; ==================================================================
-; x16-PRos -- TETRIS
+; DimOS -- TETRIS
 ; Original design by Alexey Pajitnov
 ;
 ; Made by DrunkFly( Nikolay Zapolnov)
 ; source https://github.com/drunkfly/8086tetris/blob/master/TETRIS.ASM
-; Conversion for x16-PRos by  Alex Pricker  (Aleksey Shilo)
+; Conversion for DimOS by  Alex Pricker  (Aleksey Shilo)
 ; https://github.com/chiefexb
 ; See more on https://github.com/GeeksLore
 ; ==================================================================

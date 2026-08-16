@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- FONT. Font selector for x16-PRos
+; DimOS -- FONT. Font selector for DimOS
 ; Copyright (C) 2026 PRoX2011
 ;
 ; Made by PRoX-dev

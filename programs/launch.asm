@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- LAUNCH. TUI Program Launcher for .BIN and .COM files
+; DimOS -- LAUNCH. TUI Program Launcher for .BIN and .COM files
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -797,7 +797,7 @@ arg_buffer  resb 32
 
 section .data
 
-title_str         db ' PRos Program Launcher', 0
+title_str         db ' DimOS Program Launcher', 0
 shortcut_str      db ' ', 24, 25, ' Select    ENTER Run    ^ENTER Run with args    Esc Exit', 0
 list_title        db 10 dup(0xC4), ' Programs ', 10 dup(0xC4), 0
 info_title        db 12 dup(0xC4), ' Info ', 24 dup(0xC4), 0
@@ -825,7 +825,7 @@ lbl_type          db 'File type:', 0
 lbl_launch        db 'Launch mode:', 0
 
 str_bytes         db ' bytes', 0
-str_type_bin      db 'PRos executable', 0
+str_type_bin      db 'DimOS executable', 0
 str_type_com      db 'MS-DOS executable', 0
 str_launch_native db 'Native', 0
 str_launch_emu    db 'Emulation <may not work well>', 0

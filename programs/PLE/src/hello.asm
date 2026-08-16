@@ -13,6 +13,6 @@ start:
 
     retf
 
-hello_msg db 'Hello, PRos! Live long and prosper!', 10, 13, 0
+hello_msg db 'Hello, DimOS! Live long and prosper!', 10, 13, 0
 
 PLE_END

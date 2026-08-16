@@ -22,5 +22,5 @@ What should happen
 What actually happens
 
 **Environment:**
-- x16-PRos version: x.x.x
+- DimOS version: x.x.x
 - Emulator: <emulator name>

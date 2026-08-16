@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- Font rendering library for VGA mode 0x12
+; DimOS -- Font rendering library for VGA mode 0x12
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Provides pixel-level character rendering with foreground and

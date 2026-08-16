@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- FETCH. Neofetch-like fetch tool for x16-PRos
+; DimOS -- FETCH. Neofetch-like fetch tool for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -703,10 +703,10 @@ vesa_msg         db 'VESA: ', 0
 resolution_msg   db 'Resolution: ', 0
 bios_release_msg db 'BIOS release date: ', 0
 
-os_name        db 'PRos', 0
-os_full_name   db 'x16-PRos', 0
-kernel_name    db 'PRos Kernel', 0
-shell_name     db 'PRos Terminal', 0
+os_name        db 'DimOS', 0
+os_full_name   db 'DimOS', 0
+kernel_name    db 'DimOS Kernel', 0
+shell_name     db 'DimOS Terminal', 0
 yes_str        db 'Yes', 0
 no_str         db 'No', 0
 

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- PAINT. Very simple paint program.
+; DimOS -- PAINT. Very simple paint program.
 ; Copyright (C) 2025-2026 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -672,7 +672,7 @@ XorMode       db 0
 ; 9 - dark gray (0x08)
 ColorTable db 0x00, 0x0F, 0x01, 0x03, 0x02, 0x04, 0x05, 0x0E, 0x07, 0x08
 
-welcome_msg    db '                             - PRos Paint v0.2 -', 13, 10,
+welcome_msg    db '                             - DimOS Paint v0.2 -', 13, 10,
                db '         Use 1-9 buttons to change colors and W, S to change brush size', 13, 10,
                db '              Ctrl+S to save as BMP, ESC to exit program', 0
 

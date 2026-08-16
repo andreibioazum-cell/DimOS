@@ -1100,7 +1100,7 @@ install_info_title       db 'Selected drive:', 0
 install_lbl_floppy       db 'Floppy', 0
 install_lbl_hdd          db 'HDD',    0
 install_lbl_cur          db '(current)', 0
-install_lbl_brand        db 'x16-PRos', 0
+install_lbl_brand        db 'DimOS', 0
 
 install_lbl_drive        db 'Drive: ', 0
 install_lbl_type         db 'Type:  ', 0

@@ -1,5 +1,5 @@
 ; ========================================================================
-; mz.inc -- MZ EXE header generator for x16-PRos
+; mz.inc -- MZ EXE header generator for DimOS
 ; ========================================================================
 ; Usage:
 ;   %include "mz.inc"
@@ -27,7 +27,7 @@
 %macro MZ_HEADER 1
 
 ; We use SECTION with vstart so code labels start at 0.
-; The x16-PRos EXE loader ignores page count/last page fields
+; The DimOS EXE loader ignores page count/last page fields
 ; (it loads the whole file via fs_load_huge_file),
 ; so... we hardcode them to safe values :)
 

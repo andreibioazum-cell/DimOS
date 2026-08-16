@@ -1,8 +1,8 @@
-# x16-PRos Bootloader Documentation
+# DimOS Bootloader Documentation
 
 ## Overview
 
-The x16-PRos bootloader is a 16-bit real-mode program that loads the operating system kernel (`KERNEL.BIN`) from a
+The DimOS bootloader is a 16-bit real-mode program that loads the operating system kernel (`KERNEL.BIN`) from a
 FAT12-formatted 1.44 MB floppy disk into memory at address `0x2000:0x0000` and transfers control to it. It resides in
 the boot sector of the floppy disk (first 512 bytes) and is executed by the BIOS upon system startup. The bootloader
 uses BIOS interrupts to read disk sectors and navigate the FAT12 file system to locate and load the kernel.
@@ -130,7 +130,7 @@ The bootloader operates in the following stages:
 
 The BPB defines the FAT12 file system parameters:
 
-- **OEM Identifier**: `"x16-PRos"`
+- **OEM Identifier**: `"DimOS"`
 - **Bytes per Sector**: 512
 - **Sectors per Cluster**: 1
 - **Reserved Sectors**: 1 (boot sector)
@@ -174,7 +174,7 @@ The BPB defines the FAT12 file system parameters:
 
 ## License
 
-The x16-PRos bootloader is licensed under the MIT License. See the LICENSE.TXT for details.
+The DimOS bootloader is licensed under the MIT License. See the LICENSE.TXT for details.
 
 **Author**: PRoX (https://github.com/PRoX2011)
 **Version**: 0.4

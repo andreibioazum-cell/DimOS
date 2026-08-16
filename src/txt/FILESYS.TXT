@@ -26,8 +26,8 @@ SUPPORTED FILE TYPES:
 
   .EXE - MS-DOS EXE(MZ) executable
 
-  .PLE - PRos Large Executable
-         Native x16-PRos exec file
+  .PLE - DimOS Large Executable
+         Native DimOS exec file
          for lagre programs
 
   .TXT - Plain text files
@@ -53,12 +53,12 @@ DIRECTORY STRUCTURE:
   BIN/        - System programs and applications
   COM/        - MS-DOS .COM executables
   EXE/        - MS-DOS .EXE executables
-  PLE/        - PRos large executables
+  PLE/        - DimOS large executables
   CONF/       - Configuration files
   DOCS/       - Documentation files
   BMP/        - Image files
   MUSIC/      - IMF music files
   FONTS/      - cp866 FONTS
-  THEMES/     - themes for PRos Terminal in .THM format
+  THEMES/     - themes for DimOS Terminal in .THM format
 
 ===========================================================================

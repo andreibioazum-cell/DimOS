@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - FAT12 file system functions for x16-PRos kernel
+; DimOS - FAT12 file system functions for DimOS kernel
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

@@ -1,8 +1,8 @@
 ============================================================
- PLE - PRos Large Executable
+ PLE - DimOS Large Executable
 ============================================================
 
-A multi-segment executable format for x16-PRos. The whole
+A multi-segment executable format for DimOS. The whole
 file is loaded contiguously into PLE_BASE_SEG (0x3000) by
 fs_load_huge_file, so it can span more than 64 KiB. 
 

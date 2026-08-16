@@ -502,7 +502,7 @@ exit:
     int 0x10
     ret
 
-welcome_msg    db '-PRos Bar Chart Program v0.2-', 13,10,0
+welcome_msg    db '-DimOS Bar Chart Program v0.2-', 13,10,0
 input_prompt   db 'Enter numbers (0-200, use space between, Enter to finish): ',0
 menu_msg       db 13,10,"1 - Load file",13,10,"2 - New input",13,10,"> ",0
 error_load_msg db "File not found! Press any key...",0

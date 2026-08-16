@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- PIANO. PC Speaker piano.
+; DimOS -- PIANO. PC Speaker piano.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -718,7 +718,7 @@ delay_ms:
 
 ; ========== Data Section ==========
 title_msg db 0xC9, 60 dup(0xCD), 0xBB, 10, 13
-          db 0xBA, '           PRos Piano v2.0 - PC Speaker                     ', 0xBA, 10, 13
+          db 0xBA, '           DimOS Piano v2.0 - PC Speaker                     ', 0xBA, 10, 13
           db 0xC0, 60 dup(0xCD), 0xBC, 10, 13, 0
 
 help_msg  db 0xC9, 60 dup(0xCD), 0xBB, 10, 13

@@ -1,571 +1,446 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# ==================================================================
-# DimOS -- The DimOS build script for Linux
-# Copyright (C) 2025 PRoX2011
-# ==================================================================
+# DimOS build script for Linux.
+# Produces a bootable FAT12 floppy image and an El Torito ISO image.
 
-FLAG_QUIET_MODE=0
-FLAG_NO_MUSIC=0
-FLAG_NO_TXT=0
-FLAG_NO_BOOT_RECOMP=0
-FLAG_NO_KERNEL_RECOMP=0
-FLAG_NO_PROGRAMS_RECOMP=0
-FLAG_NO_LOGO_DISPLAY=0
-FLAG_NO_SETUP=0
-FLAG_DTM=0  # DTM - Dev Tesing Mode
+set -Eeuo pipefail
 
-MAX_KERNEL_LOADER_BYTES=43008   # 0xA800 - kernel image must end before dirlist
-KERNEL_SIZE_WARN_BYTES=40960    # 0xA000 - warn 2 KiB before the ceiling
+readonly FLOPPY_SIZE_BYTES=1474560
+readonly MAX_KERNEL_LOADER_BYTES=43008   # 0xA800: start of the kernel directory-list buffer.
+readonly KERNEL_SIZE_WARN_BYTES=40960    # Warn 2 KiB before the loader limit.
+readonly BOOT_IMAGE="disk_img/dimos.img"
+readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
+readonly ISO_IMAGE="disk_img/dimos.iso"
+readonly IMAGE_CHECKER="bin/dimos-image-check"
 
-for arg in $@; do
-    if [ $arg == "-quiet" ]; then FLAG_QUIET_MODE=1; continue; fi
-    if [ $arg == "-no-music" ]; then FLAG_NO_MUSIC=1; continue; fi
-    if [ $arg == "-no-txt" ]; then FLAG_NO_TXT=1; continue; fi
-    if [ $arg == "-no-boot-recomp" ]; then FLAG_NO_BOOT_RECOMP=1; continue; fi
-    if [ $arg == "-no-kernel-recomp" ]; then FLAG_NO_KERNEL_RECOMP=1; continue; fi
-    if [ $arg == "-no-programs-recomp" ]; then FLAG_NO_PROGRAMS_RECOMP=1; continue; fi
-    if [ $arg == "-no-logo-display" ]; then FLAG_NO_LOGO_DISPLAY=1; continue; fi
-    if [ $arg == "-no-setup" ]; then FLAG_NO_SETUP=1; continue; fi
-    if [ $arg == "-dtm" ]; then FLAG_NO_SETUP=1; FLAG_NO_LOGO_DISPLAY=1; FLAG_NO_BOOT_RECOMP=1; continue; fi
-done
+QUIET=0
+NO_MUSIC=0
+NO_TEXT=0
+NO_BOOT_RECOMPILE=0
+NO_KERNEL_RECOMPILE=0
+NO_PROGRAMS_RECOMPILE=0
+NO_LOGO_DISPLAY=0
+NO_SETUP=0
+BUILD_ISO=1
 
-RED='\033[31m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-BLUE='\033[34m'
-CYAN='\033[36m'
-NC='\033[0m'
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    RED=$'\033[31m'
+    GREEN=$'\033[32m'
+    YELLOW=$'\033[33m'
+    CYAN=$'\033[36m'
+    RESET=$'\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    CYAN=''
+    RESET=''
+fi
 
-print_info() {
-    local message="$1"
-    if [ $FLAG_QUIET_MODE == 0 ]; then
-        echo -e "${CYAN}[ INFO ]${NC} ${message}";
+usage() {
+    cat <<'USAGE'
+Usage: ./build-linux.sh [options]
+
+Options:
+  --quiet                  Print only errors
+  --no-music               Do not copy music assets
+  --no-text                Do not copy documentation to the image
+  --no-boot-recompile      Reuse bin/BOOT.BIN
+  --no-kernel-recompile    Reuse bin/KERNEL.BIN
+  --no-programs-recompile  Reuse program binaries from bin/
+  --no-logo-display        Compile the kernel without the startup logo
+  --no-setup               Compile programs without the first-boot setup
+  --no-iso                 Build only the FAT12 images
+  --dtm                    Development mode (no logo and no setup)
+  -h, --help               Show this help
+
+The legacy single-dash option names (for example, -quiet) remain supported.
+USAGE
+}
+
+log_info() {
+    if (( ! QUIET )); then
+        printf '%s[ INFO ]%s %s\n' "$CYAN" "$RESET" "$1"
     fi
 }
 
-print_ok() {
-    local message="$1"
-    if [ $FLAG_QUIET_MODE == 0 ]; then
-        echo -e "${GREEN}[  OK  ]${NC} ${message}"
+log_ok() {
+    if (( ! QUIET )); then
+        printf '%s[  OK  ]%s %s\n' "$GREEN" "$RESET" "$1"
     fi
 }
 
-print_failed() {
-    local message="$1"
-    if [ $FLAG_QUIET_MODE == 0 ]; then
-        echo -e "${RED}[ FAILED ]${NC} ${message}"
+log_section() {
+    if (( ! QUIET )); then
+        printf '\n%s========== %s ==========%s\n' "$GREEN" "$1" "$RESET"
     fi
+}
+
+fail() {
+    printf '%s[ FAILED ]%s %s\n' "$RED" "$RESET" "$1" >&2
     exit 1
 }
 
-print_splitline() {
-    local message="$1"
-    if [ $FLAG_QUIET_MODE == 0 ]; then
-        echo -e "$NC"
-        echo -e "$GREEN========== $message ==========$NC"
-    fi
+on_error() {
+    local status=$?
+    printf '%s[ FAILED ]%s Build command failed at line %s (exit %s).\n' \
+        "$RED" "$RESET" "${BASH_LINENO[0]}" "$status" >&2
+    exit "$status"
+}
+trap on_error ERR
+
+for argument in "$@"; do
+    case "$argument" in
+        --quiet|-quiet) QUIET=1 ;;
+        --no-music|-no-music) NO_MUSIC=1 ;;
+        --no-text|--no-txt|-no-txt) NO_TEXT=1 ;;
+        --no-boot-recompile|-no-boot-recomp) NO_BOOT_RECOMPILE=1 ;;
+        --no-kernel-recompile|-no-kernel-recomp) NO_KERNEL_RECOMPILE=1 ;;
+        --no-programs-recompile|-no-programs-recomp) NO_PROGRAMS_RECOMPILE=1 ;;
+        --no-logo-display|-no-logo-display) NO_LOGO_DISPLAY=1 ;;
+        --no-setup|-no-setup) NO_SETUP=1 ;;
+        --no-iso) BUILD_ISO=0 ;;
+        --dtm|-dtm)
+            NO_SETUP=1
+            NO_LOGO_DISPLAY=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            fail "Unknown option: $argument"
+            ;;
+    esac
+done
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
-check_error() {
-    if [ $? -ne 0 ]; then
-        print_failed "$1"
-    fi
+require_file() {
+    [[ -f "$1" ]] || fail "Required file not found: $1"
 }
 
-print_kernel_size() {
-    local label="$1"
-    local size_bytes
-    size_bytes=$(stat -c%s bin/KERNEL.BIN 2>/dev/null)
-    if [ -n "$size_bytes" ]; then
-        local size_kib
-        size_kib=$(( (size_bytes + 1023) / 1024 ))
-        print_info "$label kernel size: ${size_bytes} bytes (~${size_kib} KiB)"
-    fi
+file_size() {
+    wc -c < "$1" | tr -d '[:space:]'
 }
 
-check_kernel_size_guard() {
-    local size_bytes
-    size_bytes=$(stat -c%s bin/KERNEL.BIN 2>/dev/null || echo 0)
+assemble() {
+    local source=$1
+    local output=$2
+    shift 2
 
-    if [ "$size_bytes" -le 0 ]; then
-        print_failed "Kernel image missing: bin/KERNEL.BIN"
-    fi
-
-    print_info "Loader window limit: ${MAX_KERNEL_LOADER_BYTES} bytes"
-
-    if [ "$size_bytes" -gt "$KERNEL_SIZE_WARN_BYTES" ]; then
-        print_info "Kernel size warning: ${size_bytes} bytes is close to loader limit"
-    fi
-
-    if [ "$size_bytes" -gt "$MAX_KERNEL_LOADER_BYTES" ]; then
-        print_failed "Kernel too large for bootloader window (${size_bytes} > ${MAX_KERNEL_LOADER_BYTES})"
-    fi
+    log_info "Assembling $source -> $output"
+    nasm -f bin "$@" "$source" -o "$output"
 }
 
-mkdir -p bin
-mkdir -p disk_img
+copy_to_image() {
+    local source=$1
+    local destination=$2
 
-print_splitline "Starting DimOS build..."
+    require_file "$source"
+    log_info "Copying $source -> $destination"
+    mcopy -i "$BOOT_IMAGE" "$source" "$destination"
+}
 
-echo -e "$NC"
+create_directory() {
+    local directory=$1
+    log_info "Creating $directory"
+    mmd -i "$BOOT_IMAGE" "::/$directory"
+}
 
-# Compile bootloader
-if [ $FLAG_NO_BOOT_RECOMP == 0 ]; then
-    print_info "Compiling bootloader (boot.asm => bin/BOOT.BIN)..."
-    nasm -f bin src/bootloader/boot.asm -o bin/BOOT.BIN
-    check_error "Bootloader compilation failed"
-    print_ok "Bootloader compiled successfully"
-fi
+compile_program_group() {
+    local destination=$1
+    local include_directory=$2
+    local definitions=$3
+    shift 3
+    local entries=("$@")
+    local entry source output
+    local nasm_options=()
 
-# Compile kernel
-if [ $FLAG_NO_KERNEL_RECOMP == 0 ]; then
-    addition_flags=""
-    if [ $FLAG_NO_LOGO_DISPLAY == 1 ]; then
-        addition_flags="-d NO_LOGO_DISPLAY"
-    fi
-    baseline_kernel_size=$(stat -c%s bin/KERNEL.BIN 2>/dev/null || echo 0)
-    print_info "Compiling kernel (kernel.asm => bin/KERNEL.BIN)..."
-    nasm -f bin src/kernel/kernel.asm -o bin/KERNEL.BIN $addition_flags
-    check_error "Kernel compilation failed"
-    print_ok "Kernel compiled successfully"
-    current_kernel_size=$(stat -c%s bin/KERNEL.BIN 2>/dev/null || echo 0)
-    if [ "$baseline_kernel_size" -gt 0 ]; then
-        delta_kernel_size=$((current_kernel_size - baseline_kernel_size))
-        delta_sign="+"
-        if [ "$delta_kernel_size" -lt 0 ]; then
-            delta_sign=""
+    [[ -z "$include_directory" ]] || nasm_options+=("-I${include_directory}/")
+    [[ -z "$definitions" ]] || nasm_options+=("-D${definitions}")
+
+    for entry in "${entries[@]}"; do
+        IFS='|' read -r source output <<< "$entry"
+
+        if (( ! NO_PROGRAMS_RECOMPILE )); then
+            assemble "$source" "bin/$output" "${nasm_options[@]}"
+        else
+            require_file "bin/$output"
         fi
-        print_info "Kernel size delta: ${delta_sign}${delta_kernel_size} bytes (baseline ${baseline_kernel_size})"
+
+        copy_to_image "bin/$output" "$destination"
+    done
+}
+
+create_floppy_image() {
+    local path=$1
+
+    log_info "Creating FAT12 image: $path"
+    truncate -s "$FLOPPY_SIZE_BYTES" "$path"
+    mkfs.vfat -F 12 -n DIMOS "$path" >/dev/null
+}
+
+build_image_checker() {
+    local compiler=${CXX:-g++}
+
+    if [[ ! -x "$IMAGE_CHECKER" || tools/image_inspector.cpp -nt "$IMAGE_CHECKER" ]]; then
+        log_info "Compiling C++ image checker"
+        "$compiler" -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            tools/image_inspector.cpp -o "$IMAGE_CHECKER"
     fi
-    print_kernel_size "Current"
+}
+
+check_kernel_size() {
+    local size_bytes
+    size_bytes=$(file_size bin/KERNEL.BIN)
+
+    (( size_bytes > 0 )) || fail "Kernel image is empty: bin/KERNEL.BIN"
+    log_info "Kernel size: $size_bytes bytes (loader limit: $MAX_KERNEL_LOADER_BYTES bytes)"
+
+    if (( size_bytes > KERNEL_SIZE_WARN_BYTES )); then
+        printf '%s[ WARN ]%s Kernel is close to the loader limit (%s bytes).\n' \
+            "$YELLOW" "$RESET" "$size_bytes" >&2
+    fi
+
+    (( size_bytes <= MAX_KERNEL_LOADER_BYTES )) || \
+        fail "Kernel is too large for the bootloader ($size_bytes > $MAX_KERNEL_LOADER_BYTES bytes)"
+}
+
+create_iso_image() {
+    local staging_directory="disk_img/iso-root"
+
+    log_section "Creating bootable ISO"
+    rm -rf "$staging_directory"
+    mkdir -p "$staging_directory"
+    cp "$BOOT_IMAGE" "$staging_directory/dimos.img"
+
+    # A 1.44 MB boot image is recognized as El Torito floppy emulation.
+    xorriso -as mkisofs \
+        -quiet \
+        -V DIMOS \
+        -b dimos.img \
+        -c boot.cat \
+        -o "$ISO_IMAGE" \
+        "$staging_directory"
+
+    rm -rf "$staging_directory"
+    log_ok "Created $ISO_IMAGE ($(file_size "$ISO_IMAGE") bytes)"
+}
+
+for command in nasm mkfs.vfat mcopy mmd mdir truncate; do
+    require_command "$command"
+done
+require_command "${CXX:-g++}"
+if (( BUILD_ISO )); then
+    require_command xorriso
 fi
 
-check_kernel_size_guard
+mkdir -p bin disk_img
+build_image_checker
 
-# Create and format disk image
-print_info "Creating disk image (disk_img/dimos.img)..."
-dd if=/dev/zero of=disk_img/dimos.img bs=512 count=2880 conv=notrunc status=none
-check_error "Disk image creation failed"
-print_ok "Disk image created successfully"
+log_section "Compiling DimOS"
 
-print_info "Formatting disk image..."
-mkfs.vfat disk_img/dimos.img -n "DIMOS"
-check_error "Disk formatting failed"
-print_ok "Disk image formatted successfully"
+if (( ! NO_BOOT_RECOMPILE )); then
+    assemble src/bootloader/boot.asm bin/BOOT.BIN
+else
+    require_file bin/BOOT.BIN
+fi
 
-# ==================================================================
-# This section of the script creates the FLOPPY2.IMG disk image. 
-# It connects to the emulator launched with run-linux.sh and is simply 
-# used to demonstrate the system's ability to operate with multiple 
-# disks and to store additional files. 
-# Removing it won't cause any serious problems.
-# ==================================================================
-dd if=/dev/zero of=disk_img/FLOPPY2.img bs=512 count=2880 conv=notrunc status=none
-check_error "FLOPPY2.img creation failed"
+if (( ! NO_KERNEL_RECOMPILE )); then
+    kernel_options=()
+    (( ! NO_LOGO_DISPLAY )) || kernel_options+=("-DNO_LOGO_DISPLAY")
+    assemble src/kernel/kernel.asm bin/KERNEL.BIN "${kernel_options[@]}"
+else
+    require_file bin/KERNEL.BIN
+fi
+check_kernel_size
 
-mkfs.vfat disk_img/FLOPPY2.img -n "DIMOS"
-check_error "FLOPPY2.img formatting failed"
-# ==================================================================
+log_section "Creating disk images"
+create_floppy_image "$BOOT_IMAGE"
+create_floppy_image "$SECOND_FLOPPY_IMAGE"
 
-# Write bootloader
-print_info "Writing bootloader to disk..."
-dd status=none if=bin/BOOT.BIN of=disk_img/dimos.img conv=notrunc
-check_error "Bootloader writing failed"
-print_ok "Bootloader written successfully"
+log_info "Installing boot sector"
+dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
+copy_to_image bin/KERNEL.BIN ::/
 
-# Copy kernel
-print_info "Copying kernel to disk (bin/KERNEL.BIN => disk_img/dimos.img)..."
-mcopy -i disk_img/dimos.img bin/KERNEL.BIN ::/
-check_error "Kernel copy failed"
-print_ok "Kernel copied successfully"
-
-# Create BIN directory
-print_splitline "Creating BIN directory..."
-print_info "Creating BIN directory..."
-mmd -i disk_img/dimos.img ::/BIN.DIR
-check_error "Failed to create BIN directory"
-print_ok "BIN directory created successfully"
-
-# Create COM directory
-print_splitline "Creating COM directory..."
-print_info "Creating COM directory..."
-mmd -i disk_img/dimos.img ::/COM.DIR
-check_error "Failed to create COM directory"
-print_ok "COM directory created successfully"
-
-# Create EXE directory
-print_splitline "Creating EXE directory..."
-print_info "Creating EXE directory..."
-mmd -i disk_img/dimos.img ::/EXE.DIR
-check_error "Failed to create EXE directory"
-print_ok "EXE directory created successfully"
-
-# Create PLE directory
-print_splitline "Creating PLE directory..."
-print_info "Creating PLE directory..."
-mmd -i disk_img/dimos.img ::/PLE.DIR
-check_error "Failed to create PLE directory"
-print_ok "PLE directory created successfully"
-
-# Create BMP directory
-print_splitline "Creating BMP directory..."
-print_info "Creating BMP directory..."
-mmd -i disk_img/dimos.img ::/BMP.DIR
-check_error "Failed to create BMP directory"
-print_ok "BMP directory created successfully"
-
-# Create CONF directory
-print_splitline "Creating CONF directory..."
-print_info "Creating CONF directory..."
-mmd -i disk_img/dimos.img ::/CONF.DIR
-check_error "Failed to create CONF directory"
-print_ok "CONF directory created successfully"
-
-# Create DOCS directory
-print_splitline "Creating DOCS directory..."
-print_info "Creating DOCS directory..."
-mmd -i disk_img/dimos.img ::/DOCS.DIR
-check_error "Failed to create DOCS directory"
-print_ok "DOCS directory created successfully"
-
-# Create MUSIC directory
-print_splitline "Creating MUSIC directory..."
-print_info "Creating MUSIC directory..."
-mmd -i disk_img/dimos.img ::/MUSIC.DIR
-check_error "Failed to create MUSIC directory"
-print_ok "MUSIC directory created successfully"
-
-# Create FONTS directory
-print_splitline "Creating FONTS directory..."
-print_info "Creating FONTS directory..."
-mmd -i disk_img/dimos.img ::/FONTS.DIR
-check_error "Failed to create FONTS directory"
-print_ok "FONTS directory created successfully"
-
-# Create THEMES directory
-print_splitline "Creating THEMES directory..."
-print_info "Creating THEMES directory..."
-mmd -i disk_img/dimos.img ::/THEMES.DIR
-check_error "Failed to create THEMES directory"
-print_ok "THEMES directory created successfully"
-
-# Copy fonts
-print_info "Copying DEFAULT.FNT to disk..."
-mcopy -i disk_img/dimos.img assets/fonts/DEFAULT.FNT ::/FONTS.DIR/
-check_error "DEFAULT.FNT copy failed"
-print_ok "DEFAULT.FNT copied successfully"
-
-print_info "Copying BOLD.FNT to disk..."
-mcopy -i disk_img/dimos.img assets/fonts/BOLD.FNT ::/FONTS.DIR/
-check_error "BOLD.FNT copy failed"
-print_ok "BOLD.FNT copied successfully"
-
-print_info "Copying THIN.FNT to disk..."
-mcopy -i disk_img/dimos.img assets/fonts/THIN.FNT ::/FONTS.DIR/
-check_error "THIN.FNT copy failed"
-print_ok "THIN.FNT copied successfully"
-
-print_info "Copying ITALIC.FNT to disk..."
-mcopy -i disk_img/dimos.img assets/fonts/ITALIC.FNT ::/FONTS.DIR/
-check_error "ITALIC.FNT copy failed"
-print_ok "ITALIC.FNT copied successfully"
-
-# Copy themes
-print_splitline "Copying themes..."
-for thm in assets/themes/*.THM; do
-    fname=$(basename "$thm")
-    print_info "Copying $fname to disk..."
-    mcopy -i disk_img/dimos.img "$thm" ::/THEMES.DIR/
-    check_error "$fname copy failed"
-    print_ok "$fname copied successfully"
-done
-
-echo -e "$NC"
-
-# Copy config files
-print_info "Copying kernelconfig files..."
-mcopy -i disk_img/dimos.img src/kernel/configs/USER.CFG ::/CONF.DIR/
-check_error "USER.CFG copy failed"
-print_ok "USER.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/FIRST_B.CFG ::/CONF.DIR/
-check_error "FIRST_B.CFG copy failed"
-print_ok "FIRST_B.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/PASSWORD.CFG ::/CONF.DIR/
-check_error "PASSWORD.CFG copy failed"
-print_ok "PASSWORD.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/TIMEZONE.CFG ::/CONF.DIR/
-check_error "TIMEZONE.CFG copy failed"
-print_ok "TIMEZONE.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/PROMPT.CFG ::/CONF.DIR/
-check_error "PROMPT.CFG copy failed"
-print_ok "PROMPT.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/THEME.CFG ::/CONF.DIR/
-check_error "THEME.CFG copy failed"
-print_ok "THEME.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/FONT.CFG ::/CONF.DIR/
-check_error "FONT.CFG copy failed"
-print_ok "FONT.CFG copied successfully"
-mcopy -i disk_img/dimos.img src/kernel/configs/SYSTEM.CFG ::/
-check_error "SYSTEM.CFG copy failed"
-print_ok "SYSTEM.CFG copied successfully"
-
-# Compile and copy programs
-print_splitline "Compiling and copying programs..."
-
-# Define programs as an array of tuples: source, output_name
-programs_root=(
-    "programs/autoexec.asm AUTOEXEC.BIN"
-    "programs/setup/setup.asm SETUP.BIN"
+image_directories=(
+    BIN.DIR
+    COM.DIR
+    EXE.DIR
+    PLE.DIR
+    BMP.DIR
+    CONF.DIR
+    DOCS.DIR
+    MUSIC.DIR
+    FONTS.DIR
+    THEMES.DIR
 )
-
-for prog in "${programs_root[@]}"; do
-    src=$(echo $prog | cut -d' ' -f1)
-    bin_name=$(echo $prog | cut -d' ' -f2)
-
-    addition_flags=""
-    if [ $FLAG_NO_SETUP == 1 ]; then
-        addition_flags="-d NO_SETUP"
-    fi
-
-    if [ $FLAG_NO_PROGRAMS_RECOMP == 0 ]; then
-        print_info "Compiling $src => bin/$bin_name..."
-        nasm -f bin $src -o bin/$bin_name $addition_flags
-        check_error "Compilation of $src failed"
-        print_ok "$bin_name compiled successfully"
-    fi
-    
-    print_info "Copying $bin_name to disk..."
-    mcopy -i disk_img/dimos.img bin/$bin_name ::/
-    check_error "Copy of $bin_name failed"
-    print_ok "$bin_name copied successfully"
+for directory in "${image_directories[@]}"; do
+    create_directory "$directory"
 done
 
-programs=(
-    "programs/help.asm HELP.BIN"
-    "programs/grep.asm GREP.BIN"
-    "programs/head.asm HEAD.BIN"
-    "programs/tail.asm TAIL.BIN"
-    "programs/cpu.asm CPU.BIN"
-    "programs/dlist.asm DLIST.BIN"
-    "programs/theme.asm THEME.BIN"
-    "programs/fetch.asm FETCH.BIN"
-    "programs/imfplay.asm IMFPLAY.BIN"
-    "programs/wavplay.asm WAVPLAY.BIN"
-    "programs/credits.asm CREDITS.BIN"
-    "programs/hello.asm HELLO.BIN"
-    "programs/write.asm WRITER.BIN"
-    "programs/barchart.asm BCHART.BIN"
-    "programs/brainf.asm BRAINF.BIN"
-    "programs/calc.asm CALC.BIN"
-    "programs/memory.asm MEMORY.BIN"
-    "programs/mine.asm MINE.BIN"
-    "programs/piano.asm PIANO.BIN"
-    "programs/snake.asm SNAKE.BIN"
-    "programs/space.asm SPACE.BIN"
-    "programs/procentc.asm PROCENTC.BIN"
-    "programs/paint.asm PAINT.BIN"
-    "programs/pong.asm PONG.BIN"
-    "programs/hexedit.asm HEXEDIT.BIN"
-    "programs/clock.asm CLOCK.BIN"
-    "programs/mandel.asm MANDEL.BIN"
-    "programs/tetris.asm TETRIS.BIN"
-    "programs/tetris-df.asm TETRIS2.BIN"
-    "programs/chars.asm CHARS.BIN"
-    "programs/eye.asm EYE.BIN"
-    "programs/ed.asm ED.BIN"
-    "programs/fdisk.asm FDISK.BIN"
-    "programs/launch.asm LAUNCH.BIN"
-    "programs/font.asm FONT.BIN"
-    "programs/tree.asm TREE.BIN"
-    "programs/print.asm PRINT.BIN"
-    "programs/calendar.asm CALENDAR.BIN"
-    "programs/settings.asm SETTINGS.BIN"
+log_section "Copying fonts, themes, and configuration"
+for file in assets/fonts/*.FNT; do
+    copy_to_image "$file" ::/FONTS.DIR/
+done
+for file in assets/themes/*.THM; do
+    copy_to_image "$file" ::/THEMES.DIR/
+done
+
+configuration_files=(
+    "src/kernel/configs/USER.CFG|::/CONF.DIR/"
+    "src/kernel/configs/FIRST_B.CFG|::/CONF.DIR/"
+    "src/kernel/configs/PASSWORD.CFG|::/CONF.DIR/"
+    "src/kernel/configs/TIMEZONE.CFG|::/CONF.DIR/"
+    "src/kernel/configs/PROMPT.CFG|::/CONF.DIR/"
+    "src/kernel/configs/THEME.CFG|::/CONF.DIR/"
+    "src/kernel/configs/FONT.CFG|::/CONF.DIR/"
+    "src/kernel/configs/SYSTEM.CFG|::/"
 )
-
-for prog in "${programs[@]}"; do
-    src=$(echo $prog | cut -d' ' -f1)
-    bin_name=$(echo $prog | cut -d' ' -f2)
-
-    if [ $FLAG_NO_PROGRAMS_RECOMP == 0 ]; then
-        print_info "Compiling $src => bin/$bin_name..."
-        nasm -f bin $src -o bin/$bin_name
-        check_error "Compilation of $src failed"
-        print_ok "$bin_name compiled successfully"
-    fi
-
-    print_info "Copying $bin_name to disk..."
-    mcopy -i disk_img/dimos.img bin/$bin_name ::/BIN.DIR/
-    check_error "Copy of $bin_name failed"
-    print_ok "$bin_name copied successfully"
+for entry in "${configuration_files[@]}"; do
+    IFS='|' read -r source destination <<< "$entry"
+    copy_to_image "$source" "$destination"
 done
 
-
-programs_com=(
-    "programs/COM/hello.asm HELLO.COM"
-    "programs/COM/fractal.asm FRACTAl.COM"
-    "programs/COM/clock.asm CLOCK.COM"
+log_section "Compiling and copying programs"
+root_programs=(
+    "programs/autoexec.asm|AUTOEXEC.BIN"
+    "programs/setup/setup.asm|SETUP.BIN"
 )
+root_definitions=''
+(( ! NO_SETUP )) || root_definitions=NO_SETUP
+compile_program_group ::/ '' "$root_definitions" "${root_programs[@]}"
 
-for prog in "${programs_com[@]}"; do
-    src=$(echo $prog | cut -d' ' -f1)
-    bin_name=$(echo $prog | cut -d' ' -f2)
-
-    if [ $FLAG_NO_PROGRAMS_RECOMP == 0 ]; then
-        print_info "Compiling $src => bin/$bin_name..."
-        nasm -f bin $src -o bin/$bin_name
-        check_error "Compilation of $src failed"
-        print_ok "$bin_name compiled successfully"
-    fi
-    
-    print_info "Copying $bin_name to disk..."
-    mcopy -i disk_img/dimos.img bin/$bin_name ::/COM.DIR/
-    check_error "Copy of $bin_name failed"
-    print_ok "$bin_name copied successfully"
-done
-
-programs_exe=(
-    "programs/EXE/hello.asm HELLO.EXE"
+bin_programs=(
+    "programs/help.asm|HELP.BIN"
+    "programs/grep.asm|GREP.BIN"
+    "programs/head.asm|HEAD.BIN"
+    "programs/tail.asm|TAIL.BIN"
+    "programs/cpu.asm|CPU.BIN"
+    "programs/dlist.asm|DLIST.BIN"
+    "programs/theme.asm|THEME.BIN"
+    "programs/fetch.asm|FETCH.BIN"
+    "programs/imfplay.asm|IMFPLAY.BIN"
+    "programs/wavplay.asm|WAVPLAY.BIN"
+    "programs/credits.asm|CREDITS.BIN"
+    "programs/hello.asm|HELLO.BIN"
+    "programs/write.asm|WRITER.BIN"
+    "programs/barchart.asm|BCHART.BIN"
+    "programs/brainf.asm|BRAINF.BIN"
+    "programs/calc.asm|CALC.BIN"
+    "programs/memory.asm|MEMORY.BIN"
+    "programs/mine.asm|MINE.BIN"
+    "programs/piano.asm|PIANO.BIN"
+    "programs/snake.asm|SNAKE.BIN"
+    "programs/space.asm|SPACE.BIN"
+    "programs/procentc.asm|PROCENTC.BIN"
+    "programs/paint.asm|PAINT.BIN"
+    "programs/pong.asm|PONG.BIN"
+    "programs/hexedit.asm|HEXEDIT.BIN"
+    "programs/clock.asm|CLOCK.BIN"
+    "programs/mandel.asm|MANDEL.BIN"
+    "programs/tetris.asm|TETRIS.BIN"
+    "programs/tetris-df.asm|TETRIS2.BIN"
+    "programs/chars.asm|CHARS.BIN"
+    "programs/eye.asm|EYE.BIN"
+    "programs/ed.asm|ED.BIN"
+    "programs/fdisk.asm|FDISK.BIN"
+    "programs/launch.asm|LAUNCH.BIN"
+    "programs/font.asm|FONT.BIN"
+    "programs/tree.asm|TREE.BIN"
+    "programs/print.asm|PRINT.BIN"
+    "programs/calendar.asm|CALENDAR.BIN"
+    "programs/settings.asm|SETTINGS.BIN"
 )
+compile_program_group ::/BIN.DIR/ '' '' "${bin_programs[@]}"
 
-for prog in "${programs_exe[@]}"; do
-    src=$(echo $prog | cut -d' ' -f1)
-    bin_name=$(echo $prog | cut -d' ' -f2)
-
-    if [ $FLAG_NO_PROGRAMS_RECOMP == 0 ]; then
-        print_info "Compiling $src => bin/$bin_name..."
-        nasm -f bin -I programs/EXE/ $src -o bin/$bin_name
-        check_error "Compilation of $src failed"
-        print_ok "$bin_name compiled successfully"
-    fi
-
-    print_info "Copying $bin_name to disk..."
-    mcopy -i disk_img/dimos.img bin/$bin_name ::/EXE.DIR/
-    check_error "Copy of $bin_name failed"
-    print_ok "$bin_name copied successfully"
-done
-
-programs_ple=(
-    "programs/PLE/src/hello.asm HELLO.PLE"
+com_programs=(
+    "programs/COM/hello.asm|HELLO.COM"
+    "programs/COM/fractal.asm|FRACTAL.COM"
+    "programs/COM/clock.asm|CLOCK.COM"
 )
+compile_program_group ::/COM.DIR/ '' '' "${com_programs[@]}"
 
-for prog in "${programs_ple[@]}"; do
-    src=$(echo $prog | cut -d' ' -f1)
-    bin_name=$(echo $prog | cut -d' ' -f2)
+exe_programs=("programs/EXE/hello.asm|HELLO.EXE")
+compile_program_group ::/EXE.DIR/ programs/EXE '' "${exe_programs[@]}"
 
-    if [ $FLAG_NO_PROGRAMS_RECOMP == 0 ]; then
-        print_info "Compiling $src => bin/$bin_name..."
-        nasm -f bin -I programs/PLE/ $src -o bin/$bin_name
-        check_error "Compilation of $src failed"
-        print_ok "$bin_name compiled successfully"
-    fi
+ple_programs=("programs/PLE/src/hello.asm|HELLO.PLE")
+compile_program_group ::/PLE.DIR/ programs/PLE '' "${ple_programs[@]}"
 
-    print_info "Copying $bin_name to disk..."
-    mcopy -i disk_img/dimos.img bin/$bin_name ::/PLE.DIR/
-    check_error "Copy of $bin_name failed"
-    print_ok "$bin_name copied successfully"
-done
+if (( ! NO_TEXT )); then
+    log_section "Copying documentation"
+    copy_to_image LICENSE.TXT ::/
+    log_info "Copying project_philosophy.txt -> ::/PROJECT.TXT"
+    mcopy -i "$BOOT_IMAGE" project_philosophy.txt ::/PROJECT.TXT
 
-mcopy -i disk_img/dimos.img bin/prasm.bin ::/BIN.DIR/
-
-# Copy text files
-if [ $FLAG_NO_TXT == 0 ]; then
-    print_splitline "Copying text files..."
-    text_files=(
-        "LICENSE.TXT"
+    documentation_files=(
+        src/txt/README.TXT
+        src/txt/CONFIGS.TXT
+        src/txt/FILESYS.TXT
+        src/txt/LIMITS.TXT
+        src/txt/PROGRAMS.TXT
+        src/txt/QUICKST.TXT
+        src/txt/COMMANDS.TXT
+        src/txt/EDMAN.TXT
     )
-
-    for file in "${text_files[@]}"; do
-        print_info "Copying $file..."
-        mcopy -i disk_img/dimos.img $file ::/
-        check_error "Copy of $file failed"
-        print_ok "$file copied successfully"
-    done
-
-    print_info "Copying project_philosophy.txt as PROJECT.TXT..."
-    mcopy -o -i disk_img/dimos.img project_philosophy.txt ::/PROJECT.TXT
-    check_error "Copy of PROJECT.TXT failed"
-    print_ok "PROJECT.TXT copied successfully"
-
-    text_files_doc=(
-        "src/txt/README.TXT"
-        "src/txt/CONFIGS.TXT"
-        "src/txt/FILESYS.TXT"
-        "src/txt/LIMITS.TXT"
-        "src/txt/PROGRAMS.TXT"
-        "src/txt/QUICKST.TXT"
-        "src/txt/COMMANDS.TXT"
-        "src/txt/EDMAN.TXT"
-    )
-
-    for file in "${text_files_doc[@]}"; do
-        print_info "Copying $file..."
-        mcopy -i disk_img/dimos.img $file ::/DOCS.DIR/
-        check_error "Copy of $file failed"
-        print_ok "$file copied successfully"
+    for file in "${documentation_files[@]}"; do
+        copy_to_image "$file" ::/DOCS.DIR/
     done
 fi
 
-# Copy image files
-print_splitline "Copying image files..."
+log_section "Copying media assets"
 image_files=(
-    "assets/images/logo/LOGO.BMP"
-    "assets/images/PROX.BMP"
-    "assets/images/PROS.BMP"
-    "assets/images/PROS_W.BMP"
-    "assets/images/PROS_A.BMP"
-    "assets/images/TRAIN.BMP"
-    "assets/images/CHILL.BMP"
+    assets/images/logo/LOGO.BMP
+    assets/images/PROX.BMP
+    assets/images/PROS.BMP
+    assets/images/PROS_W.BMP
+    assets/images/PROS_A.BMP
+    assets/images/TRAIN.BMP
+    assets/images/CHILL.BMP
 )
-
 for file in "${image_files[@]}"; do
-    print_info "Copying $file..."
-    mcopy -i disk_img/dimos.img $file ::/BMP.DIR/
-    check_error "Copy of $file failed"
-    print_ok "$file copied successfully"
+    copy_to_image "$file" ::/BMP.DIR/
 done
 
-# Copy music files
-if [ $FLAG_NO_MUSIC == 0 ]; then
-    print_splitline "Copying music files..."
+if (( ! NO_MUSIC )); then
     music_files=(
-        "assets/IMF/RICK.IMF"
-        "assets/IMF/SONIC.IMF"
+        assets/IMF/RICK.IMF
+        assets/IMF/SONIC.IMF
         "assets/IMF/HOPES&D.IMF"
-        "assets/IMF/RUSSIA.IMF"
-        "assets/IMF/METRO_E.IMF"
-        "assets/IMF/METRO_E2.IMF"
-        "assets/IMF/GTA_VC.IMF"
-        "assets/IMF/CYBWRLD.IMF"
-        "assets/IMF/BIGSHOT.IMF"
-        "assets/IMF/DF.IMF"
-        "assets/IMF/TRUEHERO.IMF"
-        "assets/IMF/CORE.IMF"
-        "assets/WAV/1985.WAV"
+        assets/IMF/RUSSIA.IMF
+        assets/IMF/METRO_E.IMF
+        assets/IMF/METRO_E2.IMF
+        assets/IMF/GTA_VC.IMF
+        assets/IMF/CYBWRLD.IMF
+        assets/IMF/BIGSHOT.IMF
+        assets/IMF/DF.IMF
+        assets/IMF/TRUEHERO.IMF
+        assets/IMF/CORE.IMF
+        assets/WAV/1985.WAV
     )
-
     for file in "${music_files[@]}"; do
-        print_info "Copying $file..."
-        mcopy -i disk_img/dimos.img $file ::/MUSIC.DIR/
-        check_error "Copy of $file failed"
-        print_ok "$file copied successfully"
+        copy_to_image "$file" ::/MUSIC.DIR/
     done
 fi
 
-echo -e "$NC"
+log_section "Validating build artifacts"
+"$IMAGE_CHECKER" bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE"
 
-# Display disk contents
-if [ $FLAG_QUIET_MODE == 0 ]; then
-    echo -e "$YELLOW Disk contents:$NC"
-    mdir -i disk_img/dimos.img ::/
+if (( ! QUIET )); then
+    printf '\n%sDisk contents:%s\n' "$YELLOW" "$RESET"
+    mdir -i "$BOOT_IMAGE" ::/
 fi
 
-# Create ISO
-# rm -f disk_img/dimos.iso
-# print_info "Creating ISO image (disk_img/dimos.iso)..."
-# mkisofs -quiet -V 'DIMOS' -input-charset iso8859-1 -o disk_img/dimos.iso -b dimos.img disk_img/
-# check_error "ISO creation failed"
-# print_ok "ISO image created successfully"
+if (( BUILD_ISO )); then
+    create_iso_image
+fi
 
-
-print_splitline "Build completed successfully!"
+log_section "Build completed successfully"
+log_ok "Floppy image: $BOOT_IMAGE"
+if (( BUILD_ISO )); then
+    log_ok "ISO image: $ISO_IMAGE"
+fi

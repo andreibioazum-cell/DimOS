@@ -16,7 +16,7 @@
 ;   0x09: CP866 control (AL=0x00 disable, AL=0x01 default font, AL=0x02 by name SI)
 ;   0x0A: Get system time (OUT: CH=hour, CL=min, DH=sec)
 ;   0x0B: Get system date (OUT: CH=century, CL=year, DH=month, DL=day)
-;   0x0С: Clear screen and aply theme from CONF.DIR/THEME.CFG
+;   0x0C: Clear the screen and apply the theme from CONF.DIR/THEME.CFG
 ; Preserves all registers unless specified
 ; ==================================================================
 

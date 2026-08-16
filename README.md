@@ -39,22 +39,37 @@ The terminal launches programs from `BIN/` or the current directory. Run `HELP` 
 | `view` | Display BMP images |
 | `reboot`, `shut` | Restart or power off the machine |
 
-## Running DimOS
+## Building and running DimOS
 
-### Requirements
+### Build requirements
 
 - NASM
-- `mtools`
+- `dosfstools` and `mtools`
+- A C++17 compiler (`g++` by default)
+- `xorriso`
+- GNU Make (optional convenience entry point)
 - QEMU (optional, for `run-linux.sh`)
+
+On Debian and Ubuntu, install the complete toolchain with:
+
+```bash
+sudo apt-get install build-essential dosfstools mtools nasm xorriso
+```
 
 ### Build and run on Linux
 
 ```bash
-./build-linux.sh
+make iso                  # or: ./build-linux.sh
 ./run-linux.sh
 ```
 
-The build script creates a bootable FAT12 disk image. See the script output for its exact location and available build options.
+A successful build creates:
+
+- `disk_img/dimos.img` — bootable 1.44 MB FAT12 floppy image;
+- `disk_img/FLOPPY2.img` — writable secondary floppy used by the run script;
+- `disk_img/dimos.iso` — bootable El Torito ISO containing `dimos.img`.
+
+The C++ tool in `tools/image_inspector.cpp` validates the boot signature, FAT12 geometry, kernel loader limit, and the `KERNEL.BIN` directory entry during every build. Run `./build-linux.sh --help` to see optional build flags, or `make verify` to validate existing artifacts.
 
 ## Documentation
 

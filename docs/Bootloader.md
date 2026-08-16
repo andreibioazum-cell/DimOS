@@ -24,9 +24,9 @@ The bootloader operates in the following stages:
 
 ### 1. Initialization
 
-- **Segment Setup**: The bootloader sets the data segment (`DS`), extra segment (`ES`), file segment (`FS`), and general
-  segment (`GS`) to `0x07C0`, the segment where the boot sector is loaded by the BIOS. The stack segment (`SS`) is set
-  to `0x0000`, with the stack pointer (`SP`) initialized to `0xFFFF` for a descending stack.
+- **Segment Setup**: The bootloader sets the data segment (`DS`) and extra segment (`ES`) to `0x07C0`, the segment
+  where the boot sector is loaded by the BIOS. The stack segment (`SS`) is set to `0x0000`, with the stack pointer
+  (`SP`) initialized to `0xFFFF` for a descending stack.
 - **Interrupts**: Interrupts are disabled (`cli`) during segment setup and re-enabled (`sti`) afterward to allow BIOS
   interrupt calls.
 - **Output**: Displays a "Loading Boot Image" message using BIOS interrupt `0x10` (function `0x0E`) to indicate the
@@ -75,10 +75,10 @@ The bootloader operates in the following stages:
 
 ### 6. Transferring Control
 
-- **Jump**: After loading all clusters, displays a newline (`msgCRLF`) and transfers control to the kernel at
-  `0x2000:0x0000` using a far return (`retf`) with the stack set up to point to this address.
-- **Environment**: The kernel is executed in a 16-bit real-mode environment with `DS`, `ES`, `FS`, and `GS` expected to
-  be set by the kernel itself.
+- **Jump**: After loading all clusters, displays a newline (`msgCRLF`) and transfers control directly to the kernel at
+  `0x2000:0x0000` using a far jump.
+- **Environment**: The kernel is executed in a 16-bit real-mode environment and initializes the segment registers it
+  needs.
 
 ### 7. Error Handling
 
@@ -130,7 +130,7 @@ The bootloader operates in the following stages:
 
 The BPB defines the FAT12 file system parameters:
 
-- **OEM Identifier**: `"DimOS"`
+- **OEM Identifier**: `"DIMOS   "`
 - **Bytes per Sector**: 512
 - **Sectors per Cluster**: 1
 - **Reserved Sectors**: 1 (boot sector)
@@ -143,8 +143,8 @@ The BPB defines the FAT12 file system parameters:
 - **Heads per Cylinder**: 2
 - **Drive Number**: 0 (auto-detected)
 - **Extended Boot Signature**: `0x29`
-- **Serial Number**: `0xa0a1a2a3`
-- **Volume Label**: `"FLOPPY "`
+- **Serial Number**: `0x00000000`
+- **Volume Label**: `"DIMOS      "`
 - **File System Type**: `"FAT12   "`
 
 ## Memory Layout
@@ -159,7 +159,8 @@ The BPB defines the FAT12 file system parameters:
 - **File Name**: Hardcoded to `KERNEL.BIN` (11-byte FAT12 format).
 - **Disk Size**: Assumes a 1.44 MB floppy disk (2880 sectors).
 - **Error Handling**: Limited to retrying disk reads and rebooting on failure.
-- **Memory**: Kernel must fit within the memory starting at `0x2000:0x0000` and handle its own segment setup.
+- **Memory**: The kernel starts at `0x2000:0x0000` and must not exceed 43,008 bytes, because the kernel reserves offset
+  `0xA800` and above for runtime buffers.
 
 ## Example Flow
 

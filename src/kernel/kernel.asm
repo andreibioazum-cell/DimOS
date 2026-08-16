@@ -83,7 +83,7 @@ start:
     call init_system           ; Init system (segments, timer, api, configs, display, security, start autoexec)
     call fs_list_drives        ; List drives
     call load_timezone_cfg     ; It is necessary after completion of SETUP.BIN so that the time zone is updated to the user one
-    call load_and_apply_theme  ; Load and aply theme from THEME.CFG file
+    call load_and_apply_theme  ; Load and apply theme from THEME.CFG file
     call shell                 ; Start DimOS terminal
 
     jmp $

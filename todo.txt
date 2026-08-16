@@ -1,7 +1,6 @@
 [ IN PROGRESS ] Implement all MS-DOS system calls for the compatibility layer (37/87)
 [     TODO    ] Implement cooperative multitasking
 [     TODO    ] Add malloc, mfree
-[     TODO    ] Add the ability to compile DimOS to ISO image
 [     TODO    ] Add internet driver
 [     TODO    ] Separate DimOS Terminal from kernel
 [     TODO    ] I/O redirection and pipes (cmd > file, cmd1 | cmd2)

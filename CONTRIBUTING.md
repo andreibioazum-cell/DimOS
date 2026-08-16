@@ -6,7 +6,7 @@ Thank you for your interest in contributing to DimOS! This document provides gui
 
 ## Coding Standards
 
-All code must be written in **NASM assembly language** and follow these conventions:
+DimOS bootloader, kernel, driver, and target-program code must be written in **NASM assembly language**. Host-side build and validation tools may use **C++17**. Follow these conventions:
 
 ### Naming Conventions
 
@@ -67,6 +67,13 @@ function_name:
     mov ax, bx
     ret
 ```
+
+### C++ Host Tools
+
+- Keep host tooling in `tools/` and use C++17 or newer only when the build configuration is updated accordingly.
+- Compile cleanly with `-Wall -Wextra -Wpedantic -Werror`.
+- Prefer small, dependency-free tools so the CI and local build environments stay reproducible.
+- Host tools support the build; they are not linked into the 16-bit operating system.
 
 ### Comments
 

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- PONG. Pong game.
+; DimOS -- PONG. Pong game.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev

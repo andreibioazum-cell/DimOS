@@ -1,8 +1,8 @@
-# x16-PRos API Documentation
+# DimOS API Documentation
 
 ## Overview
 
-The x16-PRos operating system provides a set of interrupt-driven APIs for developers to interact with the system. These
+The DimOS operating system provides a set of interrupt-driven APIs for developers to interact with the system. These
 APIs are organized into three categories, each accessible via a specific interrupt:
 
 - **INT 0x21**: Output API for screen output and video mode initialization.
@@ -390,7 +390,7 @@ filenames are in 8.3 format (e.g., `FILENAME.EXT`) and converts them to uppercas
 
 ## Usage Notes
 
-- **Environment**: The x16-PRos API is designed for a 16-bit real-mode x86 environment, running on a 1.44 MB floppy disk
+- **Environment**: The DimOS API is designed for a 16-bit real-mode x86 environment, running on a 1.44 MB floppy disk
   with a FAT12 file system and VGA video mode (640x480, 16 colors).
 - **Filename Format**: File system functions expect filenames in 8.3 format (e.g., `FILENAME.EXT`). Filenames are
   case-insensitive and converted to uppercase internally.
@@ -412,7 +412,7 @@ filenames are in 8.3 format (e.g., `FILENAME.EXT`) and converts them to uppercas
 
 ## License
 
-The x16-PRos operating system and its API are licensed under the MIT License. See the LICENSE.TXT for details.
+The DimOS operating system and its API are licensed under the MIT License. See the LICENSE.TXT for details.
 
 **Author**: PRoX (https://github.com/PRoX2011)
 **Version**: 0.4, 0.5, 0.6, 0.7, 0.8, 0.9

@@ -1,9 +1,9 @@
 ===========================================================================
-                        x16-PRos Operating System
+                        DimOS Operating System
                             Version 0.9.0
 ===========================================================================
 
-Welcome to x16-PRos - a minimalistic 16-bit operating system written
+Welcome to DimOS - a minimalistic 16-bit operating system written
 in NASM assembly for x86 architecture.
 
 DOCUMENTATION INDEX:
@@ -17,8 +17,8 @@ DOCUMENTATION INDEX:
   SECURITY.TXT - Password protection and encryption
   STARTUP.TXT  - Boot process and AUTOEXEC
 
-For latest updates visit: https://x16-pros.prosdev.org/
-GitHub: https://github.com/PRoX2011/x16-PRos
+For latest updates, consult the DimOS project documentation.
+Source: DimOS source tree
 
 License: MIT
 Author: PRoX2011

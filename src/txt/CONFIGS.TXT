@@ -42,7 +42,7 @@ They use .CFG extension and are loaded at system startup.
     $user     - Replaced with username from USER.CFG
     %XX       - ASCII character in hex (e.g., %3E = ">")
 
-  Default: [$user@PRos] >
+  Default: [$user@DimOS] >
 
 [THEME.CFG]
   Purpose: Terminal color scheme

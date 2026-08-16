@@ -41,7 +41,7 @@ UTILITIES:
   FETCH.BIN
     System information display
     Shows CPU, memory, OS version
-    "I use PRos btw" style output
+    "I use DimOS btw" style output
 
   MEMORY.BIN
     Memory viewer

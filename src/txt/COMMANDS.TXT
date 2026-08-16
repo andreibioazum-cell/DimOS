@@ -14,7 +14,7 @@ HELP & INFORMATION:
     Memory and hardware details
 
   ver
-    Display PRos terminal version
+    Display DimOS terminal version
     Quick version check
 
   cpu

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- CALC.BIN. Calculator.
+; DimOS -- CALC.BIN. Calculator.
 ; Copyright (C) 2025 litvincode, Saeta, PRoX2011
 ;
 ; Made by litvincode, Saeta and PRoX-dev
@@ -436,7 +436,7 @@ print_number:
     ret
 
 
-welcome_msg db 0xDA, 12 dup(0xC4), ' PRos Calculator (by @litvincode, Saeta and PRoX-dev) ', 12 dup(0xC4), 0xBF
+welcome_msg db 0xDA, 12 dup(0xC4), ' DimOS Calculator (by @litvincode, Saeta and PRoX-dev) ', 12 dup(0xC4), 0xBF
             db 0xC0, 78 dup(0xC4), 0xD9, 10, 13
             db 'Supports: + - * / ^', 0x0D, 0x0A
             db 'Press [ESC] to exit', 0x0D, 0x0A, 0x0D, 0x0A, 0

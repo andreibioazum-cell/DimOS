@@ -1,5 +1,5 @@
 ; ==================================================================
-; WAV Player for x16-PRos
+; WAV Player for DimOS
 ;
 ; Based on Leonardo Ono's playpcm.asm (https://github.com/leonardo-ono/Assembly8086SBHardwareLevelDspProgrammingTest/blob/master/playpcm2.asm)
 ; Ported and improved by PRoX2011

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - BMP rendering for x16-PRos in VGA mode 0x13 (320x200, 256 colors)
+; DimOS - BMP rendering for DimOS in VGA mode 0x13 (320x200, 256 colors)
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Uses direct VGA memory writes at 0xA000 for fast rendering.

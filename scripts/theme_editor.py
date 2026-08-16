@@ -71,12 +71,12 @@ ASCII_ART = [
 ]
 
 FETCH_INFO = [
-    [("green", "user"), ("white", "@"), ("cyan", "PRos")],
+    [("green", "user"), ("white", "@"), ("cyan", "DimOS")],
     [("white", "-" * 15)],
-    [("yellow", "OS:     "), ("white", "x16-PRos")],
+    [("yellow", "OS:     "), ("white", "DimOS")],
     [("yellow", "Host:   "), ("white", "IBM PC AT 5170")],
-    [("yellow", "Kernel: "), ("white", "PRos Kernel")],
-    [("yellow", "Shell:  "), ("white", "PRos Terminal")],
+    [("yellow", "Kernel: "), ("white", "DimOS Kernel")],
+    [("yellow", "Shell:  "), ("white", "DimOS Terminal")],
     [("yellow", "CPU:    "), ("white", "Intel 8088")],
     [("yellow", "VESA:   "), ("green", "Yes")],
     [("yellow", "Res:    "), ("white", "640x480")],
@@ -220,7 +220,7 @@ class ThemeEditor(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.title("x16-PRos Theme Editor")
+        self.title("DimOS Theme Editor")
         self.geometry("1130x720")
         self.resizable(False, False)
 
@@ -396,7 +396,7 @@ class ThemeEditor(ctk.CTk):
         t.insert("end", "\n", "bg")
         t.insert("end", "user",  "green")
         t.insert("end", "@",     "white")
-        t.insert("end", "PRos",  "cyan")
+        t.insert("end", "DimOS",  "cyan")
         t.insert("end", ":/$ ",  "white")
         t.insert("end", "\u2588", "white")
 

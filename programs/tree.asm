@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- TREE. Directory tree viewer for x16-PRos
+; DimOS -- TREE. Directory tree viewer for DimOS
 ; Copyright (C) 2026 PRoX2011
 ;
 ; Usage: tree <directory>

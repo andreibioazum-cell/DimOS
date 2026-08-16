@@ -278,7 +278,7 @@ esc_exit:
 
 dataPointer:
     dw 0
-    msg db 13, 10, 'PRos brainf v0.1                                                                 ', 0
+    msg db 13, 10, 'DimOS brainf v0.1                                                                 ', 0
     hr db 13, 10, '________________________________________________________________________________', 0
 
     helper db 13, 10, 'ENTER - run code  ESC - quit                                                      ', 0

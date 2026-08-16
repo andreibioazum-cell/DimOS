@@ -1,5 +1,5 @@
 ; =================================================================
-; x16-PRos Mandelbrot Set Visualizer
+; DimOS Mandelbrot Set Visualizer
 ; Author: Gemini
 ;
 ; Mode: VGA 13h (320x200, 256 colors)

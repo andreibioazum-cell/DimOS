@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- CPU. Utility to show CPU info for x16-PRos
+; DimOS -- CPU. Utility to show CPU info for DimOS
 ; Copyright (C) 2026 PRoX2011
 ;
 ; Made by PRoX-dev

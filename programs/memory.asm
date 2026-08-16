@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- MEMORY. Memory viewer.
+; DimOS -- MEMORY. Memory viewer.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by ??? and PRoX-dev
@@ -244,7 +244,7 @@ nibble_to_hex:
 .done:
     ret
 
-title_msg db '-PRos Memory Viewer v0.1-', 0x0D, 0x0A, 0
+title_msg db '-DimOS Memory Viewer v0.1-', 0x0D, 0x0A, 0
 help_msg db 'Keys: W/S-navigate (-0010; +0010), F-jump 0000, ESC-exit', 0x0D, 0x0A, 0
 address_msg db 'Current address: ', 0
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==================================================================
-# x16-PRos -- The x16-PRos run script for Linux
+# DimOS -- The DimOS run script for Linux
 # Copyright (C) 2025 PRoX2011
 # ==================================================================
 
@@ -22,7 +22,7 @@ print_msg "$GREEN" "Starting emulator..."
 mkdir -p lpt
 qemu-system-x86_64 \
     -display gtk \
-    -fda disk_img/x16pros.img \
+    -fda disk_img/dimos.img \
     -machine pcspk-audiodev=snd0 \
     -device adlib,audiodev=snd0 \
     -audiodev pa,id=snd0 \

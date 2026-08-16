@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - PC Speaker functions for x16-PRos kernel
+; DimOS - PC Speaker functions for DimOS kernel
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

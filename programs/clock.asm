@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- CLOCK. Clock.
+; DimOS -- CLOCK. Clock.
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev

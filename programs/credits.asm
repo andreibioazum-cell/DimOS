@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- CREDITS. Contributors and sponsors list.
+; DimOS -- CREDITS. Contributors and sponsors list.
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 
@@ -116,7 +116,7 @@ print_at:
 
 section .data
 
-title_line1  db 'x16-PRos credits', 0
+title_line1  db 'DimOS credits', 0
 title_line2  db 'Contributors and Sponsors', 0
 table_header db 'Name                  Role                    Name                  Role', 0
 

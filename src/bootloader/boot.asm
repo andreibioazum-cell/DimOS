@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- The x16-PRos bootloader
+; DimOS -- The DimOS bootloader
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Loads the kernel (KERNEL.BIN) for execution.
@@ -34,7 +34,7 @@ start: jmp main
 ; bsVolumeLabel        - 11-byte volume label
 ; bsFileSystem         - 8-byte filesystem type
 
-bpbOEM               DB "x16-PROS"
+bpbOEM               DB "DIMOS   "
 bpbBytesPerSector    DW 512
 bpbSectorsPerCluster DB 1
 bpbReservedSectors   DW 1
@@ -51,7 +51,7 @@ bsDriveNumber        DB 0
 bsUnused             DB 0
 bsExtBootSignature   DB 0x29
 bsSerialNumber       DD 0x00000000
-bsVolumeLabel        DB "x16-PROS   "
+bsVolumeLabel        DB "DIMOS      "
 bsFileSystem         DB "FAT12   "
 
 ; ===================================================================

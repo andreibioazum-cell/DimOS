@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- CHARS. A program that prints all ASCII characters
+; DimOS -- CHARS. A program that prints all ASCII characters
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev

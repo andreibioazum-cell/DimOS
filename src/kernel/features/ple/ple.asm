@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - PLE (PRos Large Executable) loader
+; DimOS - PLE (DimOS Large Executable) loader
 ; Copyright (C) 2026 PRoX2011
 ; ==================================================================
 

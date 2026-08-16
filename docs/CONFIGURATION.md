@@ -1,6 +1,6 @@
-# x16-PRos Configuration Guide
+# DimOS Configuration Guide
 
-x16-PRos uses configuration files stored in `CONF.DIR` (except `SYSTEM.CFG`, which is at root).
+DimOS uses configuration files stored in `CONF.DIR` (except `SYSTEM.CFG`, which is at root).
 
 ## Configuration Files
 
@@ -23,7 +23,7 @@ x16-PRos uses configuration files stored in `CONF.DIR` (except `SYSTEM.CFG`, whi
 Default fallback prompt:
 
 ```text
-[$username@PRos] >
+[$username@DimOS] >
 ```
 
 ### Supported placeholders

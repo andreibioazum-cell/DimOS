@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - PS/2 mouse driver
+; DimOS - PS/2 mouse driver
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Driver version: 0.2

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - Simple encryption/decryption functions
+; DimOS - Simple encryption/decryption functions
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

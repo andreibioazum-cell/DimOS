@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - string functions for x16-PRos kernel
+; DimOS - string functions for DimOS kernel
 ; Copyright (C) 2025 PRoX2011
 ; ==================================================================
 

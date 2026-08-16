@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - Kernel File System API (Interrupt-Driven)
+; DimOS - Kernel File System API (Interrupt-Driven)
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Function codes in AH:

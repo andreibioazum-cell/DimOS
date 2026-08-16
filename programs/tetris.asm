@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- TETRIS
+; DimOS -- TETRIS
 ; Original design by Alexey Pajitnov
 ;
 ; Made by Dexoron and PRoX-dev

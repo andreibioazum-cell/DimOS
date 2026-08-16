@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- TAIL. tail utility for x16-PRos
+; DimOS -- TAIL. tail utility for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Usage: tail <filename>

@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- WRITER. Text editor for x16-PRos 
+; DimOS -- WRITER. Text editor for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Usage: writer <filename>
@@ -1182,7 +1182,7 @@ restore_text_buffer:
 
 section .data 
 
-title_str       db 'PRos WRITER v2.0', 0
+title_str       db 'DimOS WRITER v2.0', 0
 shortcut_str    db '^X Exit  ^O Save  ^G Help  ^K Cut Line', 0
 save_prompt_str db 'Enter filename to save:', 0
 

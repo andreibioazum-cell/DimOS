@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos - Font loading (.FNT) support
+; DimOS - Font loading (.FNT) support
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Loads 8x16 bitmap fonts (4096 bytes, 256 chars) from FONTS.DIR/.

@@ -42,6 +42,6 @@ user_cfg       db 'USER.CFG', 0
 conf_dir_name  db 'CONF.DIR', 0
 hello_msg      db 'Hello, ', 0
 hello_end_msg  db '! ', 0
-welcome_msg    db 'Welcome to the x16-PRos!', 10, 13, 10, 13,0
+welcome_msg    db 'Welcome to the DimOS!', 10, 13, 10, 13,0
 
 buffer times 32 db 0

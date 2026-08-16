@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- SETUP. First-boot configuration wizard for x16-PRos
+; DimOS -- SETUP. First-boot configuration wizard for DimOS
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Walks the user through the initial system configuration: chooses
@@ -726,7 +726,7 @@ timezone             db '0', 0
 encrypted_pass       times 32 db 0
 
 ; Prompt options
-prompt_option1       db '[$username@PRos] > ', 0
+prompt_option1       db '[$username@DimOS] > ', 0
 prompt_option2       db '%DA%C4%C4 $username%0A%C0%C4 %FE %10 ', 0
 prompt_option3       db '$username@pros:~$ ', 0
 

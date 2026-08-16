@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- TUI library for VGA mode 0x12 (640x480, 16 colors)
+; DimOS -- TUI library for VGA mode 0x12 (640x480, 16 colors)
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Theme is controlled by TUI_BASE_COLOR (default: blue).

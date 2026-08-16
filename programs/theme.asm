@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- THEME. Theme selector for x16-PRos
+; DimOS -- THEME. Theme selector for DimOS
 ; Copyright (C) 2026 PRoX2011
 ;
 ; Made by PRoX-dev

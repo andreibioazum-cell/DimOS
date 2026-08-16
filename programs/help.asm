@@ -1,5 +1,5 @@
 ; ==================================================================
-; x16-PRos -- HELP. Help program. Shows all kshell commands
+; DimOS -- HELP. Help program. Shows all kshell commands
 ; Copyright (C) 2025 PRoX2011
 ;
 ; Made by PRoX-dev
@@ -114,12 +114,12 @@ help_categories:
 
 current_category dw 0
 
-help_menu_1 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
+help_menu_1 db 0xC9, 18 dup(0xCD), ' DimOS help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' Basic Commands                          [1/6] ', 0xBA, 10, 13
      db 0xBA, 47 dup(0xC4), 0xBA, 10, 13
      db 0xBA, '  help   - get list of the commands            ', 0xBA, 10, 13
      db 0xBA, '  info   - print system information            ', 0xBA, 10, 13
-     db 0xBA, '  ver    - print PRos terminal version         ', 0xBA, 10, 13
+     db 0xBA, '  ver    - print DimOS terminal version         ', 0xBA, 10, 13
      db 0xBA, '  cls    - clear terminal                      ', 0xBA, 10, 13
      db 0xBA, '  shut   - shutdown PC                         ', 0xBA, 10, 13
      db 0xBA, '  reboot - restart system                      ', 0xBA, 10, 13
@@ -136,7 +136,7 @@ help_menu_1 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' <-- Back   |  Press ESC to exit   |  Next --> ', 0xBA, 10, 13
      db 0xC8, 47 dup(0xCD), 0xBC, 0
 
-help_menu_2 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
+help_menu_2 db 0xC9, 18 dup(0xCD), ' DimOS help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' File Operations                         [2/6] ', 0xBA, 10, 13
      db 0xBA, 47 dup(0xC4), 0xBA, 10, 13
      db 0xBA, '  dir               - list files on disk       ', 0xBA, 10, 13
@@ -158,7 +158,7 @@ help_menu_2 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' <-- Back   |  Press ESC to exit   |  Next --> ', 0xBA, 10, 13
      db 0xC8, 47 dup(0xCD), 0xBC, 0
 
-help_menu_3 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
+help_menu_3 db 0xC9, 18 dup(0xCD), ' DimOS help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' Directories Operations                  [3/6] ', 0xBA, 10, 13
      db 0xBA, 47 dup(0xC4), 0xBA, 10, 13
      db 0xBA, '  cd     <dirname>  - change directory         ', 0xBA, 10, 13
@@ -180,7 +180,7 @@ help_menu_3 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' <-- Back   |  Press ESC to exit   |  Next --> ', 0xBA, 10, 13
      db 0xC8, 47 dup(0xCD), 0xBC, 0
 
-help_menu_4 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
+help_menu_4 db 0xC9, 18 dup(0xCD), ' DimOS help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' Image Operations                        [4/6] ', 0xBA, 10, 13
      db 0xBA, 47 dup(0xC4), 0xBA, 10, 13
      db 0xBA, '  view  <filename> <flags>  - view image file  ', 0xBA, 10, 13
@@ -202,7 +202,7 @@ help_menu_4 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' <-- Back   |  Press ESC to exit   |  Next --> ', 0xBA, 10, 13
      db 0xC8, 47 dup(0xCD), 0xBC, 0
 
-help_menu_5 db 0xC9, 18 dup(0xCD), ' PRos help ', 18 dup(0xCD), 0xBB, 10, 13
+help_menu_5 db 0xC9, 18 dup(0xCD), ' DimOS help ', 18 dup(0xCD), 0xBB, 10, 13
      db 0xBA, ' Other stuff                             [5/6] ', 0xBA, 10, 13
      db 0xBA, 47 dup(0xC4), 0xBA, 10, 13
      db 0xBA, '  exit            - exit to boot loader        ', 0xBA, 10, 13

@@ -649,8 +649,115 @@ static void read_line(char *buffer, u8 capacity) {
     }
 }
 
+#define FAT_ROOT ((volatile u8 *)0x10000u)
+#define FAT_TABLE ((volatile u8 *)0x07E00u)
+#define FILE_DATA ((volatile u8 *)0x30000u)
+#define FAT_ROOT_ENTRIES 224u
+#define FAT_FILE_LIMIT 32768u
+
+static u8 file_deleted[FAT_ROOT_ENTRIES];
+
+static u16 fat12_next(u16 cluster) {
+    const u16 offset = (u16)(cluster + cluster / 2u);
+    u16 value = (u16)FAT_TABLE[offset] | ((u16)FAT_TABLE[offset + 1u] << 8u);
+    return (cluster & 1u) != 0u ? (u16)(value >> 4u) : (u16)(value & 0x0FFFu);
+}
+
+static u8 file_name_matches(const volatile u8 *entry, const char *name) {
+    u8 pos = 0u;
+    u8 i = 0u;
+    while (name[i] != '\0' && i < 12u) {
+        char character = name[i++];
+        if (character == '.') {
+            while (pos < 8u) { if (entry[pos++] != ' ') return 0u; }
+            pos = 8u;
+        } else {
+            if (pos >= 11u || (pos == 8u && entry[pos] == ' ')) return 0u;
+            if (ascii_upper((u8)character) != ascii_upper(entry[pos])) return 0u;
+            ++pos;
+        }
+    }
+    if (i == 0u) return 0u;
+    while (pos < 11u) { if (entry[pos++] != ' ') return 0u; }
+    return 1u;
+}
+
+static u16 file_find(const char *name) {
+    u16 index;
+    for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
+        const volatile u8 *entry = FAT_ROOT + index * 32u;
+        if (entry[0] == 0x00u) break;
+        if (entry[0] == 0xE5u || entry[11] == 0x0Fu ||
+            (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
+        if (file_name_matches(entry, name) != 0u) return index;
+    }
+    return 0xFFFFu;
+}
+
+static void file_print_name(const volatile u8 *entry) {
+    u8 index;
+    for (index = 0u; index < 8u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
+    if (entry[8] != ' ') {
+        console_put_character('.');
+        for (index = 8u; index < 11u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
+    }
+}
+
+static void file_manager_dir(void) {
+    u16 index;
+    console_write("Disk files (FAT12):\n");
+    for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
+        const volatile u8 *entry = FAT_ROOT + index * 32u;
+        if (entry[0] == 0x00u) break;
+        if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
+        file_print_name(entry);
+        console_write("  ");
+        console_write_unsigned((u32)entry[28] | ((u32)entry[29] << 8u) | ((u32)entry[30] << 16u) | ((u32)entry[31] << 24u));
+        console_write(" bytes\n");
+    }
+}
+
+static void file_type(const char *name) {
+    const u16 index = file_find(name);
+    u16 cluster;
+    u32 remaining;
+    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
+    cluster = (u16)FAT_ROOT[index * 32u + 26u] | ((u16)FAT_ROOT[index * 32u + 27u] << 8u);
+    remaining = (u32)FAT_ROOT[index * 32u + 28u] | ((u32)FAT_ROOT[index * 32u + 29u] << 8u) | ((u32)FAT_ROOT[index * 32u + 30u] << 16u) | ((u32)FAT_ROOT[index * 32u + 31u] << 24u);
+    if (remaining > FAT_FILE_LIMIT) remaining = FAT_FILE_LIMIT;
+    while (remaining != 0u && cluster >= 2u && cluster < 0xFF8u) {
+        const u32 offset = (u32)(cluster - 2u) * 512u;
+        u32 count = remaining < 512u ? remaining : 512u;
+        u32 position;
+        for (position = 0u; position < count; ++position) console_put_character((char)FILE_DATA[offset + position]);
+        remaining -= count;
+        cluster = fat12_next(cluster);
+    }
+    console_put_character('\n');
+}
+
+static void file_delete(const char *name) {
+    const u16 index = file_find(name);
+    const volatile u8 *entry;
+    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
+    entry = FAT_ROOT + index * 32u;
+    file_deleted[index] = 1u;
+    console_write("Deleted (session only): "); file_print_name(entry); console_write("\n");
+}
+
+static char *command_argument(char *command) {
+    while (*command != ' ' && *command != '\0') ++command;
+    if (*command == '\0') return command;
+    *command++ = '\0';
+    while (*command == ' ') ++command;
+    return command;
+}
+
 static void print_help(void) {
     console_write("Commands:\n");
+    console_write("  DIR    list real FAT12 files\n");
+    console_write("  TYPE   read a file, for example TYPE README.TXT\n");
+    console_write("  DEL    safely hide a file (KERNEL.BIN is protected)\n");
     console_write("  SNAKE  start the built-in game\n");
     console_write("  CLEAR  clear the screen\n");
     console_write("  HELP   show this list\n");
@@ -668,15 +775,25 @@ void kernel_main(void) {
 
     for (;;) {
         char *command;
+        char *argument;
 
         console_write("> ");
         read_line(command_buffer, COMMAND_CAPACITY);
         command = trim_command(command_buffer);
+        argument = command_argument(command);
 
         if (*command == '\0') {
             continue;
         }
-        if (strings_equal(command, "SNAKE") != 0u) {
+        if (strings_equal(command, "DIR") != 0u) {
+            file_manager_dir();
+        } else if (strings_equal(command, "TYPE") != 0u) {
+            if (*argument == '\0') console_write("Usage: TYPE filename\n");
+            else file_type(argument);
+        } else if (strings_equal(command, "DEL") != 0u) {
+            if (*argument == '\0') console_write("Usage: DEL filename\n");
+            else file_delete(argument);
+        } else if (strings_equal(command, "SNAKE") != 0u) {
             snake_game();
             console_clear();
             console_write("Back at the command line. Type HELP.\n\n");

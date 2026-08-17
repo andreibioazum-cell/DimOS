@@ -10,7 +10,6 @@ readonly BOOT_IMAGE="disk_img/dimos.img"
 # Kept as a blank compatibility disk for existing release automation.
 readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
 readonly ISO_IMAGE="disk_img/dimos.iso"
-readonly WEB_ISO_IMAGE="web/dimos.iso"
 readonly IMAGE_CHECKER="bin/dimos-image-check"
 
 QUIET=0
@@ -173,11 +172,6 @@ if (( ! QUIET )); then
 fi
 
 (( ! BUILD_ISO )) || create_iso_image
-
-if (( BUILD_ISO )); then
-    cp "$ISO_IMAGE" "$WEB_ISO_IMAGE"
-    log_ok "Web ISO image: $WEB_ISO_IMAGE"
-fi
 
 log_ok "Floppy image: $BOOT_IMAGE"
 (( ! BUILD_ISO )) || log_ok "ISO image: $ISO_IMAGE"

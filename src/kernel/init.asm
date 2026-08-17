@@ -408,7 +408,8 @@ execute_autoexec_if_exists:
 load_system_cfg:
     pusha
 
-    mov byte [cfg_sound_enabled], 1
+    mov byte [cfg_sound_enabled], 0
+    mov byte [cfg_logo_enabled], 0
     mov byte [cfg_logo_stretch], 0
 
     mov si, default_logo_file
@@ -801,8 +802,7 @@ load_logo_and_display:
     call display_bmp_stretched
 
 .wait_key:
-    mov ah, 0
-    int 16h
+    ; Banner removed: instant boot - no key wait
     mov byte [_palSet], 0
     pop bx
 

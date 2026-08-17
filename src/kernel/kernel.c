@@ -304,7 +304,13 @@ static u16 keyboard_poll(void) {
                 case 0x4Bu: return KEY_LEFT;
                 case 0x1Cu: return (u16)'\n';
                 case 0x35u: return (u16)'/';
-                default: continue;
+                default: {
+                    const char extended_char = keyboard_ascii(base_code);
+                    if (extended_char != '\0') {
+                        return (u16)(u8)extended_char;
+                    }
+                    continue;
+                }
             }
         }
 

@@ -155,9 +155,11 @@ LOAD_ROOT:
     add WORD [datasector], cx
     ; Keep the root directory available to the protected-mode file manager.
     ; It is copied below the kernel load area and survives the mode switch.
+    push ax
     mov ax, 0x1000
     mov es, ax
     xor bx, bx
+    pop ax
     call ReadSectors
 
     mov cx, WORD [bpbRootEntries]

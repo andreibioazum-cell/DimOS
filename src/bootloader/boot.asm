@@ -106,14 +106,17 @@ ReadSectors:
     mov dl, BYTE [bsDriveNumber]
     int 0x13
     jnc .SUCCESS
-    xor ax, ax
+    ; Disk read failed - reset the disk controller with correct drive
+    mov ah, 0x00
+    mov dl, BYTE [bsDriveNumber]
     int 0x13
     dec di
     pop cx
     pop bx
     pop ax
     jnz .SECTORLOOP
-    int 0x18
+    ; All retries exhausted - use proper reboot
+    int 0x19
 .SUCCESS
     pop cx
     pop bx
@@ -125,7 +128,7 @@ ReadSectors:
     jne .WRAP_FAIL
     jmp FAILURE
 .WRAP_FAIL:
-    int 0x18
+    int 0x19
 .NEXT:
     inc ax
     loop .MAIN
@@ -133,6 +136,7 @@ ReadSectors:
 
 main:
     cli
+    cld
     mov ax, 0x07C0
     mov ds, ax
     mov es, ax
@@ -140,8 +144,26 @@ main:
     mov ss, ax
     mov sp, 0xFFFF
     sti
+    
+    ; Save the actual boot drive number (BIOS returns it in DL)
+    ; If DL is 0x80 (hard disk) or > 1, force floppy drive 0
+    cmp dl, 0x01
+    jna .drive_ok
+    mov dl, 0x00
+.drive_ok:
+    mov [bsDriveNumber], dl
+    
+    ; Give floppy motor time to spin up (optional but helps stability)
+    mov cx, 0xFFFF
+.delay:
+    loop .delay
 
 LOAD_ROOT:
+    ; Reset the disk system before first read (some BIOSes need this)
+    xor ax, ax
+    mov dl, BYTE [bsDriveNumber]
+    int 0x13
+    
     xor cx, cx
     xor dx, dx
     mov ax, 0x0020

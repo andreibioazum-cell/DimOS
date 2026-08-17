@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build images and browser launcher
+    name: Build and validate bootable images
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -27,56 +27,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends \
             build-essential \
+            binutils \
             dosfstools \
             mtools \
             nasm \
-            nodejs \
             xorriso
-
-      - name: Validate browser launcher
-        run: |
-          python3 - <<'PY'
-          from html.parser import HTMLParser
-          from pathlib import Path
-          import re
-
-          html = Path("index.html").read_text(encoding="utf-8")
-          HTMLParser().feed(html)
-
-          scripts = re.findall(
-              r"<script(?:\s[^>]*)?>(.*?)</script>",
-              html,
-              re.S,
-          )
-
-          if not scripts:
-              raise SystemExit(
-                  "index.html does not contain inline JavaScript"
-              )
-
-          Path("/tmp/dimos-index.js").write_text(
-              scripts[-1],
-              encoding="utf-8",
-          )
-
-          required = (
-              "web/v86/libv86.js",
-              "web/v86/v86.wasm",
-              "web/v86/seabios.bin",
-              "web/v86/vgabios.bin",
-              "web/v86/LICENSE",
-          )
-
-          for filename in required:
-              path = Path(filename)
-
-              if not path.is_file() or path.stat().st_size == 0:
-                  raise SystemExit(
-                      f"missing browser runtime asset: {filename}"
-                  )
-          PY
-
-          node --check /tmp/dimos-index.js
 
       - name: Build bootable images
         run: make iso
@@ -97,9 +52,7 @@ jobs:
             disk_img/dimos.iso
             disk_img/dimos.img
             disk_img/SHA256SUMS
-            index.html
             README.md
-            web/v86/**
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

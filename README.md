@@ -1,6 +1,6 @@
 ## Запуск в Termux через proot-distro
 
-Десктопный `run-linux.sh` использует GTK + PulseAudio, которых в Termux нет — поэтому окно QEMU выводится через VNC. Нужен [Termux из F-Droid](https://f-droid.org/packages/com.termux/) и любой VNC-клиент на Android (bVNC, RealVNC).
+Десктопный `run-linux.sh` рассчитан на GTK + PulseAudio, которых в Termux нет — поэтому окно QEMU отдаём через VNC. Сам QEMU уже умеет быть VNC-сервером, отдельный TigerVNC не нужен. Нужен [Termux из F-Droid](https://f-droid.org/packages/com.termux/) и любой VNC-клиент на Android (bVNC, RealVNC).
 
 **0. Подготовка образа (один раз)** — баннер при старте убирается так:
 
@@ -13,10 +13,7 @@ sed -i 's/^LOGO=.*/LOGO=FALSE/' src/kernel/configs/SYSTEM.CFG
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install x11-repo          # обязательно — tigervnc лежит в x11-repo, без него 'E: Unable to locate package tigervnc'
-pkg install proot-distro tigervnc git
-vncpasswd                     # задайте пароль 6–8 символов
-vncserver -localhost no -geometry 1024x768 -depth 24 :1
+pkg install proot-distro git
 ```
 
 **2. Внутри proot-distro (Ubuntu):**
@@ -37,8 +34,8 @@ make iso
 ```bash
 mkdir -p lpt
 qemu-system-x86_64 \
-    -display vnc=127.0.0.1:0 \
-    -fda disk_img/dimos.img \
+    -display vnc=:0 \
+    -drive format=raw,file=disk_img/dimos.img,if=floppy,index=0 \
     -machine pcspk-audiodev=snd0 \
     -device adlib,audiodev=snd0 \
     -audiodev none,id=snd0 \
@@ -46,6 +43,8 @@ qemu-system-x86_64 \
     -parallel file:lpt/output.txt
 ```
 
-**4. VNC-клиент на Android:** `127.0.0.1:5900`, пароль из `vncpasswd`.
+**4. VNC-клиент на Android:** `127.0.0.1:5900`, пароль не спрашивает.
 
-Отличия от `run-linux.sh`: `-display gtk` → `-display vnc=…`, `-audiodev pa` → `-audiodev none` (PulseAudio в proot недоступен). KVM в proot нет — QEMU работает через TCG, для DimOS этого хватает.
+После запуска QEMU выведет `VNC server running on 127.0.0.1:5900` — это сигнал, что можно подключаться. Если такого сообщения нет, VNC ещё не поднялся (BIOS QEMU инициализируется несколько секунд).
+
+Отличия от `run-linux.sh`: `-display gtk` → `-display vnc=:0`, `-fda …` → `-drive format=raw,file=…,if=floppy,index=0` (чтобы не было WARNING про автоопределение формата), `-audiodev pa` → `-audiodev none` (PulseAudio в proot недоступен). KVM в proot нет — QEMU работает через TCG, для DimOS этого хватает.

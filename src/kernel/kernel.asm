@@ -1,264 +1,94 @@
 ; ==================================================================
-; DimOS -- minimal command line and Snake
-; The bootloader loads this flat 16-bit kernel at 2000:0000.
+; DimOS kernel entry and x86 port-I/O primitives
+;
+; The bootloader enters here in 16-bit real mode at 2000:0000. Only the
+; operations that require assembly live in this file: protected-mode setup,
+; BSS initialization, and IN/OUT instructions. Kernel policy is in kernel.c.
 ; ==================================================================
 
+[CPU 386]
+
+section .entry
+
+CODE_SELECTOR equ 0x08
+DATA_SELECTOR equ 0x10
+
 [BITS 16]
-[ORG 0x0000]
-[CPU 8086]
+global kernel_entry
+extern kernel_main
+extern __bss_start
+extern __bss_end
 
-section .text
-
-start:
+kernel_entry:
     cli
+    cld
+
+    ; The binary is loaded at segment 2000h and starts at offset zero.
     mov ax, cs
     mov ds, ax
     mov es, ax
     mov ss, ax
     mov sp, 0xFFFE
-    sti
-    cld
 
-    call clear_screen
-    mov si, welcome_message
-    call print_string
+    ; This operand is a real-mode offset. The GDT itself contains linked
+    ; physical addresses because protected-mode segments have base zero.
+    lgdt [gdt_descriptor - kernel_entry]
 
-shell_loop:
-    mov si, prompt
-    call print_string
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax
+    jmp dword CODE_SELECTOR:protected_mode_entry
 
-    mov di, command_buffer
-    mov cx, COMMAND_MAX_LENGTH
-    call read_line
+[BITS 32]
+protected_mode_entry:
+    mov ax, DATA_SELECTOR
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, 0x00090000
+    xor ebp, ebp
 
-    mov si, command_buffer
-    call uppercase_string
-    cmp byte [command_buffer], 0
-    je shell_loop
+    ; A raw binary does not carry its NOLOAD .bss bytes, so clear them here.
+    mov edi, __bss_start
+    mov ecx, __bss_end
+    sub ecx, edi
+    xor eax, eax
+    rep stosb
 
-    mov si, command_buffer
-    mov di, snake_command
-    call strings_equal
-    jc run_snake
+    call kernel_main
 
-    mov si, unknown_command_message
-    call print_string
-    jmp shell_loop
+.hang:
+    cli
+    hlt
+    jmp .hang
 
-run_snake:
-    call snake_game
-    call clear_screen
-    mov si, returned_message
-    call print_string
-    jmp shell_loop
-
-; ------------------------------------------------------------------
-; BIOS text helpers
-; ------------------------------------------------------------------
-
-clear_screen:
-    mov ax, 0x0003
-    int 0x10
+; cdecl: u8 io_in8(u16 port)
+global io_in8
+io_in8:
+    mov edx, [esp + 4]
+    xor eax, eax
+    in al, dx
     ret
 
-; DS:SI -> zero-terminated string
-print_string:
-    push ax
-    push bx
-.print_next:
-    lodsb
-    test al, al
-    jz .done
-    call print_char
-    jmp .print_next
-.done:
-    pop bx
-    pop ax
+; cdecl: void io_out8(u16 port, u8 value)
+global io_out8
+io_out8:
+    mov edx, [esp + 4]
+    mov eax, [esp + 8]
+    out dx, al
     ret
 
-; AL -> character
-print_char:
-    push ax
-    push bx
-    mov ah, 0x0E
-    xor bh, bh
-    mov bl, 0x07
-    int 0x10
-    pop bx
-    pop ax
-    ret
+align 8
+gdt_start:
+    dq 0x0000000000000000       ; null descriptor
+    dq 0x00CF9A000000FFFF       ; flat 32-bit code, base 0, limit 4 GiB
+    dq 0x00CF92000000FFFF       ; flat 32-bit data, base 0, limit 4 GiB
+gdt_end:
 
-print_newline:
-    push ax
-    mov al, 13
-    call print_char
-    mov al, 10
-    call print_char
-    pop ax
-    ret
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
 
-; DH = row, DL = column
-set_cursor:
-    push ax
-    push bx
-    mov ah, 0x02
-    xor bh, bh
-    int 0x10
-    pop bx
-    pop ax
-    ret
-
-; AX -> unsigned decimal
-print_unsigned:
-    push ax
-    push bx
-    push cx
-    push dx
-
-    xor cx, cx
-    mov bx, 10
-    test ax, ax
-    jnz .collect_digits
-
-    mov al, '0'
-    call print_char
-    jmp .done
-
-.collect_digits:
-    xor dx, dx
-    div bx
-    push dx
-    inc cx
-    test ax, ax
-    jnz .collect_digits
-
-.print_digits:
-    pop dx
-    mov al, dl
-    add al, '0'
-    call print_char
-    loop .print_digits
-
-.done:
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-
-; Reads at most CX characters into DS:DI, echoes them, and adds NUL.
-read_line:
-    push ax
-    push bx
-    push cx
-    push dx
-    push di
-
-    xor bx, bx
-.read_key:
-    xor ah, ah
-    int 0x16
-
-    cmp al, 13
-    je .finish
-    cmp al, 8
-    je .backspace
-    cmp al, 32
-    jb .read_key
-    cmp al, 126
-    ja .read_key
-    cmp bx, cx
-    jae .read_key
-
-    stosb
-    inc bx
-    call print_char
-    jmp .read_key
-
-.backspace:
-    test bx, bx
-    jz .read_key
-    dec bx
-    dec di
-    mov al, 8
-    call print_char
-    mov al, ' '
-    call print_char
-    mov al, 8
-    call print_char
-    jmp .read_key
-
-.finish:
-    mov byte [di], 0
-    call print_newline
-
-    pop di
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-
-; Converts DS:SI to uppercase in place.
-uppercase_string:
-    push ax
-    push si
-.next:
-    mov al, [si]
-    test al, al
-    jz .done
-    cmp al, 'a'
-    jb .skip
-    cmp al, 'z'
-    ja .skip
-    sub byte [si], 32
-.skip:
-    inc si
-    jmp .next
-.done:
-    pop si
-    pop ax
-    ret
-
-; DS:SI and DS:DI are equal -> CF=1, otherwise CF=0.
-strings_equal:
-    push ax
-    push si
-    push di
-.compare:
-    mov al, [si]
-    cmp al, [di]
-    jne .different
-    test al, al
-    jz .equal
-    inc si
-    inc di
-    jmp .compare
-.equal:
-    stc
-    jmp .done
-.different:
-    clc
-.done:
-    pop di
-    pop si
-    pop ax
-    ret
-
-%include "src/kernel/snake.asm"
-
-section .data
-
-COMMAND_MAX_LENGTH equ 31
-
-welcome_message db 'DimOS command line', 13, 10
-                db 'Type SNAKE to start the game.', 13, 10, 13, 10, 0
-returned_message db 'Back at the command line.', 13, 10
-                 db 'Type SNAKE to play again.', 13, 10, 13, 10, 0
-unknown_command_message db 'Unknown command. The only command is SNAKE.', 13, 10, 0
-prompt db '> ', 0
-snake_command db 'SNAKE', 0
-
-command_buffer times COMMAND_MAX_LENGTH + 1 db 0
-
-kernel_end:
+section .note.GNU-stack noalloc noexec nowrite progbits

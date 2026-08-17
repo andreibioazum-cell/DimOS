@@ -11,6 +11,10 @@ readonly BOOT_IMAGE="disk_img/dimos.img"
 readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
 readonly ISO_IMAGE="disk_img/dimos.iso"
 readonly IMAGE_CHECKER="bin/dimos-image-check"
+readonly KERNEL_ENTRY_OBJECT="bin/kernel-entry.o"
+readonly KERNEL_C_OBJECT="bin/kernel-c.o"
+readonly KERNEL_ELF="bin/KERNEL.ELF"
+readonly KERNEL_MAP="bin/KERNEL.MAP"
 
 QUIET=0
 NO_BOOT_RECOMPILE=0
@@ -92,11 +96,33 @@ file_size() {
     wc -c < "$1" | tr -d '[:space:]'
 }
 
-assemble() {
-    local source=$1
-    local output=$2
-    log_info "Assembling $source -> $output"
-    nasm -f bin "$source" -o "$output"
+assemble_bootloader() {
+    log_info "Assembling src/bootloader/boot.asm -> bin/BOOT.BIN"
+    nasm -f bin src/bootloader/boot.asm -o bin/BOOT.BIN
+}
+
+build_kernel() {
+    local compiler=${CC:-gcc}
+    local linker=${LD:-ld}
+    local object_copy=${OBJCOPY:-objcopy}
+
+    log_info "Assembling protected-mode entry"
+    nasm -f elf32 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
+
+    log_info "Compiling C kernel"
+    "$compiler" \
+        -m32 -march=i386 -std=c11 -Os \
+        -Wall -Wextra -Wpedantic -Werror \
+        -ffreestanding -fno-builtin -fno-pic -fno-pie \
+        -fno-stack-protector -fno-asynchronous-unwind-tables \
+        -fno-unwind-tables -mno-mmx -mno-sse -mno-sse2 \
+        -c src/kernel/kernel.c -o "$KERNEL_C_OBJECT"
+
+    log_info "Linking flat kernel"
+    "$linker" -m elf_i386 --build-id=none -nostdlib \
+        -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
+        "$KERNEL_ENTRY_OBJECT" "$KERNEL_C_OBJECT" -o "$KERNEL_ELF"
+    "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN
 }
 
 build_image_checker() {
@@ -129,20 +155,23 @@ create_iso_image() {
 for command in nasm mkfs.vfat mcopy mdir truncate; do
     require_command "$command"
 done
+require_command "${CC:-gcc}"
 require_command "${CXX:-g++}"
+require_command "${LD:-ld}"
+require_command "${OBJCOPY:-objcopy}"
 (( ! BUILD_ISO )) || require_command xorriso
 
 mkdir -p bin disk_img
 build_image_checker
 
 if (( ! NO_BOOT_RECOMPILE )); then
-    assemble src/bootloader/boot.asm bin/BOOT.BIN
+    assemble_bootloader
 else
     require_file bin/BOOT.BIN
 fi
 
 if (( ! NO_KERNEL_RECOMPILE )); then
-    assemble src/kernel/kernel.asm bin/KERNEL.BIN
+    build_kernel
 else
     require_file bin/KERNEL.BIN
 fi

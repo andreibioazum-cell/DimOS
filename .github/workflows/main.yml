@@ -1,4 +1,4 @@
-name: Build bootable ISO
+name: Build and validate DimOS
 
 on:
   push:
@@ -9,18 +9,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-iso-${{ github.ref }}
+  group: dimos-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and validate DimOS
+    name: Build images and browser launcher
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install build dependencies
         run: |
@@ -30,28 +30,76 @@ jobs:
             dosfstools \
             mtools \
             nasm \
+            nodejs \
             xorriso
+
+      - name: Validate browser launcher
+        run: |
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+
+          html = Path("index.html").read_text(encoding="utf-8")
+          HTMLParser().feed(html)
+
+          scripts = re.findall(
+              r"<script(?:\s[^>]*)?>(.*?)</script>",
+              html,
+              re.S,
+          )
+
+          if not scripts:
+              raise SystemExit(
+                  "index.html does not contain inline JavaScript"
+              )
+
+          Path("/tmp/dimos-index.js").write_text(
+              scripts[-1],
+              encoding="utf-8",
+          )
+
+          required = (
+              "web/v86/libv86.js",
+              "web/v86/v86.wasm",
+              "web/v86/seabios.bin",
+              "web/v86/vgabios.bin",
+              "web/v86/LICENSE",
+          )
+
+          for filename in required:
+              path = Path(filename)
+
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(
+                      f"missing browser runtime asset: {filename}"
+                  )
+          PY
+
+          node --check /tmp/dimos-index.js
 
       - name: Build bootable images
         run: make iso
 
-      - name: Validate artifacts
+      - name: Validate bootable images
         run: make verify
 
       - name: Create checksums
         run: |
           cd disk_img
-          sha256sum dimos.iso dimos.img FLOPPY2.img > SHA256SUMS
+          sha256sum dimos.iso dimos.img > SHA256SUMS
 
-      - name: Upload boot images
-        uses: actions/upload-artifact@v4
+      - name: Upload DimOS package
+        uses: actions/upload-artifact@v6
         with:
           name: DimOS-${{ github.sha }}
           path: |
             disk_img/dimos.iso
             disk_img/dimos.img
-            disk_img/FLOPPY2.img
             disk_img/SHA256SUMS
+            index.html
+            README.md
+            web/v86/**
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

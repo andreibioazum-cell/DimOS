@@ -115,8 +115,6 @@ ReadSectors:
     jnz .SECTORLOOP
     int 0x18
 .SUCCESS
-    mov si, msgProgress
-    call Print
     pop cx
     pop bx
     pop ax
@@ -142,8 +140,6 @@ main:
     mov ss, ax
     mov sp, 0xFFFF
     sti
-    mov si, msgLoading
-    call Print
 
 LOAD_ROOT:
     xor cx, cx
@@ -225,8 +221,6 @@ LOAD_IMAGE:
     jb LOAD_IMAGE
 
 DONE:
-    mov si, msgCRLF
-    call Print
     jmp 0x2000:0x0000
 
 FAILURE:
@@ -240,9 +234,6 @@ REBOOT:
 datasector dw 0x0000
 cluster dw 0x0000
 ImageName db "KERNEL  BIN"
-msgLoading db 0x0D, 0x0A, "Loading Boot Image ", 0x00
-msgCRLF db 0x0D, 0x0A, 0x00
-msgProgress db ".", 0x00
 msgFailure db 0x0D, 0x0A, "KERNEL.BIN not found. Press Any Key to Reboot", 0x0D, 0x0A, 0x00
 
 TIMES 510-($-$$) DB 0

@@ -741,9 +741,8 @@ static void file_delete(const char *name) {
     const volatile u8 *entry;
     if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
     entry = FAT_ROOT + index * 32u;
-    if (file_name_matches(entry, "KERNEL.BIN") != 0u) { console_write("Protected system file: KERNEL.BIN\n"); return; }
     file_deleted[index] = 1u;
-    console_write("Deleted safely (session only): "); file_print_name(entry); console_write("\n");
+    console_write("Deleted (session only): "); file_print_name(entry); console_write("\n");
 }
 
 static char *command_argument(char *command) {

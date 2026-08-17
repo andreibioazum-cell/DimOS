@@ -2438,8 +2438,8 @@ cfg_key_logo         db 'LOGO=', 0
 cfg_key_logo_stretch db 'LOGO_STRETCH=', 0
 cfg_key_sound        db 'START_SOUND=', 0
 default_logo_file    db 'LOGO.BMP', 0
-cfg_sound_enabled    db 1  ; 1 = True, 0 = False
-cfg_logo_enabled     db 1  ; 1 = True, 0 = False
+cfg_sound_enabled    db 0  ; 1 = True, 0 = False
+cfg_logo_enabled     db 0  ; 1 = True, 0 = False
 cfg_logo_stretch     db 0  ; 1 = Stretch, 0 = Centered
 
 bin_dir_name         db 'BIN.DIR', 0

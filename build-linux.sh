@@ -192,11 +192,18 @@ mkfs.vfat -F 12 -n EMPTY "$SECOND_FLOPPY_IMAGE" >/dev/null
 
 dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
 mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
+# Ship a small ordinary file so the file manager has a real FAT12 file to inspect.
+if [[ -d files ]]; then
+    for user_file in files/*; do
+        [[ -f "$user_file" ]] || continue
+        mcopy -i "$BOOT_IMAGE" "$user_file" ::/
+    done
+fi
 
 "$IMAGE_CHECKER" bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE"
 
 if (( ! QUIET )); then
-    printf '\nDisk contents (intentionally only the kernel):\n'
+    printf '\nDisk contents (kernel plus user files):\n'
     mdir -i "$BOOT_IMAGE" ::/
 fi
 

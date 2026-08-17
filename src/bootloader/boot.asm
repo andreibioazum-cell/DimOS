@@ -153,11 +153,15 @@ LOAD_ROOT:
     add ax, WORD [bpbReservedSectors]
     mov WORD [datasector], ax
     add WORD [datasector], cx
-    mov bx, 0x0200
+    ; Keep the root directory available to the protected-mode file manager.
+    ; It is copied below the kernel load area and survives the mode switch.
+    mov ax, 0x1000
+    mov es, ax
+    xor bx, bx
     call ReadSectors
 
     mov cx, WORD [bpbRootEntries]
-    mov di, 0x0200
+    xor di, di
 .LOOP:
     push cx
     mov cx, 0x000B
@@ -180,7 +184,20 @@ LOAD_FAT:
     mov cx, ax
     mov ax, WORD [bpbReservedSectors]
     mov bx, 0x0200
+    ; FAT stays at 07C0:0200, where the existing cluster walker reads it.
+    mov ax, 0x07C0
+    mov es, ax
+    mov ax, WORD [bpbReservedSectors]
     call ReadSectors
+    ; Cache the first 32 KiB of the data area for the protected-mode
+    ; file manager. This makes ordinary files visible without BIOS calls.
+    mov ax, WORD [datasector]
+    mov cx, 0x0040
+    mov bx, 0x0000
+    mov dx, 0x3000
+    mov es, dx
+    call ReadSectors
+
     mov ax, 0x2000
     mov es, ax
     mov bx, 0x0000

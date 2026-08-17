@@ -1,30 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# ==================================================================
-# DimOS -- The DimOS run script for Linux
-# Copyright (C) 2025 PRoX2011
-# ==================================================================
+set -Eeuo pipefail
 
-RED='\033[31m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-BLUE='\033[34m'
-NC='\033[0m'
+IMAGE="disk_img/dimos.img"
 
-print_msg() {
-    local color="$1"
-    local message="$2"
-    echo -e "${color}${message}${NC}"
-}
+if [[ ! -f "$IMAGE" ]]; then
+    printf 'Image not found: %s\nRun "make iso" first.\n' "$IMAGE" >&2
+    exit 1
+fi
 
-print_msg "$NC" ""
-print_msg "$GREEN" "Starting emulator..."
-mkdir -p lpt
-qemu-system-x86_64 \
+if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    printf 'qemu-system-x86_64 is not installed.\n' >&2
+    exit 1
+fi
+
+printf 'Starting DimOS Minimal...\n'
+exec qemu-system-x86_64 \
     -display gtk \
-    -fda disk_img/dimos.img \
-    -machine pcspk-audiodev=snd0 \
-    -device adlib,audiodev=snd0 \
-    -audiodev pa,id=snd0 \
-    -drive format=raw,file=disk_img/FLOPPY2.img,if=floppy,index=1 \
-    -parallel file:lpt/output.txt
+    -drive format=raw,file="$IMAGE",if=floppy,index=0

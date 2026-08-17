@@ -1,50 +1,63 @@
-## Запуск в Termux через proot-distro
+# DimOS Minimal
 
-Десктопный `run-linux.sh` рассчитан на GTK + PulseAudio, которых в Termux нет — поэтому окно QEMU отдаём через VNC. Сам QEMU уже умеет быть VNC-сервером, отдельный TigerVNC не нужен. Нужен [Termux из F-Droid](https://f-droid.org/packages/com.termux/) и любой VNC-клиент на Android (bVNC, RealVNC).
+Минимальная 16-битная система: сразу после загрузки открывается командная строка, а единственное приложение — встроенная игра «Змейка». Старые файловые, графические, звуковые и прикладные функции в образ больше не входят.
 
-**0. Подготовка образа (один раз)** — баннер при старте убирается так:
+## Единственная команда
+
+- `SNAKE` — запустить игру.
+
+В игре используются `WASD` или стрелки. `N` начинает новую игру, `Esc` возвращает в командную строку.
+
+## Запуск в браузере
+
+В корне репозитория находится `index.html` с браузерным x86-эмулятором. Он позволяет выбрать ISO/IMG-файл через файловый менеджер телефона, подключить дополнительный образ дискеты и играть с экранных кнопок.
 
 ```bash
-# в корне репозитория
-sed -i 's/^LOGO=.*/LOGO=FALSE/' src/kernel/configs/SYSTEM.CFG
+# сначала соберите ISO
+make iso
+
+# затем откройте веб-лаунчер
+python3 -m http.server 8000
 ```
 
-**1. Termux (хост):**
+Перейдите на `http://localhost:8000`, нажмите «Выбрать ISO / IMG с телефона» и укажите `disk_img/dimos.iso` либо `disk_img/dimos.img`. Образ обрабатывается локально и не отправляется на сервер. Движок v86 и BIOS уже сохранены в `web/v86/`, поэтому при запуске через веб-сервер внешние CDN не требуются.
+
+## Сборка
+
+Требуются `nasm`, `dosfstools`, `mtools`, `xorriso`, `g++` и `make`.
 
 ```bash
-pkg update && pkg upgrade -y
-pkg install proot-distro git
-```
-
-**2. Внутри proot-distro (Ubuntu):**
-
-```bash
-proot-distro install ubuntu
-proot-distro login ubuntu
-
-apt update && apt install -y build-essential nasm dosfstools mtools xorriso qemu-system-x86 git
-cd ~
-git clone https://github.com/PRoX2011/DimOS.git
-cd DimOS
 make iso
 ```
 
-**3. Запуск QEMU (всё ещё внутри proot-distro):**
+Результаты:
+
+- `disk_img/dimos.img` — загрузочная FAT12-дискета;
+- `disk_img/dimos.iso` — загрузочный ISO.
+
+В файловой системе образа намеренно находится только `KERNEL.BIN`: командная строка и «Змейка» встроены прямо в ядро.
+
+## Запуск
 
 ```bash
-mkdir -p lpt
-qemu-system-x86_64 \
-    -display vnc=:0 \
-    -drive format=raw,file=disk_img/dimos.img,if=floppy,index=0 \
-    -machine pcspk-audiodev=snd0 \
-    -device adlib,audiodev=snd0 \
-    -audiodev none,id=snd0 \
-    -drive format=raw,file=disk_img/FLOPPY2.img,if=floppy,index=1 \
-    -parallel file:lpt/output.txt
+./run-linux.sh
 ```
 
-**4. VNC-клиент на Android:** `127.0.0.1:5900`, пароль не спрашивает.
+Или напрямую:
 
-После запуска QEMU выведет `VNC server running on 127.0.0.1:5900` — это сигнал, что можно подключаться. Если такого сообщения нет, VNC ещё не поднялся (BIOS QEMU инициализируется несколько секунд).
+```bash
+qemu-system-x86_64 -drive format=raw,file=disk_img/dimos.img,if=floppy
+```
 
-Отличия от `run-linux.sh`: `-display gtk` → `-display vnc=:0`, `-fda …` → `-drive format=raw,file=…,if=floppy,index=0` (чтобы не было WARNING про автоопределение формата), `-audiodev pa` → `-audiodev none` (PulseAudio в proot недоступен). KVM в proot нет — QEMU работает через TCG, для DimOS этого хватает.
+### Termux / proot-distro
+
+```bash
+apt update
+apt install -y build-essential nasm dosfstools mtools xorriso qemu-system-x86 git
+make iso
+qemu-system-x86_64 \
+  -display vnc=:0 \
+  -drive format=raw,file=disk_img/dimos.img,if=floppy,index=0
+```
+
+После запуска подключитесь VNC-клиентом к `127.0.0.1:5900`.

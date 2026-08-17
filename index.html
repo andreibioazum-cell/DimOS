@@ -1,0 +1,1426 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#07110d">
+    <meta name="description" content="Запуск DimOS и других загрузочных ISO/IMG-образов прямо в браузере.">
+    <title>DimOS — запуск в браузере</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #07110d;
+            --panel: rgba(14, 29, 23, 0.84);
+            --panel-strong: #0d1b16;
+            --line: rgba(143, 255, 188, 0.16);
+            --line-strong: rgba(143, 255, 188, 0.34);
+            --text: #effff5;
+            --muted: #91a99c;
+            --green: #8fffb9;
+            --green-strong: #41f18a;
+            --green-dark: #123d29;
+            --amber: #ffc96b;
+            --red: #ff8f8f;
+            --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+            --radius-xl: 30px;
+            --radius-lg: 22px;
+            --radius-md: 15px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            min-width: 320px;
+            min-height: 100vh;
+            margin: 0;
+            overflow-x: hidden;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 8% 4%, rgba(65, 241, 138, 0.12), transparent 33rem),
+                radial-gradient(circle at 92% 22%, rgba(68, 127, 255, 0.09), transparent 28rem),
+                var(--bg);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body::before {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            content: "";
+            opacity: 0.14;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            background-size: 42px 42px;
+            mask-image: linear-gradient(to bottom, black, transparent 78%);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            color: inherit;
+        }
+
+        .shell {
+            width: min(1180px, calc(100% - 32px));
+            margin: 0 auto;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 82px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text);
+            text-decoration: none;
+        }
+
+        .brand-mark {
+            display: grid;
+            width: 38px;
+            height: 38px;
+            place-items: center;
+            border: 1px solid var(--line-strong);
+            border-radius: 11px;
+            background: linear-gradient(145deg, rgba(143, 255, 185, 0.16), rgba(143, 255, 185, 0.03));
+            box-shadow: inset 0 0 22px rgba(65, 241, 138, 0.08);
+            color: var(--green);
+            font: 800 17px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        .brand-copy {
+            display: grid;
+            gap: 2px;
+        }
+
+        .brand-name {
+            letter-spacing: -0.03em;
+            font-weight: 760;
+        }
+
+        .brand-version {
+            color: var(--muted);
+            font: 600 10px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .top-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--muted);
+            font: 600 12px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        .top-status::before {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green-strong);
+            box-shadow: 0 0 14px rgba(65, 241, 138, 0.72);
+            content: "";
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(380px, 1.1fr);
+            gap: clamp(36px, 7vw, 94px);
+            align-items: center;
+            min-height: calc(100vh - 82px);
+            padding: 72px 0 86px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 22px;
+            color: var(--green);
+            font: 700 12px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .eyebrow::before {
+            width: 26px;
+            height: 1px;
+            background: currentColor;
+            content: "";
+        }
+
+        h1 {
+            max-width: 680px;
+            margin: 0;
+            letter-spacing: -0.065em;
+            font-size: clamp(54px, 7.2vw, 92px);
+            font-weight: 760;
+            line-height: 0.92;
+        }
+
+        h1 span {
+            display: block;
+            color: var(--green);
+        }
+
+        .lead {
+            max-width: 600px;
+            margin: 30px 0 0;
+            color: #b5c9be;
+            font-size: clamp(17px, 2vw, 20px);
+            line-height: 1.65;
+        }
+
+        .feature-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .feature {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            color: #b8ccc1;
+            background: rgba(255, 255, 255, 0.025);
+            font-size: 12px;
+            font-weight: 650;
+        }
+
+        .feature svg {
+            width: 15px;
+            color: var(--green);
+        }
+
+        .loader-card {
+            position: relative;
+            overflow: hidden;
+            padding: clamp(22px, 4vw, 34px);
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius-xl);
+            background: linear-gradient(150deg, rgba(18, 41, 31, 0.94), rgba(8, 19, 15, 0.94));
+            box-shadow: var(--shadow);
+        }
+
+        .loader-card::before {
+            position: absolute;
+            top: -150px;
+            right: -110px;
+            width: 310px;
+            height: 310px;
+            border-radius: 50%;
+            background: rgba(65, 241, 138, 0.08);
+            filter: blur(4px);
+            content: "";
+        }
+
+        .card-head {
+            position: relative;
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 24px;
+        }
+
+        .step-number {
+            display: grid;
+            flex: 0 0 auto;
+            width: 38px;
+            height: 38px;
+            place-items: center;
+            border-radius: 12px;
+            color: var(--green);
+            background: rgba(65, 241, 138, 0.1);
+            font: 700 13px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        h2,
+        h3,
+        p {
+            margin-top: 0;
+        }
+
+        .card-head h2 {
+            margin-bottom: 7px;
+            letter-spacing: -0.03em;
+            font-size: 23px;
+        }
+
+        .card-head p {
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .dropzone {
+            position: relative;
+            display: grid;
+            min-height: 180px;
+            padding: 26px;
+            place-items: center;
+            border: 1px dashed rgba(143, 255, 185, 0.36);
+            border-radius: var(--radius-lg);
+            outline: none;
+            background: rgba(4, 12, 9, 0.46);
+            text-align: center;
+            transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+            cursor: pointer;
+        }
+
+        .dropzone:hover,
+        .dropzone:focus-visible,
+        .dropzone.is-dragging {
+            border-color: var(--green);
+            background: rgba(65, 241, 138, 0.075);
+            transform: translateY(-2px);
+        }
+
+        .dropzone input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .upload-icon {
+            display: grid;
+            width: 52px;
+            height: 52px;
+            margin: 0 auto 15px;
+            place-items: center;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: rgba(143, 255, 185, 0.06);
+            color: var(--green);
+        }
+
+        .upload-icon svg {
+            width: 24px;
+        }
+
+        .drop-title {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 720;
+        }
+
+        .drop-hint {
+            display: block;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .file-summary {
+            display: none;
+            grid-template-columns: 42px minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            width: 100%;
+            text-align: left;
+        }
+
+        .dropzone.has-file .upload-prompt {
+            display: none;
+        }
+
+        .dropzone.has-file .file-summary {
+            display: grid;
+        }
+
+        .file-type {
+            display: grid;
+            width: 42px;
+            height: 42px;
+            place-items: center;
+            border-radius: 12px;
+            background: var(--green-dark);
+            color: var(--green);
+            font: 800 10px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        .file-copy {
+            min-width: 0;
+        }
+
+        .file-name {
+            display: block;
+            overflow: hidden;
+            margin-bottom: 4px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .file-meta {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .change-file {
+            color: var(--green);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .secondary-upload {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            margin-top: 14px;
+            padding: 14px 15px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-md);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .secondary-copy strong {
+            display: block;
+            margin-bottom: 3px;
+            font-size: 13px;
+        }
+
+        .secondary-copy span {
+            display: block;
+            overflow: hidden;
+            max-width: 280px;
+            color: var(--muted);
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 11px;
+        }
+
+        .small-file-button {
+            position: relative;
+            overflow: hidden;
+            padding: 9px 12px;
+            border: 1px solid var(--line-strong);
+            border-radius: 10px;
+            color: #cce3d6;
+            background: rgba(143, 255, 185, 0.05);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .small-file-button:hover {
+            border-color: var(--green);
+        }
+
+        .small-file-button input {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .privacy-note {
+            display: flex;
+            gap: 9px;
+            align-items: flex-start;
+            margin: 16px 2px 0;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .privacy-note svg {
+            flex: 0 0 auto;
+            width: 15px;
+            margin-top: 1px;
+            color: var(--green);
+        }
+
+        .start-button {
+            display: flex;
+            width: 100%;
+            min-height: 56px;
+            margin-top: 20px;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            border: 0;
+            border-radius: 16px;
+            color: #06140d;
+            background: var(--green);
+            box-shadow: 0 12px 35px rgba(65, 241, 138, 0.18);
+            font-weight: 800;
+            cursor: pointer;
+            transition: filter 160ms ease, transform 160ms ease, opacity 160ms ease;
+        }
+
+        .start-button:hover:not(:disabled) {
+            filter: brightness(1.08);
+            transform: translateY(-2px);
+        }
+
+        .start-button:disabled {
+            opacity: 0.38;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        .start-button svg {
+            width: 18px;
+        }
+
+        .emulator-section {
+            display: none;
+            padding: 16px 0 100px;
+        }
+
+        .emulator-section.is-visible {
+            display: block;
+        }
+
+        .emulator-heading {
+            display: flex;
+            gap: 20px;
+            align-items: flex-end;
+            justify-content: space-between;
+            margin-bottom: 22px;
+        }
+
+        .emulator-heading h2 {
+            margin-bottom: 6px;
+            letter-spacing: -0.04em;
+            font-size: clamp(30px, 5vw, 48px);
+        }
+
+        .emulator-heading p {
+            margin-bottom: 0;
+            color: var(--muted);
+        }
+
+        .machine {
+            overflow: hidden;
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius-xl);
+            background: #09110e;
+            box-shadow: var(--shadow);
+        }
+
+        .machine-toolbar {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 58px;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        .machine-status {
+            display: inline-flex;
+            min-width: 0;
+            gap: 9px;
+            align-items: center;
+            color: #b7cbbf;
+            font: 600 12px/1.3 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        .status-dot {
+            flex: 0 0 auto;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--amber);
+            box-shadow: 0 0 12px rgba(255, 201, 107, 0.52);
+        }
+
+        .machine-status[data-tone="ready"] .status-dot {
+            background: var(--green-strong);
+            box-shadow: 0 0 12px rgba(65, 241, 138, 0.6);
+        }
+
+        .machine-status[data-tone="error"] .status-dot {
+            background: var(--red);
+            box-shadow: 0 0 12px rgba(255, 143, 143, 0.55);
+        }
+
+        #statusText {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .toolbar-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            justify-content: flex-end;
+        }
+
+        .tool-button {
+            min-height: 34px;
+            padding: 7px 11px;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            color: #bdd2c7;
+            background: rgba(255, 255, 255, 0.025);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .tool-button:hover:not(:disabled) {
+            border-color: var(--line-strong);
+            color: var(--text);
+            background: rgba(143, 255, 185, 0.055);
+        }
+
+        .tool-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .screen-viewport {
+            position: relative;
+            display: grid;
+            min-height: 520px;
+            overflow: auto;
+            place-items: center;
+            padding: 28px;
+            outline: none;
+            background:
+                radial-gradient(circle at 50% 44%, rgba(28, 80, 52, 0.18), transparent 34rem),
+                #030604;
+        }
+
+        .screen-viewport:focus-visible {
+            box-shadow: inset 0 0 0 2px var(--green);
+        }
+
+        #screen_container {
+            position: relative;
+            flex: 0 0 auto;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 0 0 1px #203128, 0 16px 48px rgba(0, 0, 0, 0.58);
+        }
+
+        #screen_container > div {
+            white-space: pre;
+            font: 16px/16px ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        #screen_container canvas {
+            display: none;
+            image-rendering: pixelated;
+        }
+
+        .boot-placeholder {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            padding: 30px;
+            color: var(--muted);
+            background: #030604;
+            text-align: center;
+            font: 600 13px/1.7 ui-monospace, "SFMono-Regular", Consolas, monospace;
+        }
+
+        .boot-placeholder[hidden] {
+            display: none;
+        }
+
+        .placeholder-spinner {
+            width: 34px;
+            height: 34px;
+            margin: 0 auto 16px;
+            border: 2px solid rgba(143, 255, 185, 0.15);
+            border-top-color: var(--green);
+            border-radius: 50%;
+            animation: spin 900ms linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .mobile-controls {
+            display: grid;
+            grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.65fr);
+            gap: 20px;
+            padding: 22px;
+            border-top: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.018);
+        }
+
+        .control-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-content: center;
+        }
+
+        .control-label {
+            width: 100%;
+            margin-bottom: 2px;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .key-button {
+            min-width: 56px;
+            min-height: 46px;
+            padding: 10px 15px;
+            border: 1px solid var(--line-strong);
+            border-radius: 12px;
+            color: #dff8e9;
+            background: linear-gradient(180deg, rgba(143, 255, 185, 0.09), rgba(143, 255, 185, 0.025));
+            box-shadow: 0 3px 0 rgba(0, 0, 0, 0.32);
+            font: 750 13px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+            touch-action: manipulation;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .key-button:active:not(:disabled) {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.32);
+        }
+
+        .key-button:disabled {
+            opacity: 0.34;
+            cursor: not-allowed;
+        }
+
+        .key-button.primary-key {
+            min-width: 124px;
+            color: #06140d;
+            border-color: var(--green);
+            background: var(--green);
+        }
+
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 52px);
+            grid-template-rows: repeat(2, 48px);
+            gap: 7px;
+            justify-content: end;
+        }
+
+        .dpad .key-button {
+            min-width: 52px;
+            min-height: 48px;
+            padding: 0;
+            font-size: 17px;
+        }
+
+        .dpad-up { grid-column: 2; }
+        .dpad-left { grid-column: 1; grid-row: 2; }
+        .dpad-down { grid-column: 2; grid-row: 2; }
+        .dpad-right { grid-column: 3; grid-row: 2; }
+
+        .instructions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .instruction-card {
+            padding: 17px;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .instruction-card strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #d8eee2;
+            font-size: 13px;
+        }
+
+        .instruction-card span {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        footer {
+            display: flex;
+            gap: 18px;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 82px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        footer a {
+            color: var(--green);
+            text-decoration: none;
+        }
+
+        @media (max-width: 900px) {
+            .hero {
+                grid-template-columns: 1fr;
+                min-height: auto;
+                padding: 72px 0;
+            }
+
+            .hero-copy {
+                max-width: 720px;
+            }
+
+            .loader-card {
+                max-width: 680px;
+            }
+
+            .mobile-controls {
+                grid-template-columns: 1fr auto;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .shell {
+                width: min(100% - 22px, 1180px);
+            }
+
+            .topbar {
+                min-height: 68px;
+            }
+
+            .top-status {
+                font-size: 0;
+            }
+
+            .top-status::after {
+                content: "WEB";
+                font-size: 10px;
+            }
+
+            .hero {
+                gap: 48px;
+                padding: 52px 0 62px;
+            }
+
+            h1 {
+                font-size: clamp(48px, 16.5vw, 70px);
+            }
+
+            .lead {
+                margin-top: 24px;
+                font-size: 16px;
+            }
+
+            .loader-card {
+                padding: 18px;
+                border-radius: 24px;
+            }
+
+            .dropzone {
+                min-height: 164px;
+                padding: 20px;
+            }
+
+            .file-summary {
+                grid-template-columns: 42px minmax(0, 1fr);
+            }
+
+            .change-file {
+                display: none;
+            }
+
+            .secondary-copy span {
+                max-width: 170px;
+            }
+
+            .emulator-heading {
+                display: block;
+            }
+
+            .machine {
+                border-radius: 20px;
+            }
+
+            .machine-toolbar {
+                align-items: flex-start;
+            }
+
+            .machine-status {
+                max-width: 44%;
+            }
+
+            .toolbar-actions {
+                gap: 5px;
+            }
+
+            .tool-button {
+                padding: 7px 9px;
+                font-size: 10px;
+            }
+
+            .screen-viewport {
+                min-height: 360px;
+                padding: 14px;
+            }
+
+            .mobile-controls {
+                grid-template-columns: 1fr;
+                padding: 17px;
+            }
+
+            .dpad {
+                justify-content: start;
+            }
+
+            .instructions {
+                grid-template-columns: 1fr;
+            }
+
+            footer {
+                display: block;
+                padding: 24px 0;
+                line-height: 1.7;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+            *, *::before, *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="shell topbar">
+        <a class="brand" href="#top" aria-label="DimOS — в начало">
+            <span class="brand-mark">D&gt;</span>
+            <span class="brand-copy">
+                <span class="brand-name">DimOS</span>
+                <span class="brand-version">Browser boot</span>
+            </span>
+        </a>
+        <span class="top-status">Эмулятор x86 · локальный запуск</span>
+    </header>
+
+    <main id="top">
+        <section class="shell hero" aria-labelledby="pageTitle">
+            <div class="hero-copy">
+                <span class="eyebrow">16-bit system / web edition</span>
+                <h1 id="pageTitle">Твоя ОС.<span>Прямо в браузере.</span></h1>
+                <p class="lead">
+                    Выбери ISO или IMG-файл на телефоне — DimOS загрузится в виртуальном компьютере без установки и отправки образа на сервер.
+                </p>
+                <div class="feature-row" aria-label="Возможности">
+                    <span class="feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+                        Файлы остаются на устройстве
+                    </span>
+                    <span class="feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+                        ISO · IMG · IMA · DSK
+                    </span>
+                    <span class="feature">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 18h6"/></svg>
+                        Экранные кнопки для телефона
+                    </span>
+                </div>
+            </div>
+
+            <div class="loader-card">
+                <div class="card-head">
+                    <span class="step-number">01</span>
+                    <div>
+                        <h2>Импортировать образ</h2>
+                        <p>Открой файловый менеджер телефона или перетащи файл сюда с компьютера.</p>
+                    </div>
+                </div>
+
+                <label class="dropzone" id="dropzone" tabindex="0">
+                    <input id="bootFile" type="file" accept=".iso,.img,.ima,.dsk,application/x-iso9660-image,application/octet-stream">
+                    <span class="upload-prompt">
+                        <span class="upload-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+                        </span>
+                        <span class="drop-title">Выбрать ISO / IMG с телефона</span>
+                        <span class="drop-hint">или перетащить файл · рекомендуется до 512 МБ</span>
+                    </span>
+                    <span class="file-summary">
+                        <span class="file-type" id="fileType">ISO</span>
+                        <span class="file-copy">
+                            <span class="file-name" id="fileName">dimos.iso</span>
+                            <span class="file-meta" id="fileMeta">2 МБ · CD-ROM</span>
+                        </span>
+                        <span class="change-file">Изменить</span>
+                    </span>
+                </label>
+
+                <div class="secondary-upload">
+                    <span class="secondary-copy">
+                        <strong>Дополнительный образ</strong>
+                        <span id="extraFileName">Необязательно: IMG / IMA / DSK</span>
+                    </span>
+                    <label class="small-file-button">
+                        Добавить
+                        <input id="extraFile" type="file" accept=".img,.ima,.dsk,application/octet-stream">
+                    </label>
+                </div>
+
+                <p class="privacy-note">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                    Образы читаются локально браузером и никуда не отправляются. Движок v86 уже включён в репозиторий.
+                </p>
+
+                <button class="start-button" id="startButton" type="button" disabled>
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.6v12.8a1 1 0 0 0 1.52.85l9.6-6.4a1 1 0 0 0 0-1.7l-9.6-6.4A1 1 0 0 0 8 5.6Z"/></svg>
+                    Запустить операционную систему
+                </button>
+            </div>
+        </section>
+
+        <section class="shell emulator-section" id="emulatorSection" aria-labelledby="emulatorTitle">
+            <div class="emulator-heading">
+                <div>
+                    <span class="eyebrow">Virtual machine</span>
+                    <h2 id="emulatorTitle">DimOS работает здесь</h2>
+                    <p>Нажми на экран, чтобы передать ему физическую клавиатуру.</p>
+                </div>
+            </div>
+
+            <div class="machine">
+                <div class="machine-toolbar">
+                    <div class="machine-status" id="machineStatus" data-tone="loading" role="status" aria-live="polite">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span id="statusText">Ожидание образа</span>
+                    </div>
+                    <div class="toolbar-actions">
+                        <button class="tool-button vm-action" id="pauseButton" type="button" disabled>Пауза</button>
+                        <button class="tool-button vm-action" id="restartButton" type="button" disabled>Перезапуск</button>
+                        <button class="tool-button vm-action" id="fullscreenButton" type="button" disabled>На весь экран</button>
+                        <button class="tool-button" id="changeButton" type="button">Другой образ</button>
+                    </div>
+                </div>
+
+                <div class="screen-viewport" id="screenViewport" tabindex="0" aria-label="Экран виртуального компьютера">
+                    <div id="screen_container">
+                        <div></div>
+                        <canvas></canvas>
+                    </div>
+                    <div class="boot-placeholder" id="bootPlaceholder">
+                        <div>
+                            <div class="placeholder-spinner" aria-hidden="true"></div>
+                            Подготовка виртуального компьютера…
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mobile-controls" aria-label="Экранная клавиатура">
+                    <div class="control-panel">
+                        <span class="control-label">Командная строка</span>
+                        <button class="key-button primary-key virtual-key" type="button" data-action="snake" disabled>SNAKE ↵</button>
+                        <button class="key-button virtual-key" type="button" data-scan="49" disabled>N</button>
+                        <button class="key-button virtual-key" type="button" data-scan="1" disabled>ESC</button>
+                        <button class="key-button virtual-key" type="button" data-scan="28" disabled>ENTER</button>
+                    </div>
+                    <div>
+                        <span class="control-label">Управление змейкой</span>
+                        <div class="dpad">
+                            <button class="key-button virtual-key dpad-up" type="button" data-scan="17" aria-label="Вверх" disabled>▲</button>
+                            <button class="key-button virtual-key dpad-left" type="button" data-scan="30" aria-label="Влево" disabled>◀</button>
+                            <button class="key-button virtual-key dpad-down" type="button" data-scan="31" aria-label="Вниз" disabled>▼</button>
+                            <button class="key-button virtual-key dpad-right" type="button" data-scan="32" aria-label="Вправо" disabled>▶</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="instructions">
+                <div class="instruction-card">
+                    <strong>1. Дождись строки «&gt;»</strong>
+                    <span>Это значит, что DimOS полностью загрузилась.</span>
+                </div>
+                <div class="instruction-card">
+                    <strong>2. Запусти SNAKE</strong>
+                    <span>Нажми зелёную экранную кнопку или введи команду вручную.</span>
+                </div>
+                <div class="instruction-card">
+                    <strong>3. Играй</strong>
+                    <span>Используй стрелки на экране, WASD, N для новой игры и Esc для выхода.</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="shell">
+        <span>DimOS Browser Launcher · образ не покидает твоё устройство</span>
+        <span>Эмуляция: <a href="https://github.com/copy/v86" target="_blank" rel="noreferrer">v86</a></span>
+    </footer>
+
+    <script src="./web/v86/libv86.js"></script>
+    <script>
+        "use strict";
+
+        const OPENED_AS_LOCAL_FILE = window.location.protocol === "file:";
+        const LOCAL_V86_BASE = new URL("./web/v86/", window.location.href).href.replace(/\/$/, "");
+        const V86_BASE = OPENED_AS_LOCAL_FILE
+            ? "https://cdn.jsdelivr.net/npm/v86@0.5.424/build"
+            : LOCAL_V86_BASE;
+        const V86_BIOS_BASE = OPENED_AS_LOCAL_FILE
+            ? "https://cdn.jsdelivr.net/gh/copy/v86@f3d4472a9c934b9ad78a311f5849ba711a296d23/bios"
+            : LOCAL_V86_BASE;
+        const FLOPPY_MAX_SIZE = 3 * 1024 * 1024;
+
+        const bootFileInput = document.getElementById("bootFile");
+        const extraFileInput = document.getElementById("extraFile");
+        const dropzone = document.getElementById("dropzone");
+        const startButton = document.getElementById("startButton");
+        const emulatorSection = document.getElementById("emulatorSection");
+        const screenContainer = document.getElementById("screen_container");
+        const screenViewport = document.getElementById("screenViewport");
+        const bootPlaceholder = document.getElementById("bootPlaceholder");
+        const machineStatus = document.getElementById("machineStatus");
+        const statusText = document.getElementById("statusText");
+        const pauseButton = document.getElementById("pauseButton");
+        const restartButton = document.getElementById("restartButton");
+        const fullscreenButton = document.getElementById("fullscreenButton");
+        const changeButton = document.getElementById("changeButton");
+        const vmActions = document.querySelectorAll(".vm-action");
+        const virtualKeys = document.querySelectorAll(".virtual-key");
+
+        let primaryFile = null;
+        let secondaryFile = null;
+        let emulator = null;
+        let paused = false;
+        let starting = false;
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return `${bytes} Б`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+            if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+            return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} ГБ`;
+        }
+
+        function extensionOf(file) {
+            const match = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
+            return match ? match[1] : "img";
+        }
+
+        function isIso(file) {
+            return extensionOf(file) === "iso" || file.type.includes("iso");
+        }
+
+        function diskKind(file) {
+            if (isIso(file)) return "CD-ROM";
+            if (file.size <= FLOPPY_MAX_SIZE) return "дискета";
+            return "жёсткий диск";
+        }
+
+        function setStatus(message, tone = "loading") {
+            statusText.textContent = message;
+            machineStatus.dataset.tone = tone;
+        }
+
+        function setControlsEnabled(enabled) {
+            vmActions.forEach(button => { button.disabled = !enabled; });
+            virtualKeys.forEach(button => { button.disabled = !enabled; });
+        }
+
+        function showSelectedFile(file) {
+            primaryFile = file;
+            dropzone.classList.add("has-file");
+            document.getElementById("fileType").textContent = extensionOf(file).slice(0, 4).toUpperCase();
+            document.getElementById("fileName").textContent = file.name;
+            document.getElementById("fileMeta").textContent = `${formatBytes(file.size)} · ${diskKind(file)}`;
+            startButton.disabled = false;
+        }
+
+        function chooseDroppedFile(files) {
+            const file = Array.from(files).find(candidate => /\.(iso|img|ima|dsk)$/i.test(candidate.name));
+            if (file) {
+                showSelectedFile(file);
+            } else {
+                alert("Выбери загрузочный файл ISO, IMG, IMA или DSK.");
+            }
+        }
+
+        bootFileInput.addEventListener("change", () => {
+            if (bootFileInput.files[0]) showSelectedFile(bootFileInput.files[0]);
+        });
+
+        extraFileInput.addEventListener("change", async () => {
+            secondaryFile = extraFileInput.files[0] || null;
+            document.getElementById("extraFileName").textContent = secondaryFile
+                ? `${secondaryFile.name} · ${formatBytes(secondaryFile.size)}`
+                : "Необязательно: IMG / IMA / DSK";
+
+            if (emulator && secondaryFile) {
+                try {
+                    setStatus("Подключаю дополнительный диск…");
+                    const image = { buffer: await secondaryFile.arrayBuffer() };
+                    if (primaryFile && isIso(primaryFile)) {
+                        await emulator.set_fda(image);
+                    } else {
+                        await emulator.set_fdb(image);
+                    }
+                    setStatus(`Подключён ${secondaryFile.name}`, "ready");
+                } catch (error) {
+                    console.error(error);
+                    setStatus("Не удалось подключить дополнительный диск", "error");
+                }
+            }
+        });
+
+        ["dragenter", "dragover"].forEach(eventName => {
+            dropzone.addEventListener(eventName, event => {
+                event.preventDefault();
+                dropzone.classList.add("is-dragging");
+            });
+        });
+
+        ["dragleave", "drop"].forEach(eventName => {
+            dropzone.addEventListener(eventName, event => {
+                event.preventDefault();
+                dropzone.classList.remove("is-dragging");
+            });
+        });
+
+        dropzone.addEventListener("drop", event => chooseDroppedFile(event.dataTransfer.files));
+        dropzone.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                bootFileInput.click();
+            }
+        });
+
+        function resetScreenMarkup() {
+            const textScreen = document.createElement("div");
+            const canvas = document.createElement("canvas");
+            canvas.style.display = "none";
+            screenContainer.replaceChildren(textScreen, canvas);
+            bootPlaceholder.hidden = false;
+        }
+
+        async function destroyEmulator() {
+            if (!emulator) return;
+            const oldEmulator = emulator;
+            emulator = null;
+            window.emulator = null;
+            try {
+                await oldEmulator.stop();
+            } catch (error) {
+                console.debug("Stopping an inactive VM:", error);
+            }
+            try {
+                await oldEmulator.destroy();
+            } catch (error) {
+                console.debug("Destroying VM:", error);
+            }
+        }
+
+        function fitScreen() {
+            if (!emulator) return;
+            const available = Math.max(280, screenViewport.clientWidth - 42);
+            const scale = Math.min(1, available / 720);
+            try {
+                emulator.screen_set_scale(scale, scale);
+            } catch (error) {
+                console.debug("Screen scaling is not ready yet:", error);
+            }
+        }
+
+        async function startEmulator() {
+            if (!primaryFile || starting) return;
+            starting = true;
+            startButton.disabled = true;
+            startButton.textContent = "Подготовка образа…";
+            emulatorSection.classList.add("is-visible");
+            emulatorSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            setControlsEnabled(false);
+            setStatus("Читаю образ с устройства…");
+            paused = false;
+            pauseButton.textContent = "Пауза";
+
+            try {
+                if (typeof window.V86 !== "function") {
+                    throw new Error("Движок v86 не загрузился. Проверь подключение к интернету.");
+                }
+
+                await destroyEmulator();
+                resetScreenMarkup();
+
+                const primaryBuffer = await primaryFile.arrayBuffer();
+                const options = {
+                    wasm_path: `${V86_BASE}/v86.wasm`,
+                    memory_size: 32 * 1024 * 1024,
+                    vga_memory_size: 4 * 1024 * 1024,
+                    screen_container: screenContainer,
+                    bios: { url: `${V86_BIOS_BASE}/seabios.bin` },
+                    vga_bios: { url: `${V86_BIOS_BASE}/vgabios.bin` },
+                    autostart: true,
+                    fastboot: true,
+                    disable_mouse: true,
+                    disable_speaker: true
+                };
+
+                if (isIso(primaryFile)) {
+                    options.cdrom = { buffer: primaryBuffer };
+                    options.boot_order = 0x213; // CD-ROM, floppy, hard disk
+                } else if (primaryFile.size <= FLOPPY_MAX_SIZE) {
+                    options.fda = { buffer: primaryBuffer };
+                    options.boot_order = 0x231; // Floppy, CD-ROM, hard disk
+                } else {
+                    options.hda = { buffer: primaryBuffer };
+                    options.boot_order = 0x132; // Hard disk, CD-ROM, floppy
+                }
+
+                if (secondaryFile) {
+                    const secondaryImage = { buffer: await secondaryFile.arrayBuffer() };
+                    if (options.fda) options.fdb = secondaryImage;
+                    else options.fda = secondaryImage;
+                }
+
+                setStatus("Загружаю BIOS и движок v86…");
+                emulator = new window.V86(options);
+                window.emulator = emulator;
+
+                emulator.add_listener("download-progress", event => {
+                    if (!event.lengthComputable || !event.total) return;
+                    const progress = Math.round(event.loaded / event.total * 100);
+                    setStatus(`Загрузка компонентов: ${progress}%`);
+                });
+
+                emulator.add_listener("download-error", () => {
+                    setStatus("Ошибка загрузки компонентов v86", "error");
+                });
+
+                emulator.add_listener("emulator-ready", () => {
+                    bootPlaceholder.hidden = true;
+                    setControlsEnabled(true);
+                    setStatus(`Запущен ${primaryFile.name}`, "ready");
+                    fitScreen();
+                    screenViewport.focus({ preventScroll: true });
+                });
+
+                emulator.add_listener("emulator-stopped", () => {
+                    if (emulator && paused) setStatus("Эмулятор на паузе");
+                });
+            } catch (error) {
+                console.error(error);
+                setStatus(error.message || "Не удалось запустить образ", "error");
+                bootPlaceholder.hidden = true;
+                setControlsEnabled(false);
+            } finally {
+                starting = false;
+                startButton.textContent = "Перезапустить с выбранным образом";
+                startButton.disabled = !primaryFile;
+            }
+        }
+
+        startButton.addEventListener("click", startEmulator);
+
+        pauseButton.addEventListener("click", async () => {
+            if (!emulator) return;
+            try {
+                if (paused) {
+                    await emulator.run();
+                    paused = false;
+                    pauseButton.textContent = "Пауза";
+                    setStatus(`Запущен ${primaryFile.name}`, "ready");
+                } else {
+                    paused = true;
+                    await emulator.stop();
+                    pauseButton.textContent = "Продолжить";
+                    setStatus("Эмулятор на паузе");
+                }
+            } catch (error) {
+                console.error(error);
+                setStatus("Не удалось изменить состояние эмулятора", "error");
+            }
+        });
+
+        restartButton.addEventListener("click", () => {
+            if (!emulator) return;
+            emulator.restart();
+            setStatus("Виртуальный компьютер перезапускается…");
+        });
+
+        fullscreenButton.addEventListener("click", async () => {
+            if (!emulator) return;
+            try {
+                emulator.screen_go_fullscreen();
+            } catch (error) {
+                if (screenViewport.requestFullscreen) await screenViewport.requestFullscreen();
+            }
+        });
+
+        changeButton.addEventListener("click", () => {
+            bootFileInput.click();
+            document.getElementById("top").scrollIntoView({ behavior: "smooth" });
+        });
+
+        screenViewport.addEventListener("pointerdown", () => {
+            if (!emulator) return;
+            emulator.keyboard_set_enabled(true);
+            screenViewport.focus({ preventScroll: true });
+        });
+
+        function sendScanCode(code) {
+            if (!emulator) return;
+            emulator.keyboard_send_scancodes([code, code | 0x80]);
+            screenViewport.focus({ preventScroll: true });
+        }
+
+        virtualKeys.forEach(button => {
+            button.addEventListener("pointerdown", event => {
+                event.preventDefault();
+                if (!emulator) return;
+
+                if (button.dataset.action === "snake") {
+                    emulator.keyboard_send_text("SNAKE");
+                    window.setTimeout(() => sendScanCode(0x1C), 80);
+                    return;
+                }
+
+                sendScanCode(Number(button.dataset.scan));
+            });
+        });
+
+        window.addEventListener("resize", fitScreen);
+        window.addEventListener("unhandledrejection", event => {
+            if (!emulatorSection.classList.contains("is-visible")) return;
+            console.error(event.reason);
+            setStatus("Ошибка эмулятора. Попробуй перезапустить образ.", "error");
+        });
+    </script>
+</body>
+</html>

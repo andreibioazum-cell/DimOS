@@ -18,8 +18,7 @@ $(IMAGE_CHECKER): tools/image_inspector.cpp
 	$(CXX) $(CPPFLAGS) -std=c++17 $(CXXFLAGS) $(WARNINGS) $< -o $@
 
 verify: tools
-	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img
-	@test -s disk_img/dimos.iso
+	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img disk_img/dimos.iso
 
 clean:
 	rm -rf bin disk_img

@@ -1,8 +1,9 @@
 ; ==================================================================
-; DimOS -- FAT12 bootloader
+; DimOS -- FAT12 bootloader (exactly 512 bytes)
 ; Copyright (C) 2025 PRoX2011
 ;
-; Loads KERNEL.BIN and jumps to 2000:0000.
+; Loads KERNEL.BIN to 2000:0000 and preloads the FAT, root directory
+; and the first data sectors for the kernel file manager.
 ; Uses the BIOS drive number in DL and prefers LBA (int 13h AH=42h)
 ; so floppy, El Torito CD and small HDD images all work in SeaBIOS/v86.
 ; ==================================================================
@@ -34,8 +35,19 @@ bsSerialNumber       DD 0x00000000
 bsVolumeLabel        DB "DIMOS      "
 bsFileSystem         DB "FAT12   "
 
+; Fixed 1.44M FAT12 layout (must match the BPB and image_inspector):
+;   reserved=1, 2 FATs * 9, root=224 entries -> data LBA 33
+ROOT_LBA      equ 19
+ROOT_SECTS    equ 14
+FAT_LBA       equ 1
+FAT_SECTS     equ 18
+DATA_LBA      equ 33
+DATA_PRELOAD  equ 64
+ROOT_ENTRIES  equ 224
+
 main:
         cli
+        cld
         mov ax, 0x07C0
         mov ds, ax
         xor ax, ax
@@ -49,224 +61,164 @@ main:
 
         xor ax, ax
         int 0x13
-        call detect_lba
 
-        mov si, msgLoading
-        call Print
-
-LOAD_ROOT:
-        xor cx, cx
-        xor dx, dx
-        mov ax, 0x0020
-        mul WORD [bpbRootEntries]
-        div WORD [bpbBytesPerSector]
-        xchg ax, cx
-        mov al, BYTE [bpbNumberOfFATs]
-        mul WORD [bpbSectorsPerFAT]
-        add ax, WORD [bpbReservedSectors]
-        mov WORD [datasector], ax
-        add WORD [datasector], cx
-
-        push ax
-        mov ax, 0x1000
-        mov es, ax
+        ; Root directory -> 1000:0000
+        mov ax, ROOT_LBA
+        mov cx, ROOT_SECTS
+        mov bx, 0x1000
+        mov es, bx
         xor bx, bx
-        pop ax
         call ReadSectors
 
-        mov cx, WORD [bpbRootEntries]
+        ; ES still addresses the root directory.
+        mov cx, ROOT_ENTRIES
         xor di, di
-.LOOP:
+.find:
         push cx
-        mov cx, 0x000B
-        mov si, ImageName
         push di
-        rep cmpsb
+        mov cx, 11
+        mov si, ImageName
+        repe cmpsb
         pop di
-        je LOAD_FAT
         pop cx
-        add di, 0x0020
-        loop .LOOP
+        je .found
+        add di, 32
+        loop .find
         mov si, msgKernel
-        jmp FAIL
+        jmp fail
 
-LOAD_FAT:
-        mov dx, WORD [di + 0x001A]
-        mov WORD [cluster], dx
-        xor ax, ax
-        mov al, BYTE [bpbNumberOfFATs]
-        mul WORD [bpbSectorsPerFAT]
-        mov cx, ax
+.found:
+        ; Cluster is in the directory entry at ES:DI, not DS:DI.
+        ; mkfs.vfat writes a volume label first, so DI is rarely 0.
+        mov ax, [es:di + 26]
+        mov [cluster], ax
+
+        ; Both FATs -> 07C0:0200 (physical 0x7E00)
         mov ax, 0x07C0
         mov es, ax
         mov bx, 0x0200
-        mov ax, WORD [bpbReservedSectors]
+        mov ax, FAT_LBA
+        mov cx, FAT_SECTS
         call ReadSectors
 
-        mov ax, WORD [datasector]
-        mov cx, 0x0040
+        ; First 64 data sectors -> 3000:0000 (TYPE/DIR window)
+        mov ax, 0x3000
+        mov es, ax
         xor bx, bx
-        mov dx, 0x3000
-        mov es, dx
+        mov ax, DATA_LBA
+        mov cx, DATA_PRELOAD
         call ReadSectors
 
+        ; KERNEL.BIN -> 2000:0000
         mov ax, 0x2000
         mov es, ax
         xor bx, bx
-        push bx
 
-LOAD_IMAGE:
-        mov ax, WORD [cluster]
-        pop bx
-        call ClusterLBA
-        xor cx, cx
-        mov cl, BYTE [bpbSectorsPerCluster]
+.load:
+        mov ax, [cluster]
+        add ax, DATA_LBA - 2        ; LBA = (cluster - 2) * spc + 33
+        mov cx, 1
         call ReadSectors
-        push bx
-        mov ax, WORD [cluster]
-        mov cx, ax
-        mov dx, ax
-        shr dx, 1
-        add cx, dx
-        mov bx, 0x0200
-        add bx, cx
-        mov dx, WORD [bx]
-        test ax, 1
-        jz .EVEN
+
+        mov ax, [cluster]
+        mov si, ax
+        shr si, 1
+        add si, ax                  ; cluster * 3 / 2
+        mov dx, [si + 0x0200]
+        test al, 1
+        jz .even
         mov cl, 4
         shr dx, cl
-        jmp .NEXTCLUS
-.EVEN:
+        jmp .next
+.even:
         and dx, 0x0FFF
-.NEXTCLUS:
-        mov WORD [cluster], dx
+.next:
+        mov [cluster], dx
         cmp dx, 0x0FF0
-        jb LOAD_IMAGE
+        jb .load
+
         jmp 0x2000:0x0000
 
-FAIL_DISK:
+fail_disk:
         mov si, msgDisk
-FAIL:
-        call Print
+fail:
+        lodsb
+        or al, al
+        jz .wait
+        mov ah, 0x0E
+        mov bx, 0x0007
+        int 0x10
+        jmp fail
+.wait:
         xor ah, ah
         int 0x16
         int 0x19
 
-Print:
-        lodsb
-        or al, al
-        jz .done
-        mov ah, 0x0E
-        mov bx, 0x0007
-        int 0x10
-        jmp Print
-.done:
-        ret
-
-ClusterLBA:
-        sub ax, 2
-        xor cx, cx
-        mov cl, BYTE [bpbSectorsPerCluster]
-        mul cx
-        add ax, WORD [datasector]
-        ret
-
-LBACHS:
-        xor dx, dx
-        div WORD [bpbSectorsPerTrack]
-        inc dl
-        mov [absoluteSector], dl
-        xor dx, dx
-        div WORD [bpbHeadsPerCylinder]
-        mov [absoluteHead], dl
-        mov [absoluteTrack], al
-        ret
-
-; AX = LBA, CX = count, ES:BX = buffer
+; AX = LBA, CX = count, ES:BX = buffer. Advances ES:BX past the read.
 ReadSectors:
-.MAIN:
+.main:
         mov di, 5
-.RETRY:
+.retry:
         push ax
         push bx
         push cx
-        cmp BYTE [hasLba], 0
-        je .CHS
-        call ReadLBA
-        jnc .OK
-.CHS:
-        call ReadCHS
-        jnc .OK
-        xor ax, ax
-        mov dl, [bsDriveNumber]
-        int 0x13
-        dec di
-        pop cx
-        pop bx
-        pop ax
-        jnz .RETRY
-        jmp FAIL_DISK
-.OK:
-        pop cx
-        pop bx
-        pop ax
-        add bx, WORD [bpbBytesPerSector]
-        jnc .ADV
-        mov dx, es
-        add dh, 0x10
-        mov es, dx
-.ADV:
-        inc ax
-        loop .MAIN
-        ret
 
-ReadLBA:
-        mov WORD [dap + 2], 1
         mov [dap + 4], bx
         mov [dap + 6], es
         mov [dap + 8], ax
-        xor dx, dx
-        mov [dap + 10], dx
-        mov [dap + 12], dx
-        mov [dap + 14], dx
         mov si, dap
         mov dl, [bsDriveNumber]
         mov ah, 0x42
         int 0x13
-        ret
+        jnc .ok
 
-ReadCHS:
-        call LBACHS
-        mov ah, 0x02
-        mov al, 0x01
-        mov ch, [absoluteTrack]
-        mov cl, [absoluteSector]
-        mov dh, [absoluteHead]
+        ; CHS fallback. AX still holds the LBA (int 13h AH=42h
+        ; overwrites AX, so restore it first). pop does not change CF.
+        pop cx
+        pop bx
+        pop ax
+        push ax
+        push bx
+        push cx
+        xor dx, dx
+        mov cx, 18
+        div cx                      ; AX=temp, DX=sector-1
+        inc dx
+        mov cl, dl                  ; sector
+        mov dh, al
+        and dh, 1                   ; head  (2-sided floppy)
+        shr ax, 1
+        mov ch, al                  ; cylinder
+        mov dl, [bsDriveNumber]
+        mov ax, 0x0201
+        int 0x13
+        jnc .ok
+
+        xor ax, ax
         mov dl, [bsDriveNumber]
         int 0x13
+        pop cx
+        pop bx
+        pop ax
+        dec di
+        jnz .retry
+        jmp fail_disk
+
+.ok:
+        pop cx
+        pop bx
+        pop ax
+        add bx, 512
+        jnc .adv
+        mov dx, es
+        add dh, 0x10
+        mov es, dx
+.adv:
+        inc ax
+        loop .main
         ret
 
-detect_lba:
-        mov BYTE [hasLba], 0
-        mov ah, 0x41
-        mov bx, 0x55AA
-        mov dl, [bsDriveNumber]
-        int 0x13
-        jc .done
-        cmp bx, 0xAA55
-        jne .done
-        test cl, 1
-        jz .done
-        mov BYTE [hasLba], 1
-.done:
-        ret
-
-absoluteSector db 0
-absoluteHead   db 0
-absoluteTrack  db 0
-hasLba         db 0
-datasector     dw 0
-cluster        dw 0
+cluster     dw 0
 
 dap:
         db 16, 0
@@ -274,10 +226,12 @@ dap:
         dw 0, 0
         dd 0, 0
 
-ImageName  db "KERNEL  BIN"
-msgLoading db "Loading DimOS...", 13, 10, 0
-msgDisk    db "Disk read error", 13, 10, 0
-msgKernel  db "No KERNEL.BIN", 13, 10, 0
+ImageName   db "KERNEL  BIN"
+msgDisk     db "Disk error", 0
+msgKernel   db "No KERNEL.BIN", 0
 
+%if ($ - $$) > 510
+        %error "boot sector exceeds 510 bytes"
+%endif
         TIMES 510-($-$$) DB 0
         DW 0xAA55

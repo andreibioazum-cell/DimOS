@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DimOS</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07080c;
+      --ink: #e8edf7;
+      --muted: #93a0b8;
+      --accent: #7cf0c2;
+      --danger: #ff8b8b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.45 system-ui, sans-serif;
+    }
+    body { padding: 16px; }
+    main { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    p { color: var(--muted); margin: 0 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+    button, .file {
+      appearance: none;
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button { background: var(--accent); color: #062117; font-weight: 700; }
+    button.secondary { background: #2a3142; color: var(--ink); font-weight: 600; }
+    .file { background: #243017; color: #d8f5a2; display: inline-block; }
+    #status { min-height: 1.4em; margin-bottom: 12px; }
+    #status.err { color: var(--danger); }
+    #screen_container {
+      background: #000;
+      border: 1px solid #2a3142;
+      border-radius: 12px;
+      overflow: auto;
+      padding: 8px;
+    }
+    #screen_container div {
+      white-space: pre;
+      font: 14px/14px ui-monospace, "Cascadia Mono", Menlo, monospace;
+    }
+    #screen_container canvas { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DimOS</h1>
+    <p>
+      Выбери <strong>dimos.img</strong> (ровно 1440 КБ) или <strong>dimos.iso</strong>.
+      Лаунчер сам кладёт образ на floppy или CD. Страница copy.sh/v86/debug не нужна.
+    </p>
+    <div class="row">
+      <label class="file">Выбрать образ
+        <input id="image" type="file" accept=".img,.iso,.bin" hidden>
+      </label>
+      <button id="start" type="button">Start</button>
+      <button id="stop" class="secondary" type="button">Stop</button>
+    </div>
+    <p id="status">Собери образ через <code>make iso</code> и выбери <code>disk_img/dimos.img</code>.</p>
+    <div id="screen_container">
+      <div></div>
+      <canvas></canvas>
+    </div>
+  </main>
+  <script src="web/v86/libv86.js"></script>
+  <script>
+    const FLOPPY_BYTES = 1474560;
+    const statusEl = document.getElementById("status");
+    const fileEl = document.getElementById("image");
+    let emulator = null;
+    let pending = null;
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? "err" : "";
+    }
+
+    function isIso(buffer) {
+      if (buffer.byteLength < 32774) {
+        return false;
+      }
+      const bytes = new Uint8Array(buffer, 32769, 5);
+      return String.fromCharCode(...bytes) === "CD001";
+    }
+
+    function describe(file, buffer) {
+      if (buffer.byteLength === FLOPPY_BYTES) {
+        return { kind: "fda", label: file.name + " → floppy" };
+      }
+      if (isIso(buffer)) {
+        return { kind: "cdrom", label: file.name + " → CD-ROM" };
+      }
+      return null;
+    }
+
+    async function loadDefaultImage() {
+      try {
+        const response = await fetch("disk_img/dimos.img", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength !== FLOPPY_BYTES) {
+          return;
+        }
+        pending = {
+          kind: "fda",
+          buffer,
+          label: "disk_img/dimos.img → floppy",
+        };
+        setStatus("Найден локальный dimos.img. Жми Start.");
+      } catch (error) {
+        /* The file picker still works when the built image is not served. */
+      }
+    }
+
+    function stopEmulator() {
+      if (emulator) {
+        emulator.destroy();
+        emulator = null;
+      }
+    }
+
+    function startEmulator() {
+      if (!pending) {
+        setStatus("Сначала выбери dimos.img или dimos.iso.", true);
+        return;
+      }
+
+      stopEmulator();
+      const config = {
+        wasm_path: "web/v86/v86.wasm",
+        memory_size: 32 * 1024 * 1024,
+        vga_memory_size: 2 * 1024 * 1024,
+        screen_container: document.getElementById("screen_container"),
+        bios: { url: "web/v86/seabios.bin" },
+        vga_bios: { url: "web/v86/vgabios.bin" },
+        autostart: true,
+        disable_mouse: true,
+        acpi: false,
+      };
+
+      if (pending.kind === "fda") {
+        config.fda = { buffer: pending.buffer };
+        config.boot_order = 0x231;
+      } else {
+        config.cdrom = { buffer: pending.buffer };
+        config.boot_order = 0x123;
+      }
+
+      setStatus("Запуск: " + pending.label);
+      emulator = new V86(config);
+    }
+
+    fileEl.addEventListener("change", async () => {
+      const file = fileEl.files && fileEl.files[0];
+      if (!file) {
+        return;
+      }
+      const buffer = await file.arrayBuffer();
+      const info = describe(file, buffer);
+      if (!info) {
+        pending = null;
+        setStatus(
+          "Нужен dimos.img на 1440 КБ или загрузочный dimos.iso. Сейчас " +
+            file.name + " (" + buffer.byteLength + " байт).",
+          true
+        );
+        return;
+      }
+      pending = { kind: info.kind, buffer, label: info.label };
+      setStatus("Готово: " + info.label + ". Жми Start.");
+    });
+
+    document.getElementById("start").addEventListener("click", startEmulator);
+    document.getElementById("stop").addEventListener("click", () => {
+      stopEmulator();
+      setStatus("Остановлено.");
+    });
+
+    loadDefaultImage();
+  </script>
+</body>
+</html>

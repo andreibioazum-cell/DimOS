@@ -140,6 +140,9 @@ create_iso_image() {
     mkdir -p "$staging_directory"
     cp "$BOOT_IMAGE" "$staging_directory/dimos.img"
 
+    # Floppy-emulation El Torito: SeaBIOS in v86 maps this 1.44M image as
+    # drive 0x00. Do not pass -no-emul-boot or -boot-info-table — both break
+    # the FAT12 boot sector that DimOS actually starts from.
     xorriso -as mkisofs \
         -quiet \
         -V DIMOS \

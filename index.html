@@ -5,105 +5,41 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>DimOS</title>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #07080c;
-      --panel: #10131b;
-      --ink: #e8edf7;
-      --muted: #93a0b8;
-      --accent: #7cf0c2;
-      --danger: #ff8b8b;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      min-height: 100%;
-      background: var(--bg);
-      color: var(--ink);
-      font: 16px/1.45 system-ui, sans-serif;
-    }
-    body { padding: 16px; }
-    main { max-width: 960px; margin: 0 auto; }
-    h1 { font-size: 1.4rem; margin: 0 0 4px; }
-    .lede { color: var(--muted); margin: 0 0 12px; }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-    button {
-      appearance: none;
-      border: 0;
-      border-radius: 10px;
-      padding: 12px 16px;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-      background: var(--accent);
-      color: #062117;
-    }
-    button.secondary { background: #2a3142; color: var(--ink); font-weight: 600; }
-    button[disabled] { opacity: 0.5; cursor: not-allowed; }
-    #status { min-height: 1.4em; margin: 0 0 12px; color: var(--muted); }
-    #status.err { color: var(--danger); }
-    #status.ok { color: var(--accent); }
-    #screen_container {
-      background: #000;
-      border: 1px solid #2a3142;
-      border-radius: 12px;
-      overflow: auto;
-      padding: 8px;
-    }
-    #screen_container div {
-      white-space: pre;
-      font: 14px/14px ui-monospace, "Cascadia Mono", Menlo, monospace;
-    }
-    #screen_container canvas { display: none; }
-    details {
-      margin-top: 16px;
-      background: var(--panel);
-      border-radius: 10px;
-      padding: 12px 14px;
-    }
-    summary { cursor: pointer; color: var(--muted); }
-    details p, details li { color: var(--muted); }
-    code { color: var(--ink); }
-    .hint { font-size: 0.9rem; color: var(--muted); margin-top: 10px; }
+    :root{color-scheme:dark;--bg:#08111f;--glass:rgba(17,28,46,.82);--line:rgba(255,255,255,.14);--ink:#f3f7ff;--muted:#a9b8cf;--blue:#4ea1ff;--green:#79e6b3;--danger:#ff8a8a}
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+    body{background:radial-gradient(circle at 70% 10%,#19375d 0,#0b1a2c 32%,#050b14 100%);}
+    body:before{content:"";position:fixed;inset:0;opacity:.18;background:linear-gradient(120deg,transparent 35%,#3b82f6 36%,transparent 37%),linear-gradient(30deg,transparent 55%,#0ea5e9 56%,transparent 57%);background-size:700px 700px;pointer-events:none}
+    .desktop{height:100vh;padding:34px 24px 70px;position:relative}
+    .topbar{position:fixed;top:0;left:0;right:0;height:34px;background:rgba(5,11,20,.7);backdrop-filter:blur(16px);display:flex;align-items:center;padding:0 16px;z-index:10;color:var(--muted);font-size:13px}.topbar strong{color:var(--ink);margin-right:22px}.topbar .right{margin-left:auto;display:flex;gap:16px}
+    .icons{display:grid;gap:22px;width:92px}.icon{border:0;background:transparent;color:var(--ink);font:inherit;padding:7px 3px;border-radius:8px;cursor:pointer;text-align:center}.icon:hover{background:rgba(255,255,255,.12)}.icon .emoji{font-size:34px;display:block;margin-bottom:4px}.icon span:last-child{font-size:12px;text-shadow:0 1px 3px #000}
+    .window{position:absolute;left:50%;top:50%;transform:translate(-42%,-48%);width:min(900px,calc(100vw - 170px));height:min(620px,calc(100vh - 120px));min-width:440px;background:rgba(8,14,24,.94);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 70px #0009;overflow:hidden;display:flex;flex-direction:column}.window.hidden{display:none}
+    .titlebar{height:43px;display:flex;align-items:center;padding:0 12px 0 16px;background:linear-gradient(90deg,#152943,#102139);border-bottom:1px solid var(--line)}.appmark{font-size:18px;margin-right:9px}.titlebar strong{font-size:14px}.controls{margin-left:auto;display:flex;gap:8px}.controls button{width:28px;height:25px;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;font-size:16px}.controls button:hover{background:#ffffff1c;color:white}.controls .close:hover{background:#d9535f}
+    .window-body{padding:16px;display:flex;flex-direction:column;min-height:0;flex:1}.toolbar{display:flex;align-items:center;gap:9px;margin-bottom:12px}.toolbar button{border:1px solid var(--line);border-radius:7px;padding:8px 13px;background:#ffffff12;color:var(--ink);font:inherit;cursor:pointer}.toolbar button.primary{background:var(--blue);border-color:transparent;color:#061426;font-weight:700}.toolbar button:hover{filter:brightness(1.15)}#status{min-height:1.4em;margin:0 0 10px;color:var(--muted);font-size:13px}#status.err{color:var(--danger)}#status.ok{color:var(--green)}
+    #screen_container{background:#000;border:1px solid #273852;border-radius:7px;overflow:auto;padding:8px;cursor:default;user-select:none;touch-action:none;flex:1;min-height:180px}#screen_container.active{border-color:var(--blue)}#screen_container div{white-space:pre;font:14px/14px ui-monospace,"Cascadia Mono",Menlo,monospace}#screen_container canvas{display:none}
+    .hint{font-size:12px;color:var(--muted);margin:10px 0 0}.hint code{color:var(--ink)}
+    .taskbar{position:fixed;bottom:0;left:0;right:0;height:58px;background:rgba(7,14,25,.86);backdrop-filter:blur(18px);border-top:1px solid var(--line);display:flex;align-items:center;padding:0 14px;z-index:20}.startmenu{width:40px;height:38px;border:0;border-radius:8px;background:transparent;color:#72b8ff;font-size:23px;cursor:pointer}.startmenu:hover{background:#ffffff16}.taskapp{height:38px;margin-left:12px;padding:0 15px;border:1px solid #ffffff20;border-radius:8px;background:#ffffff12;color:var(--ink);cursor:pointer}.clock{margin-left:auto;text-align:right;font-size:12px;color:var(--muted)}
+    .menu{position:fixed;bottom:67px;left:14px;width:260px;padding:16px;background:rgba(16,29,48,.96);border:1px solid var(--line);border-radius:12px;box-shadow:0 15px 50px #000a;z-index:30}.menu.hidden{display:none}.menu h2{font-size:17px;margin:0 0 12px}.menu p{color:var(--muted);font-size:12px;margin:0 0 14px}.menu button{display:block;width:100%;text-align:left;padding:10px;border:0;border-radius:7px;background:transparent;color:var(--ink);cursor:pointer;font:inherit}.menu button:hover{background:#ffffff16}
+    @media(max-width:700px){.window{left:12px;right:12px;top:48px;transform:none;width:auto;height:calc(100vh - 120px);min-width:0}.desktop{padding-left:12px}.icons{display:flex;gap:8px;width:auto}.icon .emoji{font-size:26px}.icon span:last-child{font-size:11px}.topbar .right{gap:7px}.topbar strong{margin-right:8px}}
   </style>
 </head>
 <body>
-  <main>
-    <h1>DimOS</h1>
-    <p class="lede">
-      Образ системы встроен прямо в страницу. Ничего выбирать и никуда
-      подкладывать не нужно — просто открой файл и жми <strong>Start</strong>.
-    </p>
-    <div class="row">
-      <button id="start" type="button">Start</button>
-      <button id="stop" class="secondary" type="button">Stop</button>
-      <button id="pick" class="secondary" type="button">Свой образ…</button>
-      <input id="image" type="file" accept=".img,.iso,.bin" hidden>
+  <div class="desktop">
+    <div class="topbar"><strong>◈ DimOS</strong><span>Рабочий стол</span><div class="right"><span>⌁ Wi-Fi</span><span id="top-time">12:00</span></div></div>
+    <div class="icons">
+      <button class="icon" id="desktop-computer"><span class="emoji">🖥️</span><span>Этот компьютер</span></button>
+      <button class="icon" id="desktop-help"><span class="emoji">📘</span><span>Справка</span></button>
+      <button class="icon" id="desktop-files"><span class="emoji">📁</span><span>Файлы</span></button>
+      <button class="icon" id="desktop-settings"><span class="emoji">⚙️</span><span>Настройки</span></button>
     </div>
-    <p id="status">Загрузка встроенного образа…</p>
-    <div id="screen_container">
-      <div></div>
-      <canvas></canvas>
-    </div>
-    <p class="hint">Щёлкни один раз по чёрному экрану, чтобы клавиатура ушла в DimOS. Затем набери <code>HELP</code>.</p>
-
-    <details>
-      <summary>Если видишь «Boot failed: could not read the boot disk»</summary>
-      <p>
-        Эта надпись приходит от SeaBIOS, а не от DimOS: значит эмулятору
-        подсунули не тот образ или не в тот слот. Почти всегда причина одна из трёх:
-      </p>
-      <ul>
-        <li>открыта страница <code>copy.sh/v86/debug.html</code>, где <code>dimos.img</code> попал в слот <strong>CD-ROM</strong> или <strong>Hard disk</strong>;</li>
-        <li>выбран старый или недособранный <code>dimos.img</code> из прошлой сборки;</li>
-        <li>в слот вставлен пустой <code>FLOPPY2.img</code>.</li>
-      </ul>
-      <p>
-        Эта страница ничего из перечисленного сделать не даёт: она держит
-        рабочий образ внутри себя и всегда кладёт его на floppy-слот.
-      </p>
-    </details>
-  </main>
+    <section class="window" id="os-window">
+      <header class="titlebar"><span class="appmark">◈</span><strong>DimOS Terminal</strong><div class="controls"><button title="Свернуть">—</button><button title="Развернуть">□</button><button class="close" id="window-close" title="Закрыть">×</button></div></header>
+      <div class="window-body"><div class="toolbar"><button class="primary" id="start" type="button">▶ Запустить</button><button id="stop" type="button">■ Остановить</button><button id="pick" type="button">＋ Открыть образ</button><input id="image" type="file" accept=".img,.iso,.bin" hidden></div><p id="status">Загрузка встроенного образа…</p><div id="screen_container"><div></div><canvas></canvas></div><p class="hint">Кликните по экрану, чтобы передать мышь и клавиатуру DimOS. Для возврата нажмите <code>Esc</code>.</p></div>
+    </section>
+    <section class="window hidden" id="files-window" style="width:520px;height:360px;transform:translate(-25%,-25%)"><header class="titlebar"><span class="appmark">📁</span><strong>Файлы</strong><div class="controls"><button class="close" data-close="files-window">×</button></div></header><div class="window-body"><h2 style="margin:4px 0 14px">Домашняя папка</h2><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;text-align:center"><button class="icon"><span class="emoji">📄</span><span>README.TXT</span></button><button class="icon"><span class="emoji">💾</span><span>KERNEL.BIN</span></button><button class="icon"><span class="emoji">📦</span><span>DIMOS.IMG</span></button></div></div></section>
+    <section class="window hidden" id="settings-window" style="width:460px;height:330px;transform:translate(-55%,-15%)"><header class="titlebar"><span class="appmark">⚙️</span><strong>Настройки DimOS</strong><div class="controls"><button class="close" data-close="settings-window">×</button></div></header><div class="window-body"><h2 style="margin:4px 0">Персонализация</h2><p style="color:var(--muted)">Графическая оболочка DimOS</p><button class="toolbar button" style="width:max-content">Тёмная тема включена</button><p style="color:var(--muted);font-size:13px">Система готова к работе.</p></div></section>
+  </div>
+  <div class="menu hidden" id="start-menu"><h2>◈ DimOS</h2><p>Добро пожаловать в рабочее пространство</p><button id="menu-terminal">▣  Терминал DimOS</button><button id="menu-files">▤  Открыть образ системы</button><button id="menu-about">ⓘ  О системе</button></div>
+  <footer class="taskbar"><button class="startmenu" id="start-menu-button">◈</button><button class="taskapp" id="task-terminal">◈ DimOS Terminal</button><div class="clock"><span id="date-time"></span><br><span>RU</span></div></footer>
 
   <script src="web/dimos-image.js"></script>
   <script src="web/v86/libv86.js"></script>
@@ -189,7 +125,9 @@
         bios: { url: "web/v86/seabios.bin" },
         vga_bios: { url: "web/v86/vgabios.bin" },
         autostart: true,
-        disable_mouse: true,
+        // Не отключаем PS/2-мышь: v86 сам захватывает её после клика по экрану.
+        // Раньше здесь было disable_mouse: true, из-за чего курсор не работал.
+        disable_mouse: false,
         acpi: false,
       };
 
@@ -229,10 +167,27 @@
     });
 
     startButton.addEventListener("click", startEmulator);
+    document.getElementById("screen_container").addEventListener("pointerdown", () => {
+      document.getElementById("screen_container").classList.add("active");
+    });
     document.getElementById("stop").addEventListener("click", () => {
       stopEmulator();
       setStatus("Остановлено.");
     });
+
+    const win = document.getElementById("os-window");
+    const menu = document.getElementById("start-menu");
+    document.getElementById("start-menu-button").addEventListener("click", () => menu.classList.toggle("hidden"));
+    document.getElementById("task-terminal").addEventListener("click", () => win.classList.remove("hidden"));
+    document.getElementById("menu-terminal").addEventListener("click", () => { win.classList.remove("hidden"); menu.classList.add("hidden"); });
+    document.getElementById("menu-files").addEventListener("click", () => { fileEl.click(); menu.classList.add("hidden"); });
+    document.getElementById("window-close").addEventListener("click", () => win.classList.add("hidden"));
+    document.getElementById("desktop-computer").addEventListener("click", () => win.classList.remove("hidden"));
+    document.getElementById("desktop-files").addEventListener("click", () => document.getElementById("files-window").classList.remove("hidden"));
+    document.getElementById("desktop-settings").addEventListener("click", () => document.getElementById("settings-window").classList.remove("hidden"));
+    document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => document.getElementById(button.dataset.close).classList.add("hidden")));
+    function updateClock(){ const d=new Date(); const text=d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"}); document.getElementById("date-time").textContent=text; document.getElementById("top-time").textContent=text; }
+    updateClock(); setInterval(updateClock, 30000);
 
     loadEmbeddedImage();
   </script>

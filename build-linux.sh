@@ -11,6 +11,7 @@ readonly BOOT_IMAGE="disk_img/dimos.img"
 readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
 readonly ISO_IMAGE="disk_img/dimos.iso"
 readonly IMAGE_CHECKER="bin/dimos-image-check"
+readonly EMBEDDED_IMAGE_JS="web/dimos-image.js"
 readonly KERNEL_ENTRY_OBJECT="bin/kernel-entry.o"
 readonly KERNEL_C_OBJECT="bin/kernel-c.o"
 readonly KERNEL_ELF="bin/KERNEL.ELF"
@@ -155,7 +156,7 @@ create_iso_image() {
     log_ok "Created $ISO_IMAGE ($(file_size "$ISO_IMAGE") bytes)"
 }
 
-for command in nasm mkfs.vfat mcopy mdir truncate; do
+for command in nasm mkfs.vfat mcopy mdir truncate gzip base64 sha256sum; do
     require_command "$command"
 done
 require_command "${CC:-gcc}"
@@ -211,6 +212,12 @@ if (( ! QUIET )); then
 fi
 
 (( ! BUILD_ISO )) || create_iso_image
+
+# Keep the browser launcher self-contained: index.html boots this payload with
+# no file picking, which is what makes "could not read the boot disk" possible.
+log_info "Embedding the floppy image into $EMBEDDED_IMAGE_JS"
+./tools/embed-image.sh "$BOOT_IMAGE" "$EMBEDDED_IMAGE_JS" >/dev/null
+log_ok "Embedded launcher image: $EMBEDDED_IMAGE_JS"
 
 log_ok "Floppy image: $BOOT_IMAGE"
 (( ! BUILD_ISO )) || log_ok "ISO image: $ISO_IMAGE"

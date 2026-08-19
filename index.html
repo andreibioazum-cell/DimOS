@@ -8,6 +8,7 @@
     :root {
       color-scheme: dark;
       --bg: #07080c;
+      --panel: #10131b;
       --ink: #e8edf7;
       --muted: #93a0b8;
       --accent: #7cf0c2;
@@ -23,22 +24,25 @@
     }
     body { padding: 16px; }
     main { max-width: 960px; margin: 0 auto; }
-    h1 { font-size: 1.4rem; margin: 0 0 8px; }
-    p { color: var(--muted); margin: 0 0 12px; }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
-    button, .file {
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .lede { color: var(--muted); margin: 0 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    button {
       appearance: none;
       border: 0;
       border-radius: 10px;
       padding: 12px 16px;
       font: inherit;
+      font-weight: 700;
       cursor: pointer;
+      background: var(--accent);
+      color: #062117;
     }
-    button { background: var(--accent); color: #062117; font-weight: 700; }
     button.secondary { background: #2a3142; color: var(--ink); font-weight: 600; }
-    .file { background: #243017; color: #d8f5a2; display: inline-block; }
-    #status { min-height: 1.4em; margin-bottom: 12px; }
+    button[disabled] { opacity: 0.5; cursor: not-allowed; }
+    #status { min-height: 1.4em; margin: 0 0 12px; color: var(--muted); }
     #status.err { color: var(--danger); }
+    #status.ok { color: var(--accent); }
     #screen_container {
       background: #000;
       border: 1px solid #2a3142;
@@ -51,39 +55,86 @@
       font: 14px/14px ui-monospace, "Cascadia Mono", Menlo, monospace;
     }
     #screen_container canvas { display: none; }
+    details {
+      margin-top: 16px;
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    summary { cursor: pointer; color: var(--muted); }
+    details p, details li { color: var(--muted); }
+    code { color: var(--ink); }
+    .hint { font-size: 0.9rem; color: var(--muted); margin-top: 10px; }
   </style>
 </head>
 <body>
   <main>
     <h1>DimOS</h1>
-    <p>
-      Выбери <strong>dimos.img</strong> (ровно 1440 КБ) или <strong>dimos.iso</strong>.
-      Лаунчер сам кладёт образ на floppy или CD. Страница copy.sh/v86/debug не нужна.
+    <p class="lede">
+      Образ системы встроен прямо в страницу. Ничего выбирать и никуда
+      подкладывать не нужно — просто открой файл и жми <strong>Start</strong>.
     </p>
     <div class="row">
-      <label class="file">Выбрать образ
-        <input id="image" type="file" accept=".img,.iso,.bin" hidden>
-      </label>
       <button id="start" type="button">Start</button>
       <button id="stop" class="secondary" type="button">Stop</button>
+      <button id="pick" class="secondary" type="button">Свой образ…</button>
+      <input id="image" type="file" accept=".img,.iso,.bin" hidden>
     </div>
-    <p id="status">Собери образ через <code>make iso</code> и выбери <code>disk_img/dimos.img</code>.</p>
+    <p id="status">Загрузка встроенного образа…</p>
     <div id="screen_container">
       <div></div>
       <canvas></canvas>
     </div>
+    <p class="hint">Щёлкни один раз по чёрному экрану, чтобы клавиатура ушла в DimOS. Затем набери <code>HELP</code>.</p>
+
+    <details>
+      <summary>Если видишь «Boot failed: could not read the boot disk»</summary>
+      <p>
+        Эта надпись приходит от SeaBIOS, а не от DimOS: значит эмулятору
+        подсунули не тот образ или не в тот слот. Почти всегда причина одна из трёх:
+      </p>
+      <ul>
+        <li>открыта страница <code>copy.sh/v86/debug.html</code>, где <code>dimos.img</code> попал в слот <strong>CD-ROM</strong> или <strong>Hard disk</strong>;</li>
+        <li>выбран старый или недособранный <code>dimos.img</code> из прошлой сборки;</li>
+        <li>в слот вставлен пустой <code>FLOPPY2.img</code>.</li>
+      </ul>
+      <p>
+        Эта страница ничего из перечисленного сделать не даёт: она держит
+        рабочий образ внутри себя и всегда кладёт его на floppy-слот.
+      </p>
+    </details>
   </main>
+
+  <script src="web/dimos-image.js"></script>
   <script src="web/v86/libv86.js"></script>
   <script>
     const FLOPPY_BYTES = 1474560;
     const statusEl = document.getElementById("status");
     const fileEl = document.getElementById("image");
+    const startButton = document.getElementById("start");
     let emulator = null;
     let pending = null;
 
-    function setStatus(text, isError) {
+    function setStatus(text, kind) {
       statusEl.textContent = text;
-      statusEl.className = isError ? "err" : "";
+      statusEl.className = kind || "";
+    }
+
+    function base64ToBytes(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    async function gunzip(bytes) {
+      if (typeof DecompressionStream === "function") {
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      }
+      throw new Error("браузер не умеет DecompressionStream");
     }
 
     function isIso(buffer) {
@@ -94,34 +145,25 @@
       return String.fromCharCode(...bytes) === "CD001";
     }
 
-    function describe(file, buffer) {
-      if (buffer.byteLength === FLOPPY_BYTES) {
-        return { kind: "fda", label: file.name + " → floppy" };
+    async function loadEmbeddedImage() {
+      const embedded = window.DIMOS_EMBEDDED_IMAGE;
+      if (!embedded) {
+        setStatus("web/dimos-image.js не найден. Собери образ: make iso.", "err");
+        return;
       }
-      if (isIso(buffer)) {
-        return { kind: "cdrom", label: file.name + " → CD-ROM" };
-      }
-      return null;
-    }
-
-    async function loadDefaultImage() {
       try {
-        const response = await fetch("disk_img/dimos.img", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const buffer = await response.arrayBuffer();
-        if (buffer.byteLength !== FLOPPY_BYTES) {
-          return;
+        const raw = await gunzip(base64ToBytes(embedded.gzipBase64));
+        if (raw.length !== embedded.size) {
+          throw new Error("размер " + raw.length + " вместо " + embedded.size);
         }
         pending = {
           kind: "fda",
-          buffer,
-          label: "disk_img/dimos.img → floppy",
+          buffer: raw.buffer,
+          label: "встроенный образ DimOS",
         };
-        setStatus("Найден локальный dimos.img. Жми Start.");
+        setStatus("Встроенный образ готов (1440 КБ). Жми Start.", "ok");
       } catch (error) {
-        /* The file picker still works when the built image is not served. */
+        setStatus("Не удалось распаковать встроенный образ: " + error.message, "err");
       }
     }
 
@@ -134,7 +176,7 @@
 
     function startEmulator() {
       if (!pending) {
-        setStatus("Сначала выбери dimos.img или dimos.iso.", true);
+        setStatus("Образ ещё не готов.", "err");
         return;
       }
 
@@ -159,9 +201,11 @@
         config.boot_order = 0x123;
       }
 
-      setStatus("Запуск: " + pending.label);
+      setStatus("Запуск: " + pending.label + ". Щёлкни по экрану для клавиатуры.", "ok");
       emulator = new V86(config);
     }
+
+    document.getElementById("pick").addEventListener("click", () => fileEl.click());
 
     fileEl.addEventListener("change", async () => {
       const file = fileEl.files && fileEl.files[0];
@@ -169,27 +213,28 @@
         return;
       }
       const buffer = await file.arrayBuffer();
-      const info = describe(file, buffer);
-      if (!info) {
-        pending = null;
+      if (buffer.byteLength === FLOPPY_BYTES) {
+        pending = { kind: "fda", buffer, label: file.name + " → floppy" };
+      } else if (isIso(buffer)) {
+        pending = { kind: "cdrom", buffer, label: file.name + " → CD-ROM" };
+      } else {
         setStatus(
-          "Нужен dimos.img на 1440 КБ или загрузочный dimos.iso. Сейчас " +
+          "Нужен образ на 1440 КБ или загрузочный ISO. Сейчас " +
             file.name + " (" + buffer.byteLength + " байт).",
-          true
+          "err"
         );
         return;
       }
-      pending = { kind: info.kind, buffer, label: info.label };
-      setStatus("Готово: " + info.label + ". Жми Start.");
+      setStatus("Готово: " + pending.label + ". Жми Start.", "ok");
     });
 
-    document.getElementById("start").addEventListener("click", startEmulator);
+    startButton.addEventListener("click", startEmulator);
     document.getElementById("stop").addEventListener("click", () => {
       stopEmulator();
       setStatus("Остановлено.");
     });
 
-    loadDefaultImage();
+    loadEmbeddedImage();
   </script>
 </body>
 </html>

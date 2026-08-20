@@ -789,12 +789,31 @@ static void file_type(const char *name) {
     console_put_character('\n');
 }
 
+static u8 strings_equal(const char *left, const char *right);
+
+static u8 is_protected_name(const char *name) {
+    return strings_equal(name, "COMPUTER") != 0u ||
+           strings_equal(name, "COMPUTER/") != 0u ||
+           strings_equal(name, "DOWNLOADS") != 0u ||
+           strings_equal(name, "DOWNLOADS/") != 0u;
+}
+
+static void clear_downloads(void) {
+    u16 index;
+    for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
+        const volatile u8 *entry = FAT_ROOT + index * 32u;
+        if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u) != 0u) continue;
+        if (entry[0] == 'D' && entry[1] == 'O' && entry[2] == 'W' && entry[3] == 'N') file_deleted[index] = 1u;
+    }
+    console_write("Downloads cleared (session only).\n");
+}
+
 static void file_delete(const char *name) {
     const u16 index = file_find(name);
     const volatile u8 *entry;
     if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
     entry = FAT_ROOT + index * 32u;
-    if (file_name_matches(entry, "KERNEL.BIN") != 0u) {
+    if (is_protected_name(name) != 0u || file_name_matches(entry, "KERNEL.BIN") != 0u) {
         console_write("KERNEL.BIN is protected.\n");
         return;
     }
@@ -812,9 +831,11 @@ static char *command_argument(char *command) {
 
 static void print_help(void) {
     console_write("Commands:\n");
-    console_write("  DIR    list real FAT12 files\n");
+    console_write("  DIR    open the computer files\n");
     console_write("  TYPE   read a file, for example TYPE README.TXT\n");
-    console_write("  DEL    safely hide a file (KERNEL.BIN is protected)\n");
+    console_write("  DEL    delete a file; COMPUTER and DOWNLOADS are protected\n");
+    console_write("  DOWNLOADS  show downloads\n");
+    console_write("  CLEAR DOWNLOADS  empty downloads\n");
     console_write("  SNAKE  start the built-in game\n");
     console_write("  CLEAR  clear the screen\n");
     console_write("  HELP   show this list\n");
@@ -843,7 +864,7 @@ void kernel_main(void) {
         if (*command == '\0') {
             continue;
         }
-        if (strings_equal(command, "DIR") != 0u) {
+        if (strings_equal(command, "DIR") != 0u || strings_equal(command, "FILES") != 0u) {
             file_manager_dir();
         } else if (strings_equal(command, "TYPE") != 0u) {
             if (*argument == '\0') console_write("Usage: TYPE filename\n");
@@ -851,13 +872,17 @@ void kernel_main(void) {
         } else if (strings_equal(command, "DEL") != 0u) {
             if (*argument == '\0') console_write("Usage: DEL filename\n");
             else file_delete(argument);
+        } else if (strings_equal(command, "DOWNLOADS") != 0u) {
+            console_write("Downloads (can only be cleared):\n");
+            file_manager_dir();
         } else if (strings_equal(command, "SNAKE") != 0u) {
             snake_game();
             console_clear();
             console_write("Back at the command line. Type HELP.\n\n");
         } else if (strings_equal(command, "CLEAR") != 0u ||
                    strings_equal(command, "CLS") != 0u) {
-            console_clear();
+            if (strings_equal(argument, "DOWNLOADS") != 0u) clear_downloads();
+            else console_clear();
         } else if (strings_equal(command, "HELP") != 0u) {
             print_help();
         } else {

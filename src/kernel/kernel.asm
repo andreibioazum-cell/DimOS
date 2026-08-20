@@ -30,6 +30,10 @@ kernel_entry:
     mov ss, ax
     mov sp, 0xFFFE
 
+    ; 320x200x256 VGA mode: the kernel draws its desktop at 0xA0000.
+    mov ax, 0x0013
+    int 0x10
+
     ; This operand is a real-mode offset. The GDT itself contains linked
     ; physical addresses because protected-mode segments have base zero.
     lgdt [gdt_descriptor - kernel_entry]

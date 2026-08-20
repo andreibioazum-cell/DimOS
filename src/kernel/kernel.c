@@ -16,6 +16,9 @@ extern void io_out8(u16 port, u8 value);
 #define VGA_WIDTH 80u
 #define VGA_HEIGHT 25u
 #define VGA_MEMORY ((volatile u16 *)0xB8000u)
+#define FRAMEBUFFER ((volatile u8 *)0xA0000u)
+#define SCREEN_WIDTH 320u
+#define SCREEN_HEIGHT 200u
 
 #define KEY_NONE 0u
 #define KEY_UP 0x100u
@@ -163,9 +166,30 @@ static void console_write(const char *text) {
     }
 }
 
+static void pixel(u16 x, u16 y, u8 color) {
+    if (x < SCREEN_WIDTH && y < SCREEN_HEIGHT) FRAMEBUFFER[y * SCREEN_WIDTH + x] = color;
+}
+
+static void fill_rect(u16 x, u16 y, u16 width, u16 height, u8 color) {
+    u16 row;
+    u16 column;
+    for (row = 0u; row < height && y + row < SCREEN_HEIGHT; ++row) {
+        for (column = 0u; column < width && x + column < SCREEN_WIDTH; ++column) {
+            pixel((u16)(x + column), (u16)(y + row), color);
+        }
+    }
+}
+
 /* Compact built-in desktop: no images or external resources. */
 static void desktop_draw(void) {
     u16 cell;
+    fill_rect(0u, 0u, 320u, 200u, 1u);
+    fill_rect(0u, 0u, 320u, 20u, 9u);
+    fill_rect(0u, 178u, 320u, 22u, 8u);
+    fill_rect(18u, 38u, 105u, 92u, 7u);
+    fill_rect(28u, 48u, 85u, 20u, 15u);
+    fill_rect(136u, 38u, 165u, 110u, 7u);
+    fill_rect(146u, 48u, 145u, 20u, 3u);
     for (cell = 0u; cell < VGA_WIDTH * VGA_HEIGHT; ++cell) {
         VGA_MEMORY[cell] = (u16)(0x1Fu << 8u) | (u16)' ';
     }

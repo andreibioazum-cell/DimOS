@@ -885,6 +885,8 @@ void kernel_main(void) {
     keyboard_initialize();
     pit_initialize();
 
+    /* The desktop is visible immediately; any key enters the system. */
+    (void)keyboard_read();
     console_write("DimOS protected-mode C kernel\n");
     console_write("PS/2 keyboard ready (v86 compatible). Type HELP.\n\n");
 

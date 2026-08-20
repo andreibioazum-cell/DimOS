@@ -163,6 +163,29 @@ static void console_write(const char *text) {
     }
 }
 
+/* Compact built-in desktop: no images or external resources. */
+static void desktop_draw(void) {
+    u16 cell;
+    for (cell = 0u; cell < VGA_WIDTH * VGA_HEIGHT; ++cell) {
+        VGA_MEMORY[cell] = (u16)(0x1Fu << 8u) | (u16)' ';
+    }
+    for (cell = 0u; cell < VGA_WIDTH; ++cell) {
+        VGA_MEMORY[cell] = (u16)(0x17u << 8u) | (u16)' ';
+    }
+    VGA_MEMORY[0] = (u16)(0x1Fu << 8u) | (u16)'D';
+    VGA_MEMORY[1] = (u16)(0x1Fu << 8u) | (u16)'i';
+    VGA_MEMORY[2] = (u16)(0x1Fu << 8u) | (u16)'m';
+    VGA_MEMORY[3] = (u16)(0x1Fu << 8u) | (u16)'O';
+    VGA_MEMORY[4] = (u16)(0x1Fu << 8u) | (u16)'S';
+    console_attribute = 0x1Fu;
+    console_row = 2u;
+    console_column = 3u;
+    console_write("[ Files ]     [ Terminal ]     [ Settings ]\n\n");
+    console_write("  DimOS desktop\n\n");
+    console_write("  Terminal is ready\n\n");
+    cursor_update();
+}
+
 static void console_write_unsigned(u32 value) {
     char digits[10];
     u8 length = 0u;
@@ -777,6 +800,7 @@ void kernel_main(void) {
     char command_buffer[COMMAND_CAPACITY + 1u];
 
     console_clear();
+    desktop_draw();
     keyboard_initialize();
     pit_initialize();
 

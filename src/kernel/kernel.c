@@ -56,6 +56,10 @@ static u8 keyboard_modifiers;
 static u8 keyboard_extended;
 static u8 keyboard_pause_bytes;
 static u8 keyboard_caps_lock;
+static u8 mouse_packet[3];
+static u8 mouse_packet_index;
+static u16 mouse_x = 160u;
+static u16 mouse_y = 100u;
 
 static u16 pit_last_count;
 static u32 pit_accumulated_counts;
@@ -308,7 +312,33 @@ static char keyboard_ascii(u8 scan_code) {
  * controller. This deliberately avoids BIOS int 16h, which is unreliable
  * after handoff in the v86 debug launcher.
  */
+static void mouse_draw_cursor(void) {
+    u16 i;
+    for (i = 0u; i < 10u; ++i) {
+        if (mouse_x + i < SCREEN_WIDTH) pixel((u16)(mouse_x + i), mouse_y, (u8)(FRAMEBUFFER[mouse_y * SCREEN_WIDTH + mouse_x + i] ^ 0xFFu));
+        if (mouse_y + i < SCREEN_HEIGHT) pixel(mouse_x, (u16)(mouse_y + i), (u8)(FRAMEBUFFER[(mouse_y + i) * SCREEN_WIDTH + mouse_x] ^ 0xFFu));
+    }
+}
+
+static void mouse_poll(void) {
+    while ((io_in8(PS2_STATUS) & 0x21u) == 0x21u) {
+        const u8 value = io_in8(PS2_DATA);
+        mouse_packet[mouse_packet_index++] = value;
+        if (mouse_packet_index == 3u) {
+            mouse_packet_index = 0u;
+            if ((mouse_packet[0] & 0x08u) != 0u) {
+                mouse_x = (u16)((int)mouse_x + (int)(signed char)mouse_packet[1]);
+                mouse_y = (u16)((int)mouse_y - (int)(signed char)mouse_packet[2]);
+                if (mouse_x >= SCREEN_WIDTH) mouse_x = SCREEN_WIDTH - 1u;
+                if (mouse_y >= SCREEN_HEIGHT) mouse_y = SCREEN_HEIGHT - 1u;
+                mouse_draw_cursor();
+            }
+        }
+    }
+}
+
 static u16 keyboard_poll(void) {
+    mouse_poll();
     while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
         const u8 status = io_in8(PS2_STATUS);
         const u8 scan_code = io_in8(PS2_DATA);
@@ -402,6 +432,12 @@ static void keyboard_initialize(void) {
     while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
         (void)io_in8(PS2_DATA);
     }
+    /* Enable the auxiliary PS/2 port and start standard three-byte packets. */
+    io_out8(PS2_STATUS, 0xA8u);
+    io_out8(PS2_STATUS, 0xD4u);
+    io_out8(PS2_DATA, 0xF4u);
+    mouse_packet_index = 0u;
+    mouse_draw_cursor();
 }
 
 static u16 pit_read_counter(void) {

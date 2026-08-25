@@ -1,27 +1,31 @@
 /*
- * DimOS protected-mode kernel.
+ * DimOS workshop kernel.
  *
- * Policy: hardware setup and port I/O stay in kernel.asm; the command shell,
- * PS/2 scan-code decoder, VGA console, timer handling, and Snake belong in C.
- * No hosted C library is used.
+ * VGA mode 13h desktop: wooden cubes and warm pillows you can drag
+ * with the arrow keys. Enter unfolds a cube into a window (terminal,
+ * snake, files, about). Hardware I/O stays in kernel.asm.
  */
+
+#include "font8.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
+typedef short i16;
 
 extern u8 io_in8(u16 port);
 extern void io_out8(u16 port, u8 value);
 
-#define VGA_WIDTH 80u
-#define VGA_HEIGHT 25u
-#define VGA_MEMORY ((volatile u16 *)0xB8000u)
+#define FB ((volatile u8 *)0xA0000u)
+#define SW 320
+#define SH 200
 
 #define KEY_NONE 0u
 #define KEY_UP 0x100u
 #define KEY_RIGHT 0x101u
 #define KEY_DOWN 0x102u
 #define KEY_LEFT 0x103u
+#define KEY_TAB 0x09u
 
 #define PS2_DATA 0x60u
 #define PS2_STATUS 0x64u
@@ -29,165 +33,250 @@ extern void io_out8(u16 port, u8 value);
 #define PIT_CHANNEL_0 0x40u
 #define PIT_COMMAND 0x43u
 #define PIT_DIVISOR 11932u
-#define PIT_MOVE_COUNTS (PIT_DIVISOR * 9u)
 
-#define COMMAND_CAPACITY 31u
+#define FAT_ROOT ((volatile u8 *)0x10000u)
+#define FAT_TABLE ((volatile u8 *)0x07E00u)
+#define FILE_DATA ((volatile u8 *)0x30000u)
+#define FAT_ROOT_ENTRIES 224u
+#define FAT_FILE_LIMIT 32768u
 
-#define SNAKE_MAX_LENGTH 512u
-#define SNAKE_START_ROW 12u
-#define SNAKE_START_COLUMN 42u
-#define SNAKE_TOP 3u
-#define SNAKE_ROWS 20u
-#define SNAKE_COLUMNS 78u
+#define APP_NONE 0u
+#define APP_TERM 1u
+#define APP_SNAKE 2u
+#define APP_FILES 3u
+#define APP_ABOUT 4u
 
-#define DIRECTION_UP 0u
-#define DIRECTION_RIGHT 1u
-#define DIRECTION_DOWN 2u
-#define DIRECTION_LEFT 3u
+#define KIND_CUBE 0u
+#define KIND_PILLOW 1u
 
-static u8 console_row;
-static u8 console_column;
-static u8 console_attribute = 0x07u;
+#define OBJ_COUNT 8u
+#define TERM_COLS 36u
+#define TERM_ROWS 14u
+#define CMD_CAP 31u
+
+#define SNAKE_MAX 128u
+#define SNAKE_CW 8u
+#define SNAKE_CH 8u
+#define SNAKE_COLS 28u
+#define SNAKE_ROWS 14u
+
+#define DIR_UP 0u
+#define DIR_RIGHT 1u
+#define DIR_DOWN 2u
+#define DIR_LEFT 3u
+
+/* Warm workshop palette indices. */
+#define C_NIGHT 0u
+#define C_FLOOR 1u
+#define C_WOOD 2u
+#define C_SHAVE 3u
+#define C_CREAM 4u
+#define C_LINEN 5u
+#define C_CLAY 6u
+#define C_ROSE 7u
+#define C_BLUSH 8u
+#define C_AMBER 9u
+#define C_MOSS 10u
+#define C_INK 11u
+#define C_BAR 12u
+#define C_TEAL 13u
+#define C_WHITE 14u
+#define C_DUSK 15u
+
+struct object {
+    i16 x;
+    i16 y;
+    u8 kind;
+    u8 app;
+    u8 size;
+    const char *name;
+};
 
 static u8 keyboard_modifiers;
 static u8 keyboard_extended;
 static u8 keyboard_pause_bytes;
 static u8 keyboard_caps_lock;
 
-static u16 pit_last_count;
-static u32 pit_accumulated_counts;
+static u16 pit_last;
+static u32 pit_acc;
+static u8 bounce;
 
-static u16 snake_cells[SNAKE_MAX_LENGTH];
-static u16 snake_length;
+static struct object objects[OBJ_COUNT];
+static u8 selected;
+static u8 app_open;
+
+static char term_lines[TERM_ROWS][TERM_COLS + 1u];
+static u8 term_row;
+static u8 term_col;
+static char cmd_buf[CMD_CAP + 1u];
+static u8 cmd_len;
+static u8 file_deleted[FAT_ROOT_ENTRIES];
+
+static u16 snake_cells[SNAKE_MAX];
+static u16 snake_len;
 static u16 snake_score;
-static u8 snake_direction;
-static u32 random_state = 0xD14E05u;
+static u8 snake_dir;
+static u8 snake_dead;
+static u16 snake_food;
+static u32 rng = 0xD14E05u;
 
-static void cursor_update(void) {
-    u16 position = (u16)((u16)console_row * VGA_WIDTH + console_column);
+static u8 heap[2048];
+static u16 heap_used;
 
-    io_out8(0x3D4u, 0x0Fu);
-    io_out8(0x3D5u, (u8)position);
-    io_out8(0x3D4u, 0x0Eu);
-    io_out8(0x3D5u, (u8)(position >> 8u));
+static void dac(u8 index, u8 r, u8 g, u8 b) {
+    io_out8(0x3C8u, index);
+    io_out8(0x3C9u, r);
+    io_out8(0x3C9u, g);
+    io_out8(0x3C9u, b);
 }
 
-static void cursor_set_visible(u8 visible) {
-    u8 start;
-
-    io_out8(0x3D4u, 0x0Au);
-    start = io_in8(0x3D5u);
-    if (visible != 0u) {
-        start = (u8)(start & (u8)~0x20u);
-    } else {
-        start = (u8)(start | 0x20u);
-    }
-    io_out8(0x3D5u, start);
+static void palette_warm(void) {
+    dac(C_NIGHT, 8, 6, 4);
+    dac(C_FLOOR, 18, 12, 8);
+    dac(C_WOOD, 28, 18, 10);
+    dac(C_SHAVE, 42, 28, 14);
+    dac(C_CREAM, 52, 40, 24);
+    dac(C_LINEN, 58, 50, 38);
+    dac(C_CLAY, 48, 22, 16);
+    dac(C_ROSE, 54, 30, 26);
+    dac(C_BLUSH, 60, 46, 40);
+    dac(C_AMBER, 56, 40, 12);
+    dac(C_MOSS, 22, 28, 16);
+    dac(C_INK, 10, 8, 6);
+    dac(C_BAR, 36, 22, 12);
+    dac(C_TEAL, 18, 32, 28);
+    dac(C_WHITE, 62, 58, 48);
+    dac(C_DUSK, 12, 18, 24);
 }
 
-static void console_scroll(void) {
-    u16 row;
-    u16 column;
-
-    if (console_row < VGA_HEIGHT) {
-        return;
+static void pixel(int x, int y, u8 color) {
+    if (x >= 0 && x < SW && y >= 0 && y < SH) {
+        FB[(u16)y * SW + (u16)x] = color;
     }
+}
 
-    for (row = 1u; row < VGA_HEIGHT; ++row) {
-        for (column = 0u; column < VGA_WIDTH; ++column) {
-            VGA_MEMORY[(row - 1u) * VGA_WIDTH + column] =
-                VGA_MEMORY[row * VGA_WIDTH + column];
+static void fill_rect(int x, int y, int w, int h, u8 color) {
+    int row;
+    int col;
+    for (row = 0; row < h; ++row) {
+        const int yy = y + row;
+        if (yy < 0 || yy >= SH) {
+            continue;
+        }
+        for (col = 0; col < w; ++col) {
+            const int xx = x + col;
+            if (xx >= 0 && xx < SW) {
+                FB[(u16)yy * SW + (u16)xx] = color;
+            }
         }
     }
-
-    for (column = 0u; column < VGA_WIDTH; ++column) {
-        VGA_MEMORY[(VGA_HEIGHT - 1u) * VGA_WIDTH + column] =
-            (u16)((u16)console_attribute << 8u) | (u16)' ';
-    }
-    console_row = (u8)(VGA_HEIGHT - 1u);
 }
 
-static void console_clear(void) {
-    u16 cell;
-    const u16 blank = (u16)((u16)console_attribute << 8u) | (u16)' ';
-
-    for (cell = 0u; cell < VGA_WIDTH * VGA_HEIGHT; ++cell) {
-        VGA_MEMORY[cell] = blank;
+static void hline(int x0, int x1, int y, u8 color) {
+    int x;
+    if (x0 > x1) {
+        const int t = x0;
+        x0 = x1;
+        x1 = t;
     }
-    console_row = 0u;
-    console_column = 0u;
-    cursor_set_visible(1u);
-    cursor_update();
+    for (x = x0; x <= x1; ++x) {
+        pixel(x, y, color);
+    }
 }
 
-static void console_put_character(char character) {
-    if (character == '\n') {
-        console_column = 0u;
-        ++console_row;
-    } else if (character == '\r') {
-        console_column = 0u;
-    } else {
-        const u16 position =
-            (u16)((u16)console_row * VGA_WIDTH + console_column);
-        VGA_MEMORY[position] =
-            (u16)((u16)console_attribute << 8u) | (u8)character;
-        ++console_column;
-        if (console_column >= VGA_WIDTH) {
-            console_column = 0u;
-            ++console_row;
+static void fill_tri(int x0, int y0, int x1, int y1, int x2, int y2, u8 color) {
+    int miny = y0;
+    int maxy = y0;
+    int y;
+    if (y1 < miny) miny = y1;
+    if (y2 < miny) miny = y2;
+    if (y1 > maxy) maxy = y1;
+    if (y2 > maxy) maxy = y2;
+    if (miny < 0) miny = 0;
+    if (maxy >= SH) maxy = SH - 1;
+    for (y = miny; y <= maxy; ++y) {
+        int nodes[3];
+        int n = 0;
+        int i;
+        int xs[3];
+        int ys[3];
+        xs[0] = x0; ys[0] = y0;
+        xs[1] = x1; ys[1] = y1;
+        xs[2] = x2; ys[2] = y2;
+        for (i = 0; i < 3; ++i) {
+            const int j = (i + 1) % 3;
+            if ((ys[i] < y && ys[j] >= y) || (ys[j] < y && ys[i] >= y)) {
+                const int dy = ys[j] - ys[i];
+                if (dy != 0) {
+                    nodes[n++] = xs[i] + (xs[j] - xs[i]) * (y - ys[i]) / dy;
+                }
+            }
+        }
+        if (n >= 2) {
+            hline(nodes[0], nodes[1], y, color);
         }
     }
-
-    console_scroll();
-    cursor_update();
 }
 
-static void console_backspace(void) {
-    u16 position;
-
-    if (console_column == 0u) {
-        return;
+static void fill_circle(int cx, int cy, int rx, int ry, u8 base, u8 hi) {
+    int y;
+    for (y = -ry; y <= ry; ++y) {
+        int x;
+        for (x = -rx; x <= rx; ++x) {
+            const int nx = (x * 16) / (rx == 0 ? 1 : rx);
+            const int ny = (y * 16) / (ry == 0 ? 1 : ry);
+            if (nx * nx + ny * ny <= 16 * 16) {
+                const int lx = nx + 6;
+                const int ly = ny + 8;
+                const int d = lx * lx + ly * ly;
+                pixel(cx + x, cy + y, d < 140 ? hi : base);
+            }
+        }
     }
-
-    --console_column;
-    position = (u16)((u16)console_row * VGA_WIDTH + console_column);
-    VGA_MEMORY[position] =
-        (u16)((u16)console_attribute << 8u) | (u16)' ';
-    cursor_update();
 }
 
-static void console_write(const char *text) {
+static void draw_char(int x, int y, char ch, u8 fg, u8 bg, u8 opaque) {
+    const u8 *glyph;
+    int row;
+    u8 index;
+    if (ch < 32 || ch > 126) {
+        ch = '?';
+    }
+    index = (u8)(ch - 32);
+    glyph = font8[index];
+    for (row = 0; row < 8; ++row) {
+        u8 bits = glyph[row];
+        int col;
+        for (col = 0; col < 8; ++col) {
+            if ((bits & 0x80u) != 0u) {
+                pixel(x + col, y + row, fg);
+            } else if (opaque != 0u) {
+                pixel(x + col, y + row, bg);
+            }
+            bits = (u8)(bits << 1);
+        }
+    }
+}
+
+static void draw_text(int x, int y, const char *text, u8 fg, u8 bg, u8 opaque) {
     while (*text != '\0') {
-        console_put_character(*text);
+        draw_char(x, y, *text, fg, bg, opaque);
+        x += 8;
         ++text;
     }
 }
 
-static void console_write_unsigned(u32 value) {
-    char digits[10];
-    u8 length = 0u;
-
-    if (value == 0u) {
-        console_put_character('0');
-        return;
-    }
-
-    while (value != 0u) {
-        digits[length] = (char)('0' + (char)(value % 10u));
-        value /= 10u;
-        ++length;
-    }
-
-    while (length != 0u) {
-        --length;
-        console_put_character(digits[length]);
-    }
-}
-
-static void console_set_position(u8 row, u8 column) {
-    console_row = row;
-    console_column = column;
-    cursor_update();
+static void draw_cube(int cx, int cy, int s, u8 side, u8 top, u8 dark) {
+    const int half = s / 2;
+    const int lift = s / 2;
+    const int x = cx;
+    const int y = cy;
+    fill_tri(x, y - s, x - s, y - lift, x, y, top);
+    fill_tri(x, y - s, x + s, y - lift, x, y, top);
+    fill_tri(x - s, y - lift, x, y, x - s, y + half, side);
+    fill_tri(x, y, x - s, y + half, x, y + s - lift, side);
+    fill_tri(x + s, y - lift, x, y, x + s, y + half, dark);
+    fill_tri(x, y, x + s, y + half, x, y + s - lift, dark);
 }
 
 static char keyboard_ascii(u8 scan_code) {
@@ -209,6 +298,7 @@ static char keyboard_ascii(u8 scan_code) {
         case 0x0Cu: return shifted != 0u ? '_' : '-';
         case 0x0Du: return shifted != 0u ? '+' : '=';
         case 0x0Eu: return '\b';
+        case 0x0Fu: return '\t';
         case 0x10u: character = 'q'; break;
         case 0x11u: character = 'w'; break;
         case 0x12u: character = 'e'; break;
@@ -256,11 +346,6 @@ static char keyboard_ascii(u8 scan_code) {
     return character;
 }
 
-/*
- * Read translated set-1 scan codes directly from the emulated PS/2
- * controller. This deliberately avoids BIOS int 16h, which is unreliable
- * after handoff in the v86 debug launcher.
- */
 static u16 keyboard_poll(void) {
     while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
         const u8 status = io_in8(PS2_STATUS);
@@ -303,11 +388,11 @@ static u16 keyboard_poll(void) {
                 case 0x50u: return KEY_DOWN;
                 case 0x4Bu: return KEY_LEFT;
                 case 0x1Cu: return (u16)'\n';
-                case 0x35u: return (u16)'/';
+                case 0x0Fu: return KEY_TAB;
                 default: {
-                    const char extended_char = keyboard_ascii(base_code);
-                    if (extended_char != '\0') {
-                        return (u16)(u8)extended_char;
+                    const char ext = keyboard_ascii(base_code);
+                    if (ext != '\0') {
+                        return (u16)(u8)ext;
                     }
                     continue;
                 }
@@ -332,17 +417,7 @@ static u16 keyboard_poll(void) {
             return (u16)(u8)character;
         }
     }
-
     return KEY_NONE;
-}
-
-static u16 keyboard_read(void) {
-    u16 key;
-
-    do {
-        key = keyboard_poll();
-    } while (key == KEY_NONE);
-    return key;
 }
 
 static void keyboard_initialize(void) {
@@ -350,17 +425,14 @@ static void keyboard_initialize(void) {
     keyboard_extended = 0u;
     keyboard_pause_bytes = 0u;
     keyboard_caps_lock = 0u;
-
-    /* Drop stale BIOS handoff bytes, including command acknowledgements. */
     while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
         (void)io_in8(PS2_DATA);
     }
 }
 
-static u16 pit_read_counter(void) {
+static u16 pit_read(void) {
     u8 low;
     u8 high;
-
     io_out8(PIT_COMMAND, 0x00u);
     low = io_in8(PIT_CHANNEL_0);
     high = io_in8(PIT_CHANNEL_0);
@@ -371,226 +443,25 @@ static void pit_initialize(void) {
     io_out8(PIT_COMMAND, 0x34u);
     io_out8(PIT_CHANNEL_0, (u8)PIT_DIVISOR);
     io_out8(PIT_CHANNEL_0, (u8)(PIT_DIVISOR >> 8u));
-    pit_last_count = pit_read_counter();
-    pit_accumulated_counts = 0u;
+    pit_last = pit_read();
+    pit_acc = 0u;
 }
 
-static void pit_reset_interval(void) {
-    pit_last_count = pit_read_counter();
-    pit_accumulated_counts = 0u;
-}
-
-static u8 pit_move_due(void) {
-    const u16 current = pit_read_counter();
+static u8 pit_tick(u32 need) {
+    const u16 current = pit_read();
     u16 elapsed;
-
-    if (pit_last_count >= current) {
-        elapsed = (u16)(pit_last_count - current);
+    if (pit_last >= current) {
+        elapsed = (u16)(pit_last - current);
     } else {
-        elapsed = (u16)(pit_last_count + (PIT_DIVISOR - current));
+        elapsed = (u16)(pit_last + (PIT_DIVISOR - current));
     }
-    pit_last_count = current;
-    pit_accumulated_counts += elapsed;
-
-    if (pit_accumulated_counts >= PIT_MOVE_COUNTS) {
-        pit_accumulated_counts -= PIT_MOVE_COUNTS;
+    pit_last = current;
+    pit_acc += elapsed;
+    if (pit_acc >= need) {
+        pit_acc -= need;
         return 1u;
     }
     return 0u;
-}
-
-static void screen_cell(u16 position, char character, u8 attribute) {
-    VGA_MEMORY[position] = (u16)((u16)attribute << 8u) | (u8)character;
-}
-
-static char screen_character(u16 position) {
-    return (char)(u8)VGA_MEMORY[position];
-}
-
-static void snake_draw_score(void) {
-    console_set_position(0u, 65u);
-    console_write("Score: ");
-    console_write_unsigned(snake_score);
-}
-
-static void snake_draw_arena(void) {
-    u16 position;
-    u16 row;
-
-    console_set_position(0u, 0u);
-    console_write("DimOS Snake");
-    console_set_position(1u, 0u);
-    console_write("WASD/arrows: move   N: new game   ESC: command line");
-    snake_draw_score();
-
-    for (position = 2u * VGA_WIDTH; position < 3u * VGA_WIDTH; ++position) {
-        screen_cell(position, '#', 0x09u);
-    }
-    for (position = 23u * VGA_WIDTH; position < 24u * VGA_WIDTH; ++position) {
-        screen_cell(position, '#', 0x09u);
-    }
-    for (row = SNAKE_TOP; row < SNAKE_TOP + SNAKE_ROWS; ++row) {
-        screen_cell((u16)(row * VGA_WIDTH), '#', 0x09u);
-        screen_cell((u16)(row * VGA_WIDTH + 79u), '#', 0x09u);
-    }
-}
-
-static u32 next_random(void) {
-    u32 value = random_state;
-
-    value ^= value << 13u;
-    value ^= value >> 17u;
-    value ^= value << 5u;
-    if (value == 0u) {
-        value = 0xA341316Cu;
-    }
-    random_state = value;
-    return value;
-}
-
-static void snake_place_food(void) {
-    u16 position;
-
-    do {
-        const u16 row = (u16)(SNAKE_TOP + (next_random() % SNAKE_ROWS));
-        const u16 column = (u16)(1u + (next_random() % SNAKE_COLUMNS));
-        position = (u16)(row * VGA_WIDTH + column);
-    } while (screen_character(position) != ' ');
-
-    screen_cell(position, '@', 0x0Cu);
-}
-
-static void snake_initialize(void) {
-    u16 index;
-    u16 position = (u16)(SNAKE_START_ROW * VGA_WIDTH + SNAKE_START_COLUMN);
-
-    console_clear();
-    cursor_set_visible(0u);
-    snake_length = 5u;
-    snake_score = 0u;
-    snake_direction = DIRECTION_RIGHT;
-    random_state ^= (u32)pit_read_counter() | 1u;
-
-    snake_draw_arena();
-    for (index = 0u; index < snake_length; ++index) {
-        snake_cells[index] = position;
-        screen_cell(position, index == 0u ? 'O' : 'o',
-                    index == 0u ? 0x0Fu : 0x0Au);
-        --position;
-    }
-    snake_place_food();
-    pit_reset_interval();
-}
-
-/* Return 1 after a collision and 0 after a successful move. */
-static u8 snake_move(void) {
-    u16 new_head = snake_cells[0];
-    u16 index;
-    u8 grew = 0u;
-    char target;
-
-    if (snake_direction == DIRECTION_UP) {
-        new_head = (u16)(new_head - VGA_WIDTH);
-    } else if (snake_direction == DIRECTION_RIGHT) {
-        ++new_head;
-    } else if (snake_direction == DIRECTION_DOWN) {
-        new_head = (u16)(new_head + VGA_WIDTH);
-    } else {
-        --new_head;
-    }
-
-    target = screen_character(new_head);
-    if (target == '@') {
-        if (snake_length >= SNAKE_MAX_LENGTH) {
-            return 1u;
-        }
-        grew = 1u;
-        ++snake_length;
-        snake_score = (u16)(snake_score + 10u);
-    } else if (target != ' ') {
-        return 1u;
-    }
-
-    if (grew == 0u) {
-        screen_cell(snake_cells[snake_length - 1u], ' ', 0x07u);
-    }
-
-    index = (u16)(snake_length - 1u);
-    while (index != 0u) {
-        snake_cells[index] = snake_cells[index - 1u];
-        --index;
-    }
-
-    screen_cell(snake_cells[0], 'o', 0x0Au);
-    snake_cells[0] = new_head;
-    screen_cell(new_head, 'O', 0x0Fu);
-
-    if (grew != 0u) {
-        snake_draw_score();
-        snake_place_food();
-    }
-    return 0u;
-}
-
-static void snake_change_direction(u16 key) {
-    if ((key == (u16)'w' || key == (u16)'W' || key == KEY_UP) &&
-        snake_direction != DIRECTION_DOWN) {
-        snake_direction = DIRECTION_UP;
-    } else if ((key == (u16)'d' || key == (u16)'D' || key == KEY_RIGHT) &&
-               snake_direction != DIRECTION_LEFT) {
-        snake_direction = DIRECTION_RIGHT;
-    } else if ((key == (u16)'s' || key == (u16)'S' || key == KEY_DOWN) &&
-               snake_direction != DIRECTION_UP) {
-        snake_direction = DIRECTION_DOWN;
-    } else if ((key == (u16)'a' || key == (u16)'A' || key == KEY_LEFT) &&
-               snake_direction != DIRECTION_RIGHT) {
-        snake_direction = DIRECTION_LEFT;
-    }
-}
-
-static void snake_game(void) {
-    u8 restart = 1u;
-
-    while (restart != 0u) {
-        u8 collided = 0u;
-        restart = 0u;
-        snake_initialize();
-
-        while (collided == 0u) {
-            const u16 key = keyboard_poll();
-
-            if (key == 27u) {
-                cursor_set_visible(1u);
-                return;
-            }
-            if (key == (u16)'n' || key == (u16)'N') {
-                restart = 1u;
-                break;
-            }
-            if (key != KEY_NONE) {
-                snake_change_direction(key);
-            }
-            if (pit_move_due() != 0u) {
-                collided = snake_move();
-            }
-        }
-
-        if (restart == 0u && collided != 0u) {
-            console_set_position(12u, 20u);
-            console_write(" GAME OVER - ENTER/N: retry, ESC: exit ");
-            for (;;) {
-                const u16 key = keyboard_read();
-                if (key == 27u) {
-                    cursor_set_visible(1u);
-                    return;
-                }
-                if (key == (u16)'\n' || key == (u16)'n' || key == (u16)'N') {
-                    restart = 1u;
-                    break;
-                }
-            }
-        }
-    }
 }
 
 static u8 ascii_upper(u8 character) {
@@ -611,57 +482,15 @@ static u8 strings_equal(const char *left, const char *right) {
     return (u8)(*left == '\0' && *right == '\0');
 }
 
-static char *trim_command(char *command) {
-    char *start = command;
-    char *end;
-
-    while (*start == ' ') {
-        ++start;
+static void *kalloc(u16 bytes) {
+    u8 *block;
+    if ((u32)heap_used + (u32)bytes > sizeof(heap)) {
+        return 0;
     }
-    end = start;
-    while (*end != '\0') {
-        ++end;
-    }
-    while (end != start && end[-1] == ' ') {
-        --end;
-    }
-    *end = '\0';
-    return start;
+    block = heap + heap_used;
+    heap_used = (u16)(heap_used + bytes);
+    return block;
 }
-
-static void read_line(char *buffer, u8 capacity) {
-    u8 length = 0u;
-
-    for (;;) {
-        const u16 key = keyboard_read();
-
-        if (key == (u16)'\n') {
-            buffer[length] = '\0';
-            console_put_character('\n');
-            return;
-        }
-        if (key == (u16)'\b') {
-            if (length != 0u) {
-                --length;
-                console_backspace();
-            }
-            continue;
-        }
-        if (key >= 32u && key <= 126u && length < capacity) {
-            buffer[length] = (char)key;
-            ++length;
-            console_put_character((char)key);
-        }
-    }
-}
-
-#define FAT_ROOT ((volatile u8 *)0x10000u)
-#define FAT_TABLE ((volatile u8 *)0x07E00u)
-#define FILE_DATA ((volatile u8 *)0x30000u)
-#define FAT_ROOT_ENTRIES 224u
-#define FAT_FILE_LIMIT 32768u
-
-static u8 file_deleted[FAT_ROOT_ENTRIES];
 
 static u16 fat12_next(u16 cluster) {
     const u16 offset = (u16)(cluster + cluster / 2u);
@@ -675,7 +504,9 @@ static u8 file_name_matches(const volatile u8 *entry, const char *name) {
     while (name[i] != '\0' && i < 12u) {
         char character = name[i++];
         if (character == '.') {
-            while (pos < 8u) { if (entry[pos++] != ' ') return 0u; }
+            while (pos < 8u) {
+                if (entry[pos++] != ' ') return 0u;
+            }
             pos = 8u;
         } else {
             if (pos >= 11u || (pos == 8u && entry[pos] == ' ')) return 0u;
@@ -684,7 +515,9 @@ static u8 file_name_matches(const volatile u8 *entry, const char *name) {
         }
     }
     if (i == 0u) return 0u;
-    while (pos < 11u) { if (entry[pos++] != ' ') return 0u; }
+    while (pos < 11u) {
+        if (entry[pos++] != ' ') return 0u;
+    }
     return 1u;
 }
 
@@ -700,26 +533,110 @@ static u16 file_find(const char *name) {
     return 0xFFFFu;
 }
 
+static void term_clear(void) {
+    u8 row;
+    u8 col;
+    for (row = 0u; row < TERM_ROWS; ++row) {
+        for (col = 0u; col < TERM_COLS; ++col) {
+            term_lines[row][col] = ' ';
+        }
+        term_lines[row][TERM_COLS] = '\0';
+    }
+    term_row = 0u;
+    term_col = 0u;
+}
+
+static void term_scroll(void) {
+    u8 row;
+    u8 col;
+    if (term_row < TERM_ROWS) {
+        return;
+    }
+    for (row = 1u; row < TERM_ROWS; ++row) {
+        for (col = 0u; col <= TERM_COLS; ++col) {
+            term_lines[row - 1u][col] = term_lines[row][col];
+        }
+    }
+    for (col = 0u; col < TERM_COLS; ++col) {
+        term_lines[TERM_ROWS - 1u][col] = ' ';
+    }
+    term_lines[TERM_ROWS - 1u][TERM_COLS] = '\0';
+    term_row = (u8)(TERM_ROWS - 1u);
+}
+
+static void term_putc(char ch) {
+    if (ch == '\n') {
+        term_col = 0u;
+        ++term_row;
+    } else if (ch == '\r') {
+        term_col = 0u;
+    } else if (ch == '\b') {
+        if (term_col != 0u) {
+            --term_col;
+            term_lines[term_row][term_col] = ' ';
+        }
+    } else {
+        term_lines[term_row][term_col] = ch;
+        ++term_col;
+        if (term_col >= TERM_COLS) {
+            term_col = 0u;
+            ++term_row;
+        }
+    }
+    term_scroll();
+}
+
+static void term_write(const char *text) {
+    while (*text != '\0') {
+        term_putc(*text);
+        ++text;
+    }
+}
+
+static void term_write_u(u32 value) {
+    char digits[10];
+    u8 length = 0u;
+    if (value == 0u) {
+        term_putc('0');
+        return;
+    }
+    while (value != 0u) {
+        digits[length] = (char)('0' + (char)(value % 10u));
+        value /= 10u;
+        ++length;
+    }
+    while (length != 0u) {
+        --length;
+        term_putc(digits[length]);
+    }
+}
+
 static void file_print_name(const volatile u8 *entry) {
     u8 index;
-    for (index = 0u; index < 8u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
+    for (index = 0u; index < 8u && entry[index] != ' '; ++index) {
+        term_putc((char)entry[index]);
+    }
     if (entry[8] != ' ') {
-        console_put_character('.');
-        for (index = 8u; index < 11u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
+        term_putc('.');
+        for (index = 8u; index < 11u && entry[index] != ' '; ++index) {
+            term_putc((char)entry[index]);
+        }
     }
 }
 
 static void file_manager_dir(void) {
     u16 index;
-    console_write("Disk files (FAT12):\n");
+    term_write("Disk files (FAT12):\n");
     for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
         const volatile u8 *entry = FAT_ROOT + index * 32u;
         if (entry[0] == 0x00u) break;
-        if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
+        if (entry[0] == 0xE5u || entry[11] == 0x0Fu ||
+            (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
         file_print_name(entry);
-        console_write("  ");
-        console_write_unsigned((u32)entry[28] | ((u32)entry[29] << 8u) | ((u32)entry[30] << 16u) | ((u32)entry[31] << 24u));
-        console_write(" bytes\n");
+        term_write("  ");
+        term_write_u((u32)entry[28] | ((u32)entry[29] << 8u) |
+                     ((u32)entry[30] << 16u) | ((u32)entry[31] << 24u));
+        term_write(" bytes\n");
     }
 }
 
@@ -727,32 +644,57 @@ static void file_type(const char *name) {
     const u16 index = file_find(name);
     u16 cluster;
     u32 remaining;
-    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
-    cluster = (u16)FAT_ROOT[index * 32u + 26u] | ((u16)FAT_ROOT[index * 32u + 27u] << 8u);
-    remaining = (u32)FAT_ROOT[index * 32u + 28u] | ((u32)FAT_ROOT[index * 32u + 29u] << 8u) | ((u32)FAT_ROOT[index * 32u + 30u] << 16u) | ((u32)FAT_ROOT[index * 32u + 31u] << 24u);
+    if (index == 0xFFFFu) {
+        term_write("File not found.\n");
+        return;
+    }
+    cluster = (u16)FAT_ROOT[index * 32u + 26u] |
+              ((u16)FAT_ROOT[index * 32u + 27u] << 8u);
+    remaining = (u32)FAT_ROOT[index * 32u + 28u] |
+                ((u32)FAT_ROOT[index * 32u + 29u] << 8u) |
+                ((u32)FAT_ROOT[index * 32u + 30u] << 16u) |
+                ((u32)FAT_ROOT[index * 32u + 31u] << 24u);
     if (remaining > FAT_FILE_LIMIT) remaining = FAT_FILE_LIMIT;
     while (remaining != 0u && cluster >= 2u && cluster < 0xFF8u) {
         const u32 offset = (u32)(cluster - 2u) * 512u;
         u32 count = remaining < 512u ? remaining : 512u;
         u32 position;
-        for (position = 0u; position < count; ++position) console_put_character((char)FILE_DATA[offset + position]);
+        for (position = 0u; position < count; ++position) {
+            term_putc((char)FILE_DATA[offset + position]);
+        }
         remaining -= count;
         cluster = fat12_next(cluster);
     }
-    console_put_character('\n');
+    term_putc('\n');
 }
 
 static void file_delete(const char *name) {
     const u16 index = file_find(name);
     const volatile u8 *entry;
-    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
+    if (index == 0xFFFFu) {
+        term_write("File not found.\n");
+        return;
+    }
     entry = FAT_ROOT + index * 32u;
     if (file_name_matches(entry, "KERNEL.BIN") != 0u) {
-        console_write("KERNEL.BIN is protected.\n");
+        term_write("KERNEL.BIN is protected.\n");
         return;
     }
     file_deleted[index] = 1u;
-    console_write("Deleted (session only): "); file_print_name(entry); console_write("\n");
+    term_write("Deleted (session only): ");
+    file_print_name(entry);
+    term_write("\n");
+}
+
+static char *trim_command(char *command) {
+    char *start = command;
+    char *end;
+    while (*start == ' ') ++start;
+    end = start;
+    while (*end != '\0') ++end;
+    while (end != start && end[-1] == ' ') --end;
+    *end = '\0';
+    return start;
 }
 
 static char *command_argument(char *command) {
@@ -764,56 +706,464 @@ static char *command_argument(char *command) {
 }
 
 static void print_help(void) {
-    console_write("Commands:\n");
-    console_write("  DIR    list real FAT12 files\n");
-    console_write("  TYPE   read a file, for example TYPE README.TXT\n");
-    console_write("  DEL    safely hide a file (KERNEL.BIN is protected)\n");
-    console_write("  SNAKE  start the built-in game\n");
-    console_write("  CLEAR  clear the screen\n");
-    console_write("  HELP   show this list\n");
+    term_write("Commands:\n");
+    term_write("  DIR   list FAT12 files\n");
+    term_write("  TYPE  read a file\n");
+    term_write("  DEL   hide a user file\n");
+    term_write("  SNAKE start the game\n");
+    term_write("  MEM   heap usage\n");
+    term_write("  ABOUT system info\n");
+    term_write("  DESK  back to workshop\n");
+    term_write("  CLEAR HELP\n");
+}
+
+static void print_about(void) {
+    term_write("DimOS workshop 0.2\n");
+    term_write("32-bit protected mode, VGA 13h\n");
+    term_write("Cubes smell of shavings.\n");
+    term_write("Pillows stay warm.\n");
+    term_write("Arrows move, Enter opens.\n");
+    term_write("Heap used: ");
+    term_write_u(heap_used);
+    term_write("/");
+    term_write_u((u32)sizeof(heap));
+    term_write("\n");
+}
+
+static u32 next_random(void) {
+    u32 value = rng;
+    value ^= value << 13u;
+    value ^= value >> 17u;
+    value ^= value << 5u;
+    if (value == 0u) value = 0xA341316Cu;
+    rng = value;
+    return value;
+}
+
+static u16 snake_index(u8 row, u8 col) {
+    return (u16)((u16)row * SNAKE_COLS + col);
+}
+
+static u8 snake_occupies(u16 cell, u16 ignore_tail) {
+    u16 i;
+    for (i = 0u; i < snake_len; ++i) {
+        if (i == ignore_tail) continue;
+        if (snake_cells[i] == cell) return 1u;
+    }
+    return 0u;
+}
+
+static void snake_place_food(void) {
+    u16 guard = 0u;
+    do {
+        const u8 row = (u8)(next_random() % SNAKE_ROWS);
+        const u8 col = (u8)(next_random() % SNAKE_COLS);
+        snake_food = snake_index(row, col);
+        ++guard;
+    } while (snake_occupies(snake_food, 0xFFFFu) != 0u && guard < 200u);
+}
+
+static void snake_reset(void) {
+    u8 i;
+    snake_len = 4u;
+    snake_score = 0u;
+    snake_dir = DIR_RIGHT;
+    snake_dead = 0u;
+    rng ^= (u32)pit_read() | 1u;
+    for (i = 0u; i < snake_len; ++i) {
+        snake_cells[i] = snake_index(7u, (u8)(10u - i));
+    }
+    snake_place_food();
+}
+
+static void snake_step(void) {
+    u16 head = snake_cells[0];
+    u8 row = (u8)(head / SNAKE_COLS);
+    u8 col = (u8)(head % SNAKE_COLS);
+    u16 i;
+    u16 next;
+    if (snake_dir == DIR_UP) {
+        if (row == 0u) { snake_dead = 1u; return; }
+        --row;
+    } else if (snake_dir == DIR_DOWN) {
+        if (row + 1u >= SNAKE_ROWS) { snake_dead = 1u; return; }
+        ++row;
+    } else if (snake_dir == DIR_LEFT) {
+        if (col == 0u) { snake_dead = 1u; return; }
+        --col;
+    } else {
+        if (col + 1u >= SNAKE_COLS) { snake_dead = 1u; return; }
+        ++col;
+    }
+    next = snake_index(row, col);
+    if (snake_occupies(next, (u16)(snake_len - 1u)) != 0u) {
+        snake_dead = 1u;
+        return;
+    }
+    if (next == snake_food) {
+        if (snake_len < SNAKE_MAX) ++snake_len;
+        snake_score = (u16)(snake_score + 10u);
+        snake_place_food();
+    }
+    i = (u16)(snake_len - 1u);
+    while (i != 0u) {
+        snake_cells[i] = snake_cells[i - 1u];
+        --i;
+    }
+    snake_cells[0] = next;
+}
+
+static void snake_turn(u16 key) {
+    if ((key == (u16)'w' || key == (u16)'W' || key == KEY_UP) &&
+        snake_dir != DIR_DOWN) snake_dir = DIR_UP;
+    else if ((key == (u16)'d' || key == (u16)'D' || key == KEY_RIGHT) &&
+             snake_dir != DIR_LEFT) snake_dir = DIR_RIGHT;
+    else if ((key == (u16)'s' || key == (u16)'S' || key == KEY_DOWN) &&
+             snake_dir != DIR_UP) snake_dir = DIR_DOWN;
+    else if ((key == (u16)'a' || key == (u16)'A' || key == KEY_LEFT) &&
+             snake_dir != DIR_RIGHT) snake_dir = DIR_LEFT;
+}
+
+static void run_command(char *line) {
+    char *command = trim_command(line);
+    char *argument = command_argument(command);
+    if (*command == '\0') return;
+    if (strings_equal(command, "DIR") != 0u ||
+        strings_equal(command, "FILES") != 0u) {
+        file_manager_dir();
+    } else if (strings_equal(command, "TYPE") != 0u) {
+        if (*argument == '\0') term_write("Usage: TYPE filename\n");
+        else file_type(argument);
+    } else if (strings_equal(command, "DEL") != 0u) {
+        if (*argument == '\0') term_write("Usage: DEL filename\n");
+        else file_delete(argument);
+    } else if (strings_equal(command, "SNAKE") != 0u) {
+        app_open = APP_SNAKE;
+        snake_reset();
+    } else if (strings_equal(command, "MEM") != 0u) {
+        (void)kalloc(16u);
+        term_write("Heap ");
+        term_write_u(heap_used);
+        term_write(" / ");
+        term_write_u((u32)sizeof(heap));
+        term_write(" bytes\n");
+    } else if (strings_equal(command, "ABOUT") != 0u ||
+               strings_equal(command, "VER") != 0u) {
+        print_about();
+    } else if (strings_equal(command, "DESK") != 0u ||
+               strings_equal(command, "DESKTOP") != 0u) {
+        app_open = APP_NONE;
+    } else if (strings_equal(command, "CLEAR") != 0u ||
+               strings_equal(command, "CLS") != 0u) {
+        term_clear();
+    } else if (strings_equal(command, "HELP") != 0u) {
+        print_help();
+    } else if (strings_equal(command, "ECHO") != 0u) {
+        term_write(argument);
+        term_putc('\n');
+    } else {
+        term_write("Unknown. Type HELP.\n");
+    }
+}
+
+static void term_open(void) {
+    term_clear();
+    cmd_len = 0u;
+    term_write("DimOS workshop terminal\n");
+    term_write("Cubes became windows. Type HELP.\n\n> ");
+}
+
+static void term_key(u16 key) {
+    if (key == 27u) {
+        app_open = APP_NONE;
+        return;
+    }
+    if (key == (u16)'\n') {
+        cmd_buf[cmd_len] = '\0';
+        term_putc('\n');
+        run_command(cmd_buf);
+        if (app_open == APP_TERM) {
+            cmd_len = 0u;
+            term_write("> ");
+        }
+        return;
+    }
+    if (key == (u16)'\b') {
+        if (cmd_len != 0u) {
+            --cmd_len;
+            term_putc('\b');
+        }
+        return;
+    }
+    if (key >= 32u && key <= 126u && cmd_len < CMD_CAP) {
+        cmd_buf[cmd_len] = (char)key;
+        ++cmd_len;
+        term_putc((char)key);
+    }
+}
+
+static void objects_init(void) {
+    objects[0].x = 58;  objects[0].y = 118; objects[0].kind = KIND_CUBE;
+    objects[0].app = APP_NONE; objects[0].size = 22; objects[0].name = "block";
+    objects[1].x = 118; objects[1].y = 132; objects[1].kind = KIND_CUBE;
+    objects[1].app = APP_NONE; objects[1].size = 16; objects[1].name = "shaving";
+    objects[2].x = 250; objects[2].y = 128; objects[2].kind = KIND_PILLOW;
+    objects[2].app = APP_NONE; objects[2].size = 22; objects[2].name = "pillow";
+    objects[3].x = 198; objects[3].y = 146; objects[3].kind = KIND_PILLOW;
+    objects[3].app = APP_NONE; objects[3].size = 18; objects[3].name = "warm";
+    objects[4].x = 86;  objects[4].y = 78;  objects[4].kind = KIND_CUBE;
+    objects[4].app = APP_TERM; objects[4].size = 20; objects[4].name = "term";
+    objects[5].x = 156; objects[5].y = 86;  objects[5].kind = KIND_CUBE;
+    objects[5].app = APP_SNAKE; objects[5].size = 20; objects[5].name = "snake";
+    objects[6].x = 220; objects[6].y = 80;  objects[6].kind = KIND_CUBE;
+    objects[6].app = APP_FILES; objects[6].size = 18; objects[6].name = "files";
+    objects[7].x = 40;  objects[7].y = 168; objects[7].kind = KIND_CUBE;
+    objects[7].app = APP_ABOUT; objects[7].size = 16; objects[7].name = "about";
+    selected = 4u;
+}
+
+static void clamp_object(struct object *obj) {
+    if (obj->x < 20) obj->x = 20;
+    if (obj->x > 300) obj->x = 300;
+    if (obj->y < 50) obj->y = 50;
+    if (obj->y > 176) obj->y = 176;
+}
+
+static void draw_workshop(void) {
+    u8 order[OBJ_COUNT];
+    u8 i;
+    u8 j;
+    fill_rect(0, 0, SW, 36, C_DUSK);
+    fill_rect(0, 36, SW, 110, C_FLOOR);
+    fill_rect(0, 146, SW, 54, C_WOOD);
+    for (i = 0u; i < 20u; ++i) {
+        fill_rect(0, 146 + (int)i * 3, SW, 1, (i & 1u) != 0u ? C_BAR : C_WOOD);
+    }
+    fill_rect(0, 0, SW, 18, C_BAR);
+    draw_text(6, 5, "DimOS workshop", C_CREAM, C_BAR, 0u);
+    draw_text(200, 5, "v0.2", C_SHAVE, C_BAR, 0u);
+    draw_text(48, 22, "shavings in the air", C_SHAVE, C_DUSK, 0u);
+
+    for (i = 0u; i < OBJ_COUNT; ++i) order[i] = i;
+    for (i = 0u; i < OBJ_COUNT; ++i) {
+        for (j = (u8)(i + 1u); j < OBJ_COUNT; ++j) {
+            if (objects[order[j]].y < objects[order[i]].y) {
+                const u8 t = order[i];
+                order[i] = order[j];
+                order[j] = t;
+            }
+        }
+    }
+
+    for (i = 0u; i < OBJ_COUNT; ++i) {
+        const u8 id = order[i];
+        struct object *obj = &objects[id];
+        const int bob = (id == selected) ? ((bounce & 1u) != 0u ? -1 : 0) : 0;
+        const int x = obj->x;
+        const int y = obj->y + bob;
+        if (obj->kind == KIND_CUBE) {
+            u8 top = C_SHAVE;
+            u8 side = C_WOOD;
+            u8 dark = C_BAR;
+            if (obj->app == APP_TERM) { top = C_TEAL; side = C_MOSS; }
+            if (obj->app == APP_SNAKE) { top = C_AMBER; side = C_CLAY; }
+            if (obj->app == APP_FILES) { top = C_CREAM; side = C_SHAVE; }
+            if (obj->app == APP_ABOUT) { top = C_LINEN; side = C_WOOD; }
+            draw_cube(x, y, obj->size, side, top, dark);
+        } else {
+            fill_circle(x, y, obj->size, (obj->size * 3) / 4, C_ROSE, C_BLUSH);
+        }
+        if (id == selected) {
+            fill_rect(x - obj->size - 2, y + obj->size - 4, obj->size * 2 + 4, 2, C_AMBER);
+        }
+        draw_text(x - 20, y + obj->size - 2, obj->name, C_INK, C_WOOD, 0u);
+    }
+
+    fill_rect(0, 186, SW, 14, C_INK);
+    draw_text(4, 188, "Tab next  Arrows move  Enter open  Esc desk", C_LINEN, C_INK, 0u);
+}
+
+static void draw_window_frame(const char *title) {
+    fill_rect(16, 22, 288, 160, C_BAR);
+    fill_rect(18, 24, 284, 156, C_LINEN);
+    fill_rect(18, 24, 284, 14, C_WOOD);
+    draw_text(24, 26, title, C_CREAM, C_WOOD, 0u);
+    draw_text(270, 26, "x", C_CLAY, C_WOOD, 0u);
+}
+
+static void draw_terminal(void) {
+    u8 row;
+    draw_window_frame("Terminal");
+    fill_rect(20, 40, 280, 118, C_NIGHT);
+    for (row = 0u; row < TERM_ROWS; ++row) {
+        draw_text(24, 42 + (int)row * 8, term_lines[row], C_CREAM, C_NIGHT, 0u);
+    }
+    fill_rect(24 + (int)term_col * 8, 42 + (int)term_row * 8, 8, 8, C_AMBER);
+}
+
+static void draw_files_app(void) {
+    u16 index;
+    int y = 44;
+    draw_window_frame("Files");
+    draw_text(24, y, "FAT12 floppy", C_INK, C_LINEN, 0u);
+    y += 12;
+    for (index = 0u; index < FAT_ROOT_ENTRIES && y < 168; ++index) {
+        const volatile u8 *entry = FAT_ROOT + index * 32u;
+        char name[13];
+        u8 n = 0u;
+        u8 k;
+        if (entry[0] == 0x00u) break;
+        if (entry[0] == 0xE5u || entry[11] == 0x0Fu ||
+            (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
+        for (k = 0u; k < 8u && entry[k] != ' '; ++k) name[n++] = (char)entry[k];
+        if (entry[8] != ' ') {
+            name[n++] = '.';
+            for (k = 8u; k < 11u && entry[k] != ' '; ++k) name[n++] = (char)entry[k];
+        }
+        name[n] = '\0';
+        fill_rect(24, y, 10, 8, C_SHAVE);
+        draw_text(38, y, name, C_INK, C_LINEN, 0u);
+        y += 10;
+    }
+    draw_text(24, 168, "Esc closes", C_BAR, C_LINEN, 0u);
+}
+
+static void draw_about_app(void) {
+    draw_window_frame("About DimOS");
+    draw_text(24, 46, "A living workshop OS.", C_INK, C_LINEN, 0u);
+    draw_text(24, 58, "Cubes keep the smell", C_INK, C_LINEN, 0u);
+    draw_text(24, 70, "of fresh shavings.", C_INK, C_LINEN, 0u);
+    draw_text(24, 86, "Pillows stay warm.", C_ROSE, C_LINEN, 0u);
+    draw_text(24, 102, "Protected mode + FAT12", C_BAR, C_LINEN, 0u);
+    draw_text(24, 114, "Heap", C_INK, C_LINEN, 0u);
+    draw_text(64, 114, "ready", C_MOSS, C_LINEN, 0u);
+    draw_text(24, 130, "Next: fonts, net, more", C_BAR, C_LINEN, 0u);
+    draw_text(24, 168, "Esc back to workshop", C_BAR, C_LINEN, 0u);
+}
+
+static void draw_snake_app(void) {
+    const int ox = 28;
+    const int oy = 44;
+    u16 i;
+    u8 r;
+    u8 c;
+    draw_window_frame("Snake");
+    fill_rect(ox - 2, oy - 2, SNAKE_COLS * SNAKE_CW + 4,
+              SNAKE_ROWS * SNAKE_CH + 4, C_INK);
+    fill_rect(ox, oy, SNAKE_COLS * SNAKE_CW, SNAKE_ROWS * SNAKE_CH, C_MOSS);
+    for (i = 0u; i < snake_len; ++i) {
+        r = (u8)(snake_cells[i] / SNAKE_COLS);
+        c = (u8)(snake_cells[i] % SNAKE_COLS);
+        fill_rect(ox + (int)c * SNAKE_CW + 1, oy + (int)r * SNAKE_CH + 1,
+                  SNAKE_CW - 2, SNAKE_CH - 2, i == 0u ? C_AMBER : C_SHAVE);
+    }
+    r = (u8)(snake_food / SNAKE_COLS);
+    c = (u8)(snake_food % SNAKE_COLS);
+    fill_circle(ox + (int)c * SNAKE_CW + 4, oy + (int)r * SNAKE_CH + 4,
+                3, 3, C_CLAY, C_ROSE);
+    if (snake_dead != 0u) {
+        draw_text(80, 100, "GAME OVER", C_WHITE, C_INK, 1u);
+        draw_text(56, 112, "Enter retry  Esc desk", C_CREAM, C_INK, 1u);
+    }
+}
+
+static void draw_frame(void) {
+    if (app_open == APP_NONE) {
+        draw_workshop();
+    } else if (app_open == APP_TERM) {
+        draw_workshop();
+        draw_terminal();
+    } else if (app_open == APP_SNAKE) {
+        draw_workshop();
+        draw_snake_app();
+    } else if (app_open == APP_FILES) {
+        draw_workshop();
+        draw_files_app();
+    } else {
+        draw_workshop();
+        draw_about_app();
+    }
+}
+
+static void open_selected(void) {
+    const u8 app = objects[selected].app;
+    if (app == APP_NONE) return;
+    app_open = app;
+    if (app == APP_TERM) term_open();
+    else if (app == APP_SNAKE) snake_reset();
+    else if (app == APP_FILES) {
+        term_clear();
+        file_manager_dir();
+    } else if (app == APP_ABOUT) {
+        term_clear();
+        print_about();
+    }
+}
+
+static void move_selected(i16 dx, i16 dy) {
+    objects[selected].x = (i16)(objects[selected].x + dx);
+    objects[selected].y = (i16)(objects[selected].y + dy);
+    clamp_object(&objects[selected]);
 }
 
 void kernel_main(void) {
-    char command_buffer[COMMAND_CAPACITY + 1u];
+    u8 dirty = 1u;
 
-    console_clear();
+    palette_warm();
     keyboard_initialize();
     pit_initialize();
-
-    console_write("DimOS protected-mode C kernel\n");
-    console_write("PS/2 keyboard ready (v86 compatible). Type HELP.\n\n");
+    objects_init();
+    (void)kalloc(32u);
+    app_open = APP_NONE;
 
     for (;;) {
-        char *command;
-        char *argument;
+        const u16 key = keyboard_poll();
 
-        console_write("> ");
-        read_line(command_buffer, COMMAND_CAPACITY);
-        command = trim_command(command_buffer);
-        argument = command_argument(command);
-
-        if (*command == '\0') {
-            continue;
+        if (pit_tick(PIT_DIVISOR * 4u) != 0u) {
+            bounce = (u8)(bounce ^ 1u);
+            if (app_open == APP_SNAKE && snake_dead == 0u) {
+                snake_step();
+            }
+            dirty = 1u;
         }
-        if (strings_equal(command, "DIR") != 0u) {
-            file_manager_dir();
-        } else if (strings_equal(command, "TYPE") != 0u) {
-            if (*argument == '\0') console_write("Usage: TYPE filename\n");
-            else file_type(argument);
-        } else if (strings_equal(command, "DEL") != 0u) {
-            if (*argument == '\0') console_write("Usage: DEL filename\n");
-            else file_delete(argument);
-        } else if (strings_equal(command, "SNAKE") != 0u) {
-            snake_game();
-            console_clear();
-            console_write("Back at the command line. Type HELP.\n\n");
-        } else if (strings_equal(command, "CLEAR") != 0u ||
-                   strings_equal(command, "CLS") != 0u) {
-            console_clear();
-        } else if (strings_equal(command, "HELP") != 0u) {
-            print_help();
-        } else {
-            console_write("Unknown command. Type HELP.\n");
+
+        if (key != KEY_NONE) {
+            if (app_open == APP_NONE) {
+                if (key == KEY_TAB || key == (u16)'\t') {
+                    selected = (u8)((selected + 1u) % OBJ_COUNT);
+                } else if (key == KEY_LEFT) {
+                    move_selected(-6, 0);
+                } else if (key == KEY_RIGHT) {
+                    move_selected(6, 0);
+                } else if (key == KEY_UP) {
+                    move_selected(0, -6);
+                } else if (key == KEY_DOWN) {
+                    move_selected(0, 6);
+                } else if (key == (u16)'\n') {
+                    open_selected();
+                } else if (key == (u16)'1') selected = 4u;
+                else if (key == (u16)'2') selected = 5u;
+                else if (key == (u16)'3') selected = 6u;
+                else if (key == (u16)'4') selected = 7u;
+            } else if (app_open == APP_TERM) {
+                term_key(key);
+            } else if (app_open == APP_SNAKE) {
+                if (key == 27u) app_open = APP_NONE;
+                else if (snake_dead != 0u &&
+                         (key == (u16)'\n' || key == (u16)'n' || key == (u16)'N')) {
+                    snake_reset();
+                } else {
+                    snake_turn(key);
+                }
+            } else {
+                if (key == 27u) app_open = APP_NONE;
+            }
+            dirty = 1u;
+        }
+
+        if (dirty != 0u) {
+            draw_frame();
+            dirty = 0u;
         }
     }
 }

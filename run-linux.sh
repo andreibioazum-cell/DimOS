@@ -14,7 +14,7 @@ if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
     exit 1
 fi
 
-printf 'Starting DimOS Minimal...\n'
+printf 'Starting DimOS workshop...\n'
 exec qemu-system-x86_64 \
     -display gtk \
     -drive format=raw,file="$IMAGE",if=floppy,index=0

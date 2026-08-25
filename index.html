@@ -3,28 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>DimOS</title>
+  <title>DimOS — мастерская</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #07080c;
-      --panel: #10131b;
-      --ink: #e8edf7;
-      --muted: #93a0b8;
-      --accent: #7cf0c2;
-      --danger: #ff8b8b;
+      --bg: #1a120c;
+      --panel: #2a1c12;
+      --ink: #f4e6c8;
+      --muted: #c4a882;
+      --accent: #e0a04a;
+      --danger: #d97858;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
       min-height: 100%;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at 80% 0%, #3a2414 0%, transparent 42%),
+        linear-gradient(180deg, #24160e, #120c08);
       color: var(--ink);
-      font: 16px/1.45 system-ui, sans-serif;
+      font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
     }
     body { padding: 16px; }
-    main { max-width: 960px; margin: 0 auto; }
-    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    main { max-width: 980px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: 0.02em; }
     .lede { color: var(--muted); margin: 0 0 12px; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
     button {
@@ -36,25 +38,34 @@
       font-weight: 700;
       cursor: pointer;
       background: var(--accent);
-      color: #062117;
+      color: #2a1608;
     }
-    button.secondary { background: #2a3142; color: var(--ink); font-weight: 600; }
+    button.secondary { background: #4a3220; color: var(--ink); font-weight: 600; }
     button[disabled] { opacity: 0.5; cursor: not-allowed; }
     #status { min-height: 1.4em; margin: 0 0 12px; color: var(--muted); }
     #status.err { color: var(--danger); }
-    #status.ok { color: var(--accent); }
+    #status.ok { color: #d8c07a; }
     #screen_container {
       background: #000;
-      border: 1px solid #2a3142;
+      border: 2px solid #6a4424;
       border-radius: 12px;
-      overflow: auto;
-      padding: 8px;
+      overflow: hidden;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 200px;
+      box-shadow: 0 18px 50px #0008;
     }
-    #screen_container div {
-      white-space: pre;
-      font: 14px/14px ui-monospace, "Cascadia Mono", Menlo, monospace;
+    #screen_container div { display: none; }
+    #screen_container canvas {
+      display: block !important;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      width: min(960px, 100%);
+      height: auto;
+      background: #000;
     }
-    #screen_container canvas { display: none; }
     details {
       margin-top: 16px;
       background: var(--panel);
@@ -69,10 +80,10 @@
 </head>
 <body>
   <main>
-    <h1>DimOS</h1>
+    <h1>DimOS — мастерская</h1>
     <p class="lede">
-      Образ системы встроен прямо в страницу. Ничего выбирать и никуда
-      подкладывать не нужно — просто открой файл и жми <strong>Start</strong>.
+      Кубики пахнут стружкой, подушки ещё тёплые. Стрелками двигай предметы,
+      Tab выбирает, Enter раскрывает куб в окно.
     </p>
     <div class="row">
       <button id="start" type="button">Start</button>
@@ -85,23 +96,23 @@
       <div></div>
       <canvas></canvas>
     </div>
-    <p class="hint">Щёлкни один раз по чёрному экрану, чтобы клавиатура ушла в DimOS. Затем набери <code>HELP</code>.</p>
+    <p class="hint">
+      Щёлкни по экрану, чтобы клавиатура ушла в DimOS.
+      <code>Tab</code> — следующий предмет,
+      стрелки — подвинуть,
+      <code>Enter</code> — открыть,
+      <code>Esc</code> — вернуться в мастерскую.
+    </p>
 
     <details>
-      <summary>Если видишь «Boot failed: could not read the boot disk»</summary>
-      <p>
-        Эта надпись приходит от SeaBIOS, а не от DimOS: значит эмулятору
-        подсунули не тот образ или не в тот слот. Почти всегда причина одна из трёх:
-      </p>
+      <summary>Как пользоваться мастерской</summary>
       <ul>
-        <li>открыта страница <code>copy.sh/v86/debug.html</code>, где <code>dimos.img</code> попал в слот <strong>CD-ROM</strong> или <strong>Hard disk</strong>;</li>
-        <li>выбран старый или недособранный <code>dimos.img</code> из прошлой сборки;</li>
-        <li>в слот вставлен пустой <code>FLOPPY2.img</code>.</li>
+        <li><strong>term</strong> — терминал (HELP, DIR, TYPE, SNAKE, MEM, ABOUT).</li>
+        <li><strong>snake</strong> — змейка на графике.</li>
+        <li><strong>files</strong> — файлы FAT12.</li>
+        <li><strong>about</strong> — о системе.</li>
+        <li><strong>block / shaving / pillow / warm</strong> — просто поиграть, подвигать.</li>
       </ul>
-      <p>
-        Эта страница ничего из перечисленного сделать не даёт: она держит
-        рабочий образ внутри себя и всегда кладёт его на floppy-слот.
-      </p>
     </details>
   </main>
 
@@ -161,7 +172,8 @@
           buffer: raw.buffer,
           label: "встроенный образ DimOS",
         };
-        setStatus("Встроенный образ готов (1440 КБ). Жми Start.", "ok");
+        setStatus("Мастерская готова. Жми Start — или подожди, сейчас сама.", "ok");
+        startEmulator();
       } catch (error) {
         setStatus("Не удалось распаковать встроенный образ: " + error.message, "err");
       }
@@ -201,7 +213,7 @@
         config.boot_order = 0x123;
       }
 
-      setStatus("Запуск: " + pending.label + ". Щёлкни по экрану для клавиатуры.", "ok");
+      setStatus("Мастерская запущена. Щёлкни по экрану для клавиатуры.", "ok");
       emulator = new V86(config);
     }
 

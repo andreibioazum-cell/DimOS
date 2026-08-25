@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Build the minimal DimOS image: bootloader + command line/Snake kernel.
+# Build the DimOS workshop image: bootloader + graphical kernel.
 
 set -Eeuo pipefail
 
@@ -117,6 +117,7 @@ build_kernel() {
         -ffreestanding -fno-builtin -fno-pic -fno-pie \
         -fno-stack-protector -fno-asynchronous-unwind-tables \
         -fno-unwind-tables -mno-mmx -mno-sse -mno-sse2 \
+        -I src/kernel \
         -c src/kernel/kernel.c -o "$KERNEL_C_OBJECT"
 
     log_info "Linking flat kernel"
@@ -156,14 +157,18 @@ create_iso_image() {
     log_ok "Created $ISO_IMAGE ($(file_size "$ISO_IMAGE") bytes)"
 }
 
-for command in nasm mkfs.vfat mcopy mdir truncate gzip base64 sha256sum; do
+for command in nasm gzip base64 sha256sum; do
     require_command "$command"
 done
 require_command "${CC:-gcc}"
 require_command "${CXX:-g++}"
 require_command "${LD:-ld}"
 require_command "${OBJCOPY:-objcopy}"
-(( ! BUILD_ISO )) || require_command xorriso
+require_command "${PYTHON:-python3}"
+if (( BUILD_ISO )) && ! command -v xorriso >/dev/null 2>&1; then
+    log_info "xorriso not found; building floppy only"
+    BUILD_ISO=0
+fi
 
 mkdir -p bin disk_img
 build_image_checker
@@ -187,29 +192,19 @@ kernel_size=$(file_size bin/KERNEL.BIN)
 log_ok "Kernel size: $kernel_size bytes"
 
 log_info "Creating FAT12 image"
-truncate -s "$FLOPPY_SIZE_BYTES" "$BOOT_IMAGE"
-mkfs.vfat -F 12 -n DIMOS "$BOOT_IMAGE" >/dev/null
-
-# The old workflow publishes this name; it is intentionally an empty FAT12 disk.
-truncate -s "$FLOPPY_SIZE_BYTES" "$SECOND_FLOPPY_IMAGE"
-mkfs.vfat -F 12 -n EMPTY "$SECOND_FLOPPY_IMAGE" >/dev/null
-
-dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
-mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
-# Ship a small ordinary file so the file manager has a real FAT12 file to inspect.
+fat_files=(bin/KERNEL.BIN)
 if [[ -d files ]]; then
     for user_file in files/*; do
         [[ -f "$user_file" ]] || continue
-        mcopy -i "$BOOT_IMAGE" "$user_file" ::/
+        fat_files+=("$user_file")
     done
 fi
+"${PYTHON:-python3}" tools/make_fat12.py bin/BOOT.BIN "$BOOT_IMAGE" "${fat_files[@]}"
+
+# Compatibility empty second floppy.
+"${PYTHON:-python3}" -c 'from pathlib import Path; Path("disk_img/FLOPPY2.img").write_bytes(bytes(1474560))'
 
 "$IMAGE_CHECKER" bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE"
-
-if (( ! QUIET )); then
-    printf '\nDisk contents (kernel plus user files):\n'
-    mdir -i "$BOOT_IMAGE" ::/
-fi
 
 (( ! BUILD_ISO )) || create_iso_image
 

@@ -1,6 +1,13 @@
-DimOS file manager
+DimOS workshop
 
-DIR lists the real FAT12 files on this disk.
-TYPE README.TXT reads this file.
-DEL removes only a user file for the current session.
-KERNEL.BIN is protected so deleting files can never stop DimOS booting.
+Tab selects a cube or a pillow.
+Arrows drag it across the floor.
+Enter unfolds an app cube into a window.
+
+term   - command line
+snake  - the game
+files  - FAT12 disk
+about  - system card
+
+block, shaving, pillow, warm are just toys.
+They keep the smell of shavings and stay warm.

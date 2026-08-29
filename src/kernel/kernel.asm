@@ -46,7 +46,12 @@ kernel_entry:
     shl eax, 4              ; ES * 16
     movzx ebx, bp           ; + BP
     add eax, ebx
-    mov [bios_font_address - KERNEL_SEGMENT * 16], eax
+    ; The dword inside the brackets is an address-size prefix: it makes the
+    ; assembler emit a 32-bit displacement. A 16-bit displacement would ask
+    ; the linker for a 16-bit relocation of an address above 64 KiB, which
+    ; overflows; the 32-bit form links everywhere. At run time DS is 0x2000,
+    ; so the linear address is 0x20000 plus this offset.
+    mov [dword bios_font_address - KERNEL_SEGMENT * 16], eax
 
     ; --- 320 x 200, 256 colours ------------------------------------
     ; Video service 00h, mode 13h: the classic DOS graphics mode. One
@@ -55,7 +60,9 @@ kernel_entry:
     int 0x10
 
     ; --- into protected mode ---------------------------------------
-    lgdt [gdt_descriptor - KERNEL_SEGMENT * 16]
+    ; Same address-size prefix as above: 32-bit displacement, so the linker
+    ; never sees a 16-bit relocation it cannot fit.
+    lgdt [dword gdt_descriptor - KERNEL_SEGMENT * 16]
     mov eax, cr0
     or eax, 1               ; set PE, the protection enable bit
     mov cr0, eax

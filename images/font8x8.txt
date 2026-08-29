@@ -1,0 +1,45 @@
+DimOS Font 8x8 - TGA Export
+==========================
+
+This file describes the font8x8_full.tga image which contains the complete DimOS font.
+
+FORMAT:
+-------
+- Image size: 128x64 pixels
+- Characters: 95 printable ASCII characters (0x20 to 0x7E)
+- Each character: 8x8 pixels
+- Layout: 16 characters per row, 8 rows total
+
+CHARACTER MAP:
+-------------
+Row 0: 0x20 (space) to 0x2F (/)
+Row 1: 0x30 (0) to 0x3F (?)
+Row 2: 0x40 (@) to 0x4F (O)
+Row 3: 0x50 (P) to 0x5F (_)
+Row 4: 0x60 (`) to 0x6F (o)
+Row 5: 0x70 (p) to 0x7E (~)
+
+CHARACTER POSITIONS:
+-------------------
+Character 0x20 (space) is at: (0, 0) to (7, 7)
+Character 0x21 (!) is at: (8, 0) to (15, 7)
+Character 0x22 (\") is at: (16, 0) to (23, 7)
+...
+Character 0x7E (~) is at: (120, 56) to (127, 63)
+
+USAGE IN CODE:
+--------------
+To extract a specific character from the TGA file:
+1. Calculate row = (character_code - 0x20) / 16
+2. Calculate col = (character_code - 0x20) % 16
+3. Extract 8x8 pixel block from (col*8, row*8) to (col*8+7, row*8+7)
+
+COLOR:
+------
+- Background: Black (0, 0, 0)
+- Foreground: White (255, 255, 255)
+
+ORIGINAL SOURCE:
+----------------
+The font data comes from tools/sandbox/font8x8.py in the DimOS repository.
+It contains the classic public domain IBM VGA 8x8 font set.

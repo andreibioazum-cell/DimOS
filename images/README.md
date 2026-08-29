@@ -23,8 +23,14 @@
 
 ### Шрифты
 - **font8x8.tga** - Шрифт 8x8 (тестовое изображение с сеткой)
-- **font8x8_full.tga** - Полный шрифт 8x8 (все символы из font8x8.py)
+- **font8x8_full.tga** - Полный шрифт 8x8 из BIOS (все символы из font8x8.py)
 - **font8x8.txt** - Описание шрифта
+- **font_optimized.h** - Супер-оптимизированный шрифт из BIOS (C header, 760 bytes)
+- **font_optimized.bin** - Binary версия оптимизированного шрифта
+- **font_optimized.tga** - TGA версия оптимизированного шрифта
+- **font_ttf_8x8.h** - Шрифт из TTF (DejaVu Sans) в C формате (760 bytes)
+- **font_ttf_8x8.bin** - Binary версия TTF шрифта
+- **font_ttf_8x8.tga** - TGA версия TTF шрифта (128x48)
 
 ## Формат
 

@@ -4,8 +4,9 @@
 ;
 ; Loads KERNEL.BIN to 2000:0000 and preloads the FAT, root directory
 ; and the first data sectors for the kernel file manager.
-; Uses the BIOS drive number in DL and prefers LBA (int 13h AH=42h)
-; so floppy, El Torito CD and small HDD images all work in SeaBIOS/v86.
+; Uses the BIOS drive number in DL and prefers LBA (int 13h AH=42h),
+; so the same sector boots from the hard disk slot (DL=0x80, the
+; reliable ATA/LBA path), from El Torito CD and from a floppy.
 ; ==================================================================
 
 [BITS 16]

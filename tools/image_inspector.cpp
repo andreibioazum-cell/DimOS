@@ -1,8 +1,9 @@
 // DimOS build artifact validator.
 //
 // This host-side tool keeps binary-format checks out of the shell build script.
-// It validates the boot sector, the kernel loader limit, the FAT12 geometry, and
-// the KERNEL.BIN root-directory entry before an ISO is published.
+// It validates the boot sector, the kernel loader limit, the FAT12 geometry,
+// the KERNEL.BIN root-directory entry, the padded hard disk image, and the
+// El Torito boot catalog before artifacts are published.
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@ namespace {
 
 constexpr std::size_t kBootSectorSize = 512;
 constexpr std::size_t kFloppySize = 1'474'560;
+constexpr std::size_t kHddSize = 8'388'608;
 constexpr std::size_t kMaximumKernelSize = 43'008;
 constexpr std::array<std::uint8_t, 11> kKernelFatName = {
     'K', 'E', 'R', 'N', 'E', 'L', ' ', ' ', 'B', 'I', 'N'};
@@ -118,6 +120,24 @@ void validate_installed_bootloader(const Bytes& bootloader, const Bytes& image) 
             "the floppy boot sector differs from BOOT.BIN");
 }
 
+void validate_hdd(const Bytes& floppy, const Bytes& hdd) {
+    require(hdd.size() == kHddSize,
+            "hard disk image must be exactly " + number(kHddSize) +
+                " bytes (8 MiB); got " + number(hdd.size()));
+    // The bootable FAT12 volume sits in the first 1.44 MB unchanged, so the
+    // HDD boots the same code SeaBIOS would find on the floppy.
+    require(hdd.size() >= floppy.size(), "hard disk image is smaller than the FAT12 volume");
+    require(std::equal(floppy.begin(), floppy.end(), hdd.begin()),
+            "hard disk image must start with the exact FAT12 floppy image");
+    // Everything past the volume is padding: a nonzero byte would mean the
+    // image was truncated or wrote garbage into the "empty" disk area.
+    for (std::size_t offset = floppy.size(); offset < hdd.size(); ++offset) {
+        require(hdd[offset] == 0,
+                "hard disk padding must be zero; first nonzero byte at offset " +
+                    number(offset));
+    }
+}
+
 void validate_kernel_directory_entry(const Bytes& image, const Bytes& kernel) {
     const auto bytes_per_sector = static_cast<std::size_t>(read_u16(image, 11));
     const auto reserved_sectors = static_cast<std::size_t>(read_u16(image, 14));
@@ -184,13 +204,13 @@ void validate_iso(const Bytes& iso) {
 
 void print_usage(const char* executable) {
     std::cerr << "Usage: " << executable
-              << " <BOOT.BIN> <KERNEL.BIN> <dimos.img> [dimos.iso]\n";
+              << " <BOOT.BIN> <KERNEL.BIN> <dimos.img> <dimos.hdd> [dimos.iso]\n";
 }
 
 }  // namespace
 
 int main(const int argc, char* argv[]) {
-    if (argc != 4 && argc != 5) {
+    if (argc < 5 || argc > 6) {
         print_usage(argv[0]);
         return 2;
     }
@@ -199,24 +219,26 @@ int main(const int argc, char* argv[]) {
         const auto bootloader = read_file(argv[1]);
         const auto kernel = read_file(argv[2]);
         const auto image = read_file(argv[3]);
+        const auto hdd = read_file(argv[4]);
 
         validate_bootloader(bootloader);
         validate_kernel(kernel);
         validate_geometry(image);
         validate_installed_bootloader(bootloader, image);
         validate_kernel_directory_entry(image, kernel);
+        validate_hdd(image, hdd);
 
-        if (argc == 5) {
-            const auto iso = read_file(argv[4]);
+        std::cout << "Validated DimOS artifacts: boot=" << bootloader.size()
+                  << " bytes, kernel=" << kernel.size()
+                  << " bytes, floppy=" << image.size()
+                  << " bytes, hdd=" << hdd.size() << " bytes";
+
+        if (argc == 6) {
+            const auto iso = read_file(argv[5]);
             validate_iso(iso);
-            std::cout << "Validated DimOS artifacts: boot=" << bootloader.size()
-                      << " bytes, kernel=" << kernel.size()
-                      << " bytes, floppy=" << image.size()
-                      << " bytes, iso=" << iso.size() << " bytes\n";
+            std::cout << ", iso=" << iso.size() << " bytes\n";
         } else {
-            std::cout << "Validated DimOS artifacts: boot=" << bootloader.size()
-                      << " bytes, kernel=" << kernel.size()
-                      << " bytes, floppy=" << image.size() << " bytes\n";
+            std::cout << '\n';
         }
         return 0;
     } catch (const std::exception& error) {

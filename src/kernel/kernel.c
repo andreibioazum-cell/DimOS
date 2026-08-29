@@ -655,6 +655,97 @@ static void read_line(char *buffer, u8 capacity) {
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Pseudo SSD: a RAM disk living in extended memory.                  */
+/*                                                                     */
+/* int 13h only reaches the first megabyte, so the bootloader preloads */
+/* the FAT12 boot sector, both FAT copies, the root directory and the  */
+/* first 64 data sectors into low memory. Once the kernel runs in       */
+/* protected mode it mirrors those windows into a clean RAM disk at    */
+/* 5 MiB; from then on "disk" I/O is a single rep movsl bulk copy: no  */
+/* ports, no BIOS, no interrupts, four bytes per iteration, which is   */
+/* the fastest bulk move on an i386 target without MMX/SSE.            */
+/* ------------------------------------------------------------------ */
+
+#define SSD_BASE_ADDRESS    0x00500000u
+#define SSD_SECTOR_SIZE     512u
+#define SSD_DWORDS_PER_SECT (SSD_SECTOR_SIZE / 4u)   /* 128 dwords = 512 bytes */
+#define SSD_TOTAL_SECTORS   8192u                     /* 4 MiB */
+
+/* Bulk copy with rep movsl (DS:ESI -> ES:EDI, cld counts upwards).
+ * Everything in DimOS is 4-byte aligned for this path (SSD base is page
+ * aligned and every transfer is whole sectors); movsl also works on
+ * unaligned operands, so there is no head/tail handling to slow it down. */
+static inline void ssd_fast_copy(void *dest, const void *src, u32 dwords) {
+    __asm__ volatile (
+        "cld\n\t"
+        "rep movsl"
+        : "+D"(dest), "+S"(src), "+c"(dwords)
+        :
+        : "memory"
+    );
+}
+
+/* Bulk zero with rep stosl: stores EAX (zero) one dword per iteration,
+ * the fastest way to erase the whole RAM disk at boot. */
+static inline void ssd_fast_zero(void *dest, u32 dwords) {
+    __asm__ volatile (
+        "cld\n\t"
+        "rep stosl"
+        : "+D"(dest), "+c"(dwords)
+        : "a"(0u)
+        : "memory"
+    );
+}
+
+static inline u8 *ssd_pointer(u32 lba) {
+    return (u8 *)(SSD_BASE_ADDRESS + lba * SSD_SECTOR_SIZE);
+}
+
+/* Read sector_count sectors starting at lba into buffer.
+ * Returns 1 on success, 0 if the request runs past the end of the SSD. */
+static inline u8 ssd_read_sectors(u32 lba, void *buffer, u32 sector_count) {
+    if (sector_count == 0u || lba >= SSD_TOTAL_SECTORS ||
+        sector_count > SSD_TOTAL_SECTORS - lba) {
+        return 0u;
+    }
+    ssd_fast_copy(buffer, ssd_pointer(lba), sector_count * SSD_DWORDS_PER_SECT);
+    return 1u;
+}
+
+/* Write sector_count sectors from buffer to lba. Same bounds contract. */
+static inline u8 ssd_write_sectors(u32 lba, const void *buffer, u32 sector_count) {
+    if (sector_count == 0u || lba >= SSD_TOTAL_SECTORS ||
+        sector_count > SSD_TOTAL_SECTORS - lba) {
+        return 0u;
+    }
+    ssd_fast_copy(ssd_pointer(lba), buffer, sector_count * SSD_DWORDS_PER_SECT);
+    return 1u;
+}
+
+/* Mirror one low-memory window the bootloader preloaded onto the RAM disk. */
+#define SSD_MIRROR(low_address, lba, sectors) \
+    ssd_fast_copy(ssd_pointer(lba), (const void *)(low_address), \
+                  (u32)(sectors) * SSD_DWORDS_PER_SECT)
+
+void ssd_initialize(void) {
+    /* RAM content is undefined on boot: wipe the RAM disk with rep stosl. */
+    ssd_fast_zero((u8 *)SSD_BASE_ADDRESS,
+                  SSD_TOTAL_SECTORS * SSD_DWORDS_PER_SECT);
+
+    /* Copy the preloaded FAT12 surfaces to their real LBA offsets so the
+     * pseudo SSD starts as an in-RAM copy of the boot disk:
+     *   LBA 0        boot sector          physical 0x07C00
+     *   LBA 1..18    both FAT copies      physical 0x07E00
+     *   LBA 19..32   root directory       physical 0x10000
+     *   LBA 33..96   first 64 data sect.  physical 0x30000
+     * Everything past LBA 96 is free user space on the RAM disk. */
+    SSD_MIRROR(0x07C00u, 0u,  1u);
+    SSD_MIRROR(0x07E00u, 1u,  18u);
+    SSD_MIRROR(0x10000u, 19u, 14u);
+    SSD_MIRROR(0x30000u, 33u, 64u);
+}
+
 #define FAT_ROOT ((volatile u8 *)0x10000u)
 #define FAT_TABLE ((volatile u8 *)0x07E00u)
 #define FILE_DATA ((volatile u8 *)0x30000u)
@@ -779,8 +870,10 @@ void kernel_main(void) {
     console_clear();
     keyboard_initialize();
     pit_initialize();
+    ssd_initialize();
 
     console_write("DimOS protected-mode C kernel\n");
+    console_write("Pseudo SSD ready: 4096 KiB RAM disk at 5 MiB (rep movsl I/O).\n");
     console_write("PS/2 keyboard ready (v86 compatible). Type HELP.\n\n");
 
     for (;;) {

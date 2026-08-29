@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Build the minimal DimOS images: bootloader + command line/Snake kernel.
+# Build the DimOS images: bootloader plus the graphical C kernel.
 #
 # The primary artifact is dimos.hdd, a hard disk image: the bootable FAT12
 # volume occupies the first 1.44 MB and the rest is zero padding. It boots as
@@ -23,7 +23,6 @@ readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
 readonly ISO_IMAGE="disk_img/dimos.iso"
 readonly IMAGE_CHECKER="bin/dimos-image-check"
 readonly KERNEL_ENTRY_OBJECT="bin/kernel-entry.o"
-readonly KERNEL_C_OBJECT="bin/kernel-c.o"
 readonly KERNEL_ELF="bin/KERNEL.ELF"
 readonly KERNEL_MAP="bin/KERNEL.MAP"
 
@@ -116,32 +115,37 @@ build_kernel() {
     local compiler=${CC:-gcc}
     local linker=${LD:-ld}
     local object_copy=${OBJCOPY:-objcopy}
+    local source
+    local objects=()
 
     log_info "Assembling protected-mode entry"
     nasm -f elf32 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
 
-    log_info "Compiling C kernel"
-    "$compiler" \
-        -m32 -march=i386 -std=c11 -Os \
-        -Wall -Wextra -Wpedantic -Werror \
-        -ffreestanding -fno-builtin -fno-pic -fno-pie \
-        -fno-stack-protector -fno-asynchronous-unwind-tables \
-        -fno-unwind-tables -mno-mmx -mno-sse -mno-sse2 \
-        -c src/kernel/kernel.c -o "$KERNEL_C_OBJECT"
+    for source in src/kernel/*.c; do
+        objects+=("bin/$(basename "${source%.c}").o")
+        "$compiler" \
+            -m32 -march=i386 -std=c11 -Os \
+            -Wall -Wextra -Wpedantic -Werror \
+            -ffreestanding -fno-builtin -fno-pic -fno-pie \
+            -fno-stack-protector -fno-asynchronous-unwind-tables \
+            -fno-unwind-tables -mno-mmx -mno-sse -mno-sse2 \
+            -c "$source" -o "bin/$(basename "${source%.c}").o"
+    done
+    log_ok "Compiled ${#objects[@]} C files"
 
     log_info "Linking flat kernel"
     "$linker" -m elf_i386 --build-id=none -nostdlib \
         -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
-        "$KERNEL_ENTRY_OBJECT" "$KERNEL_C_OBJECT" -o "$KERNEL_ELF"
+        "$KERNEL_ENTRY_OBJECT" "${objects[@]}" -o "$KERNEL_ELF"
     "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN
 }
 
 build_image_checker() {
-    local compiler=${CXX:-g++}
-    if [[ ! -x "$IMAGE_CHECKER" || tools/image_inspector.cpp -nt "$IMAGE_CHECKER" ]]; then
+    local compiler=${CC:-gcc}
+    if [[ ! -x "$IMAGE_CHECKER" || tools/image_check.c -nt "$IMAGE_CHECKER" ]]; then
         log_info "Compiling image checker"
-        "$compiler" -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-            tools/image_inspector.cpp -o "$IMAGE_CHECKER"
+        "$compiler" -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror \
+            tools/image_check.c -o "$IMAGE_CHECKER"
     fi
 }
 
@@ -181,7 +185,6 @@ for command in nasm mkfs.vfat mcopy mdir truncate; do
     require_command "$command"
 done
 require_command "${CC:-gcc}"
-require_command "${CXX:-g++}"
 require_command "${LD:-ld}"
 require_command "${OBJCOPY:-objcopy}"
 (( ! BUILD_ISO )) || require_command xorriso

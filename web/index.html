@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>DimOS — запуск в браузере</title>
+<!-- Сам v86 берётся с официального npm-пакета, BIOS — из репозитория copy/v86.
+     Странице нужен любой статический сервер (или GitHub Pages): образ диска
+     пользователь выбирает файлом ниже. -->
+<script src="https://cdn.jsdelivr.net/npm/v86@0.5.445/build/libv86.js"></script>
+<style>
+  body {
+    margin: 0;
+    background: #008080;
+    color: #ffffff;
+    font-family: "Courier New", monospace;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  header {
+    background: #000080;
+    padding: 8px 12px;
+    font-weight: bold;
+    letter-spacing: 2px;
+  }
+  #screen_container {
+    margin: 8px auto;
+    width: min(96vw, 640px);
+    touch-action: none;
+  }
+  #screen_container canvas {
+    width: 100%;
+    image-rendering: pixelated;
+  }
+  .panel {
+    width: min(96vw, 640px);
+    margin: 0 auto 12px;
+    background: #c0c0c0;
+    color: #000000;
+    border: 2px solid #000000;
+    padding: 8px;
+  }
+  button.pad {
+    font-family: "Courier New", monospace;
+    font-size: 20px;
+    font-weight: bold;
+    min-width: 64px;
+    min-height: 56px;
+    margin: 4px;
+    background: #c0c0c0;
+    border: 3px outset #ffffff;
+    touch-action: manipulation;
+  }
+  button.pad:active { border-style: inset; }
+  .row { text-align: center; }
+  input[type="file"] { font-family: "Courier New", monospace; max-width: 100%; }
+  #status { margin: 6px 0; }
+</style>
+</head>
+<body>
+<header>DimOS 2.0 — ретро-рабочий стол в браузере</header>
+
+<div class="panel">
+  <div id="status">1. Выберите собранный образ дискеты <b>dimos.img</b> (или hdd/iso —
+  поле ниже универсальное). 2. Нажмите «Старт». Дальше всё управляется кнопками
+  под экраном и пальцем по экрану — печатать не нужно.</div>
+  <input type="file" id="disk" accept=".img,.iso,.hdd,.bin">
+  <div class="row">
+    <button class="pad" id="boot" style="width:100%">Старт</button>
+  </div>
+</div>
+
+<div id="screen_container">
+  <div style="white-space: pre; font: 14px monospace; line-height: 14px"></div>
+  <canvas style="display: none"></canvas>
+</div>
+
+<div class="panel">
+  <div class="row">Стрелки — выбор иконок и меню, Enter — открыть, Esc — закрыть.</div>
+  <div class="row">
+    <button class="pad" data-codes="0x4B,0xCB">&#8592;</button>
+    <button class="pad" data-codes="0x48,0xC8">&#8593;</button>
+    <button class="pad" data-codes="0x50,0xD0">&#8595;</button>
+    <button class="pad" data-codes="0x4D,0xCD">&#8594;</button>
+  </div>
+  <div class="row">
+    <button class="pad" data-codes="0x1C,0x9C" style="width:40%">Enter</button>
+    <button class="pad" data-codes="0x39,0xB9" style="width:25%">Space</button>
+    <button class="pad" data-codes="0x01,0x81" style="width:25%">Esc</button>
+  </div>
+  <div class="row">Мышь: ведите пальцем по экрану — указатель едет, тап — клик.</div>
+</div>
+
+<script>
+"use strict";
+
+var emulator = null;
+
+function start(image_file, as_floppy) {
+  var options = {
+    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.445/build/v86.wasm",
+    memory_size: 64 * 1024 * 1024,
+    vga_memory_size: 2 * 1024 * 1024,
+    screen_container: document.getElementById("screen_container"),
+    bios:    { url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/seabios.bin" },
+    vga_bios: { url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/vgabios.bin" },
+    autostart: true,
+  };
+  if (as_floppy) { options.fda = { buffer: image_file }; }
+  else           { options.hda = { buffer: image_file }; }
+  emulator = new V86(options);
+  document.getElementById("status").textContent =
+    "DimOS загружается. Кнопки под экраном шлют скан-коды в эмулятор.";
+}
+
+document.getElementById("boot").addEventListener("click", function () {
+  var input = document.getElementById("disk");
+  if (!input.files || input.files.length === 0) {
+    document.getElementById("status").textContent =
+      "Сначала выберите файл образа: dimos.img (дискета) или dimos.hdd.";
+    return;
+  }
+  var file = input.files[0];
+  var floppy = /\.img$/i.test(file.name);
+  start(file, floppy);
+});
+
+/* Большие кнопки: одно нажатие = make + break скан-кода. */
+Array.prototype.forEach.call(document.querySelectorAll("button.pad[data-codes]"),
+  function (button) {
+    button.addEventListener("pointerdown", function (event) {
+      event.preventDefault();
+      if (!emulator) { return; }
+      var codes = button.getAttribute("data-codes").split(",")
+        .map(function (text) { return parseInt(text, 16); });
+      emulator.keyboard_send_scancodes(codes);
+    });
+  });
+</script>
+</body>
+</html>

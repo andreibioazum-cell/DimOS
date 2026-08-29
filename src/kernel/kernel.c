@@ -1,912 +1,411 @@
 /*
- * DimOS protected-mode kernel.
+ * kernel.c -- start up, time keeping, and the small helpers every other file
+ * uses (memory, text, restart).
  *
- * Policy: hardware setup and port I/O stay in kernel.asm; the command shell,
- * PS/2 scan-code decoder, VGA console, timer handling, and Snake belong in C.
- * No hosted C library is used.
+ * The bootloader loads this code at 0x20000 and kernel.asm switches the
+ * processor into 32 bit protected mode before calling kernel_main. From here
+ * on everything is plain C.
  */
 
-typedef unsigned char u8;
-typedef unsigned short u16;
-typedef unsigned int u32;
+#include "dimos.h"
 
-extern u8 io_in8(u16 port);
-extern void io_out8(u16 port, u8 value);
+/* Provided by the linker script: the uninitialized globals of the kernel.
+ * A flat binary does not carry them, so they have to be cleared by hand. */
+extern char __bss_start[];
+extern char __bss_end[];
 
-#define VGA_WIDTH 80u
-#define VGA_HEIGHT 25u
-#define VGA_MEMORY ((volatile u16 *)0xB8000u)
+/* ------------------------------------------------------------------ */
+/* Memory                                                              */
+/* ------------------------------------------------------------------ */
 
-#define KEY_NONE 0u
-#define KEY_UP 0x100u
-#define KEY_RIGHT 0x101u
-#define KEY_DOWN 0x102u
-#define KEY_LEFT 0x103u
+void memory_copy(void *destination, const void *source, u32 length) {
+    u8 *target = (u8 *)destination;
+    const u8 *from = (const u8 *)source;
+    u32 index;
 
-#define PS2_DATA 0x60u
-#define PS2_STATUS 0x64u
-
-#define PIT_CHANNEL_0 0x40u
-#define PIT_COMMAND 0x43u
-#define PIT_DIVISOR 11932u
-#define PIT_MOVE_COUNTS (PIT_DIVISOR * 9u)
-
-#define COMMAND_CAPACITY 31u
-
-#define SNAKE_MAX_LENGTH 512u
-#define SNAKE_START_ROW 12u
-#define SNAKE_START_COLUMN 42u
-#define SNAKE_TOP 3u
-#define SNAKE_ROWS 20u
-#define SNAKE_COLUMNS 78u
-
-#define DIRECTION_UP 0u
-#define DIRECTION_RIGHT 1u
-#define DIRECTION_DOWN 2u
-#define DIRECTION_LEFT 3u
-
-static u8 console_row;
-static u8 console_column;
-static u8 console_attribute = 0x07u;
-
-static u8 keyboard_modifiers;
-static u8 keyboard_extended;
-static u8 keyboard_pause_bytes;
-static u8 keyboard_caps_lock;
-
-static u16 pit_last_count;
-static u32 pit_accumulated_counts;
-
-static u16 snake_cells[SNAKE_MAX_LENGTH];
-static u16 snake_length;
-static u16 snake_score;
-static u8 snake_direction;
-static u32 random_state = 0xD14E05u;
-
-static void cursor_update(void) {
-    u16 position = (u16)((u16)console_row * VGA_WIDTH + console_column);
-
-    io_out8(0x3D4u, 0x0Fu);
-    io_out8(0x3D5u, (u8)position);
-    io_out8(0x3D4u, 0x0Eu);
-    io_out8(0x3D5u, (u8)(position >> 8u));
+    for (index = 0u; index < length; ++index) {
+        target[index] = from[index];
+    }
 }
 
-static void cursor_set_visible(u8 visible) {
-    u8 start;
+void memory_zero(void *destination, u32 length) {
+    u8 *target = (u8 *)destination;
+    u32 index;
 
-    io_out8(0x3D4u, 0x0Au);
-    start = io_in8(0x3D5u);
-    if (visible != 0u) {
-        start = (u8)(start & (u8)~0x20u);
-    } else {
-        start = (u8)(start | 0x20u);
+    for (index = 0u; index < length; ++index) {
+        target[index] = 0u;
     }
-    io_out8(0x3D5u, start);
 }
 
-static void console_scroll(void) {
-    u16 row;
-    u16 column;
+/* Reads a 16 bit value the BIOS left somewhere in low memory, for example
+ * the memory size word at 0x413. The address is a parameter so the compiler
+ * cannot fold the access away. */
+u16 bios_read_word(u32 address) {
+    const volatile u16 *place = (const volatile u16 *)address;
 
-    if (console_row < VGA_HEIGHT) {
-        return;
-    }
+    return *place;
+}
 
-    for (row = 1u; row < VGA_HEIGHT; ++row) {
-        for (column = 0u; column < VGA_WIDTH; ++column) {
-            VGA_MEMORY[(row - 1u) * VGA_WIDTH + column] =
-                VGA_MEMORY[row * VGA_WIDTH + column];
+u8 memory_equal(const void *a, const void *b, u32 length) {
+    const u8 *left = (const u8 *)a;
+    const u8 *right = (const u8 *)b;
+    u32 index;
+
+    for (index = 0u; index < length; ++index) {
+        if (left[index] != right[index]) {
+            return 0u;
         }
     }
-
-    for (column = 0u; column < VGA_WIDTH; ++column) {
-        VGA_MEMORY[(VGA_HEIGHT - 1u) * VGA_WIDTH + column] =
-            (u16)((u16)console_attribute << 8u) | (u16)' ';
-    }
-    console_row = (u8)(VGA_HEIGHT - 1u);
+    return 1u;
 }
 
-static void console_clear(void) {
-    u16 cell;
-    const u16 blank = (u16)((u16)console_attribute << 8u) | (u16)' ';
+/* ------------------------------------------------------------------ */
+/* Text                                                                */
+/* ------------------------------------------------------------------ */
 
-    for (cell = 0u; cell < VGA_WIDTH * VGA_HEIGHT; ++cell) {
-        VGA_MEMORY[cell] = blank;
-    }
-    console_row = 0u;
-    console_column = 0u;
-    cursor_set_visible(1u);
-    cursor_update();
-}
-
-static void console_put_character(char character) {
-    if (character == '\n') {
-        console_column = 0u;
-        ++console_row;
-    } else if (character == '\r') {
-        console_column = 0u;
-    } else {
-        const u16 position =
-            (u16)((u16)console_row * VGA_WIDTH + console_column);
-        VGA_MEMORY[position] =
-            (u16)((u16)console_attribute << 8u) | (u8)character;
-        ++console_column;
-        if (console_column >= VGA_WIDTH) {
-            console_column = 0u;
-            ++console_row;
-        }
-    }
-
-    console_scroll();
-    cursor_update();
-}
-
-static void console_backspace(void) {
-    u16 position;
-
-    if (console_column == 0u) {
-        return;
-    }
-
-    --console_column;
-    position = (u16)((u16)console_row * VGA_WIDTH + console_column);
-    VGA_MEMORY[position] =
-        (u16)((u16)console_attribute << 8u) | (u16)' ';
-    cursor_update();
-}
-
-static void console_write(const char *text) {
-    while (*text != '\0') {
-        console_put_character(*text);
-        ++text;
-    }
-}
-
-static void console_write_unsigned(u32 value) {
-    char digits[10];
-    u8 length = 0u;
-
-    if (value == 0u) {
-        console_put_character('0');
-        return;
-    }
-
-    while (value != 0u) {
-        digits[length] = (char)('0' + (char)(value % 10u));
-        value /= 10u;
-        ++length;
-    }
-
-    while (length != 0u) {
-        --length;
-        console_put_character(digits[length]);
-    }
-}
-
-static void console_set_position(u8 row, u8 column) {
-    console_row = row;
-    console_column = column;
-    cursor_update();
-}
-
-static char keyboard_ascii(u8 scan_code) {
-    const u8 shifted = (u8)(keyboard_modifiers != 0u);
-    char character = '\0';
-
-    switch (scan_code) {
-        case 0x01u: return (char)27;
-        case 0x02u: return shifted != 0u ? '!' : '1';
-        case 0x03u: return shifted != 0u ? '@' : '2';
-        case 0x04u: return shifted != 0u ? '#' : '3';
-        case 0x05u: return shifted != 0u ? '$' : '4';
-        case 0x06u: return shifted != 0u ? '%' : '5';
-        case 0x07u: return shifted != 0u ? '^' : '6';
-        case 0x08u: return shifted != 0u ? '&' : '7';
-        case 0x09u: return shifted != 0u ? '*' : '8';
-        case 0x0Au: return shifted != 0u ? '(' : '9';
-        case 0x0Bu: return shifted != 0u ? ')' : '0';
-        case 0x0Cu: return shifted != 0u ? '_' : '-';
-        case 0x0Du: return shifted != 0u ? '+' : '=';
-        case 0x0Eu: return '\b';
-        case 0x10u: character = 'q'; break;
-        case 0x11u: character = 'w'; break;
-        case 0x12u: character = 'e'; break;
-        case 0x13u: character = 'r'; break;
-        case 0x14u: character = 't'; break;
-        case 0x15u: character = 'y'; break;
-        case 0x16u: character = 'u'; break;
-        case 0x17u: character = 'i'; break;
-        case 0x18u: character = 'o'; break;
-        case 0x19u: character = 'p'; break;
-        case 0x1Au: return shifted != 0u ? '{' : '[';
-        case 0x1Bu: return shifted != 0u ? '}' : ']';
-        case 0x1Cu: return '\n';
-        case 0x1Eu: character = 'a'; break;
-        case 0x1Fu: character = 's'; break;
-        case 0x20u: character = 'd'; break;
-        case 0x21u: character = 'f'; break;
-        case 0x22u: character = 'g'; break;
-        case 0x23u: character = 'h'; break;
-        case 0x24u: character = 'j'; break;
-        case 0x25u: character = 'k'; break;
-        case 0x26u: character = 'l'; break;
-        case 0x27u: return shifted != 0u ? ':' : ';';
-        case 0x28u: return shifted != 0u ? '"' : '\'';
-        case 0x29u: return shifted != 0u ? '~' : '`';
-        case 0x2Bu: return shifted != 0u ? '|' : '\\';
-        case 0x2Cu: character = 'z'; break;
-        case 0x2Du: character = 'x'; break;
-        case 0x2Eu: character = 'c'; break;
-        case 0x2Fu: character = 'v'; break;
-        case 0x30u: character = 'b'; break;
-        case 0x31u: character = 'n'; break;
-        case 0x32u: character = 'm'; break;
-        case 0x33u: return shifted != 0u ? '<' : ',';
-        case 0x34u: return shifted != 0u ? '>' : '.';
-        case 0x35u: return shifted != 0u ? '?' : '/';
-        case 0x37u: return '*';
-        case 0x39u: return ' ';
-        default: return '\0';
-    }
-
-    if ((u8)(shifted ^ keyboard_caps_lock) != 0u) {
-        character = (char)(character - ('a' - 'A'));
-    }
-    return character;
-}
-
-/*
- * Read translated set-1 scan codes directly from the emulated PS/2
- * controller. This deliberately avoids BIOS int 16h, which is unreliable
- * after handoff in the v86 debug launcher.
- */
-static u16 keyboard_poll(void) {
-    while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
-        const u8 status = io_in8(PS2_STATUS);
-        const u8 scan_code = io_in8(PS2_DATA);
-        u8 base_code;
-        char character;
-
-        if ((status & 0x20u) != 0u) {
-            continue;
-        }
-        if (keyboard_pause_bytes != 0u) {
-            --keyboard_pause_bytes;
-            continue;
-        }
-        if (scan_code == 0xE1u) {
-            keyboard_pause_bytes = 5u;
-            continue;
-        }
-        if (scan_code == 0xE0u) {
-            keyboard_extended = 1u;
-            continue;
-        }
-
-        base_code = (u8)(scan_code & 0x7Fu);
-        if ((scan_code & 0x80u) != 0u) {
-            if (base_code == 0x2Au) {
-                keyboard_modifiers = (u8)(keyboard_modifiers & (u8)~0x01u);
-            } else if (base_code == 0x36u) {
-                keyboard_modifiers = (u8)(keyboard_modifiers & (u8)~0x02u);
-            }
-            keyboard_extended = 0u;
-            continue;
-        }
-
-        if (keyboard_extended != 0u) {
-            keyboard_extended = 0u;
-            switch (base_code) {
-                case 0x48u: return KEY_UP;
-                case 0x4Du: return KEY_RIGHT;
-                case 0x50u: return KEY_DOWN;
-                case 0x4Bu: return KEY_LEFT;
-                case 0x1Cu: return (u16)'\n';
-                case 0x35u: return (u16)'/';
-                default: {
-                    const char extended_char = keyboard_ascii(base_code);
-                    if (extended_char != '\0') {
-                        return (u16)(u8)extended_char;
-                    }
-                    continue;
-                }
-            }
-        }
-
-        if (base_code == 0x2Au) {
-            keyboard_modifiers = (u8)(keyboard_modifiers | 0x01u);
-            continue;
-        }
-        if (base_code == 0x36u) {
-            keyboard_modifiers = (u8)(keyboard_modifiers | 0x02u);
-            continue;
-        }
-        if (base_code == 0x3Au) {
-            keyboard_caps_lock = (u8)(keyboard_caps_lock ^ 1u);
-            continue;
-        }
-
-        character = keyboard_ascii(base_code);
-        if (character != '\0') {
-            return (u16)(u8)character;
-        }
-    }
-
-    return KEY_NONE;
-}
-
-static u16 keyboard_read(void) {
-    u16 key;
-
-    do {
-        key = keyboard_poll();
-    } while (key == KEY_NONE);
-    return key;
-}
-
-static void keyboard_initialize(void) {
-    keyboard_modifiers = 0u;
-    keyboard_extended = 0u;
-    keyboard_pause_bytes = 0u;
-    keyboard_caps_lock = 0u;
-
-    /* Drop stale BIOS handoff bytes, including command acknowledgements. */
-    while ((io_in8(PS2_STATUS) & 0x01u) != 0u) {
-        (void)io_in8(PS2_DATA);
-    }
-}
-
-static u16 pit_read_counter(void) {
-    u8 low;
-    u8 high;
-
-    io_out8(PIT_COMMAND, 0x00u);
-    low = io_in8(PIT_CHANNEL_0);
-    high = io_in8(PIT_CHANNEL_0);
-    return (u16)((u16)low | ((u16)high << 8u));
-}
-
-static void pit_initialize(void) {
-    io_out8(PIT_COMMAND, 0x34u);
-    io_out8(PIT_CHANNEL_0, (u8)PIT_DIVISOR);
-    io_out8(PIT_CHANNEL_0, (u8)(PIT_DIVISOR >> 8u));
-    pit_last_count = pit_read_counter();
-    pit_accumulated_counts = 0u;
-}
-
-static void pit_reset_interval(void) {
-    pit_last_count = pit_read_counter();
-    pit_accumulated_counts = 0u;
-}
-
-static u8 pit_move_due(void) {
-    const u16 current = pit_read_counter();
-    u16 elapsed;
-
-    if (pit_last_count >= current) {
-        elapsed = (u16)(pit_last_count - current);
-    } else {
-        elapsed = (u16)(pit_last_count + (PIT_DIVISOR - current));
-    }
-    pit_last_count = current;
-    pit_accumulated_counts += elapsed;
-
-    if (pit_accumulated_counts >= PIT_MOVE_COUNTS) {
-        pit_accumulated_counts -= PIT_MOVE_COUNTS;
-        return 1u;
-    }
-    return 0u;
-}
-
-static void screen_cell(u16 position, char character, u8 attribute) {
-    VGA_MEMORY[position] = (u16)((u16)attribute << 8u) | (u8)character;
-}
-
-static char screen_character(u16 position) {
-    return (char)(u8)VGA_MEMORY[position];
-}
-
-static void snake_draw_score(void) {
-    console_set_position(0u, 65u);
-    console_write("Score: ");
-    console_write_unsigned(snake_score);
-}
-
-static void snake_draw_arena(void) {
-    u16 position;
-    u16 row;
-
-    console_set_position(0u, 0u);
-    console_write("DimOS Snake");
-    console_set_position(1u, 0u);
-    console_write("WASD/arrows: move   N: new game   ESC: command line");
-    snake_draw_score();
-
-    for (position = 2u * VGA_WIDTH; position < 3u * VGA_WIDTH; ++position) {
-        screen_cell(position, '#', 0x09u);
-    }
-    for (position = 23u * VGA_WIDTH; position < 24u * VGA_WIDTH; ++position) {
-        screen_cell(position, '#', 0x09u);
-    }
-    for (row = SNAKE_TOP; row < SNAKE_TOP + SNAKE_ROWS; ++row) {
-        screen_cell((u16)(row * VGA_WIDTH), '#', 0x09u);
-        screen_cell((u16)(row * VGA_WIDTH + 79u), '#', 0x09u);
-    }
-}
-
-static u32 next_random(void) {
-    u32 value = random_state;
-
-    value ^= value << 13u;
-    value ^= value >> 17u;
-    value ^= value << 5u;
-    if (value == 0u) {
-        value = 0xA341316Cu;
-    }
-    random_state = value;
-    return value;
-}
-
-static void snake_place_food(void) {
-    u16 position;
-
-    do {
-        const u16 row = (u16)(SNAKE_TOP + (next_random() % SNAKE_ROWS));
-        const u16 column = (u16)(1u + (next_random() % SNAKE_COLUMNS));
-        position = (u16)(row * VGA_WIDTH + column);
-    } while (screen_character(position) != ' ');
-
-    screen_cell(position, '@', 0x0Cu);
-}
-
-static void snake_initialize(void) {
-    u16 index;
-    u16 position = (u16)(SNAKE_START_ROW * VGA_WIDTH + SNAKE_START_COLUMN);
-
-    console_clear();
-    cursor_set_visible(0u);
-    snake_length = 5u;
-    snake_score = 0u;
-    snake_direction = DIRECTION_RIGHT;
-    random_state ^= (u32)pit_read_counter() | 1u;
-
-    snake_draw_arena();
-    for (index = 0u; index < snake_length; ++index) {
-        snake_cells[index] = position;
-        screen_cell(position, index == 0u ? 'O' : 'o',
-                    index == 0u ? 0x0Fu : 0x0Au);
-        --position;
-    }
-    snake_place_food();
-    pit_reset_interval();
-}
-
-/* Return 1 after a collision and 0 after a successful move. */
-static u8 snake_move(void) {
-    u16 new_head = snake_cells[0];
-    u16 index;
-    u8 grew = 0u;
-    char target;
-
-    if (snake_direction == DIRECTION_UP) {
-        new_head = (u16)(new_head - VGA_WIDTH);
-    } else if (snake_direction == DIRECTION_RIGHT) {
-        ++new_head;
-    } else if (snake_direction == DIRECTION_DOWN) {
-        new_head = (u16)(new_head + VGA_WIDTH);
-    } else {
-        --new_head;
-    }
-
-    target = screen_character(new_head);
-    if (target == '@') {
-        if (snake_length >= SNAKE_MAX_LENGTH) {
-            return 1u;
-        }
-        grew = 1u;
-        ++snake_length;
-        snake_score = (u16)(snake_score + 10u);
-    } else if (target != ' ') {
-        return 1u;
-    }
-
-    if (grew == 0u) {
-        screen_cell(snake_cells[snake_length - 1u], ' ', 0x07u);
-    }
-
-    index = (u16)(snake_length - 1u);
-    while (index != 0u) {
-        snake_cells[index] = snake_cells[index - 1u];
-        --index;
-    }
-
-    screen_cell(snake_cells[0], 'o', 0x0Au);
-    snake_cells[0] = new_head;
-    screen_cell(new_head, 'O', 0x0Fu);
-
-    if (grew != 0u) {
-        snake_draw_score();
-        snake_place_food();
-    }
-    return 0u;
-}
-
-static void snake_change_direction(u16 key) {
-    if ((key == (u16)'w' || key == (u16)'W' || key == KEY_UP) &&
-        snake_direction != DIRECTION_DOWN) {
-        snake_direction = DIRECTION_UP;
-    } else if ((key == (u16)'d' || key == (u16)'D' || key == KEY_RIGHT) &&
-               snake_direction != DIRECTION_LEFT) {
-        snake_direction = DIRECTION_RIGHT;
-    } else if ((key == (u16)'s' || key == (u16)'S' || key == KEY_DOWN) &&
-               snake_direction != DIRECTION_UP) {
-        snake_direction = DIRECTION_DOWN;
-    } else if ((key == (u16)'a' || key == (u16)'A' || key == KEY_LEFT) &&
-               snake_direction != DIRECTION_RIGHT) {
-        snake_direction = DIRECTION_LEFT;
-    }
-}
-
-static void snake_game(void) {
-    u8 restart = 1u;
-
-    while (restart != 0u) {
-        u8 collided = 0u;
-        restart = 0u;
-        snake_initialize();
-
-        while (collided == 0u) {
-            const u16 key = keyboard_poll();
-
-            if (key == 27u) {
-                cursor_set_visible(1u);
-                return;
-            }
-            if (key == (u16)'n' || key == (u16)'N') {
-                restart = 1u;
-                break;
-            }
-            if (key != KEY_NONE) {
-                snake_change_direction(key);
-            }
-            if (pit_move_due() != 0u) {
-                collided = snake_move();
-            }
-        }
-
-        if (restart == 0u && collided != 0u) {
-            console_set_position(12u, 20u);
-            console_write(" GAME OVER - ENTER/N: retry, ESC: exit ");
-            for (;;) {
-                const u16 key = keyboard_read();
-                if (key == 27u) {
-                    cursor_set_visible(1u);
-                    return;
-                }
-                if (key == (u16)'\n' || key == (u16)'n' || key == (u16)'N') {
-                    restart = 1u;
-                    break;
-                }
-            }
-        }
-    }
-}
-
-static u8 ascii_upper(u8 character) {
+u8 character_to_upper(u8 character) {
     if (character >= (u8)'a' && character <= (u8)'z') {
         return (u8)(character - (u8)('a' - 'A'));
     }
     return character;
 }
 
-static u8 strings_equal(const char *left, const char *right) {
-    while (*left != '\0' && *right != '\0') {
-        if (ascii_upper((u8)*left) != ascii_upper((u8)*right)) {
-            return 0u;
-        }
-        ++left;
-        ++right;
+u16 text_length(const char *text) {
+    u16 length = 0u;
+
+    while (text[length] != '\0') {
+        ++length;
     }
-    return (u8)(*left == '\0' && *right == '\0');
+    return length;
 }
 
-static char *trim_command(char *command) {
-    char *start = command;
-    char *end;
-
-    while (*start == ' ') {
-        ++start;
+u8 text_equal(const char *a, const char *b) {
+    while (*a != '\0' && *a == *b) {
+        ++a;
+        ++b;
     }
-    end = start;
-    while (*end != '\0') {
-        ++end;
+    return (u8)(*a == *b);
+}
+
+u8 text_equal_ignore_case(const char *a, const char *b) {
+    while (*a != '\0' && character_to_upper((u8)*a) == character_to_upper((u8)*b)) {
+        ++a;
+        ++b;
     }
-    while (end != start && end[-1] == ' ') {
-        --end;
-    }
-    *end = '\0';
-    return start;
+    return (u8)(*a == *b);
 }
 
-static void read_line(char *buffer, u8 capacity) {
-    u8 length = 0u;
+void text_copy(char *destination, const char *source, u16 capacity) {
+    u16 index = 0u;
 
-    for (;;) {
-        const u16 key = keyboard_read();
-
-        if (key == (u16)'\n') {
-            buffer[length] = '\0';
-            console_put_character('\n');
-            return;
-        }
-        if (key == (u16)'\b') {
-            if (length != 0u) {
-                --length;
-                console_backspace();
-            }
-            continue;
-        }
-        if (key >= 32u && key <= 126u && length < capacity) {
-            buffer[length] = (char)key;
-            ++length;
-            console_put_character((char)key);
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* Pseudo SSD: a RAM disk living in extended memory.                  */
-/*                                                                     */
-/* int 13h only reaches the first megabyte, so the bootloader preloads */
-/* the FAT12 boot sector, both FAT copies, the root directory and the  */
-/* first 64 data sectors into low memory. Once the kernel runs in       */
-/* protected mode it mirrors those windows into a clean RAM disk at    */
-/* 5 MiB; from then on "disk" I/O is a single rep movsl bulk copy: no  */
-/* ports, no BIOS, no interrupts, four bytes per iteration, which is   */
-/* the fastest bulk move on an i386 target without MMX/SSE.            */
-/* ------------------------------------------------------------------ */
-
-#define SSD_BASE_ADDRESS    0x00500000u
-#define SSD_SECTOR_SIZE     512u
-#define SSD_DWORDS_PER_SECT (SSD_SECTOR_SIZE / 4u)   /* 128 dwords = 512 bytes */
-#define SSD_TOTAL_SECTORS   8192u                     /* 4 MiB */
-
-/* Bulk copy with rep movsl (DS:ESI -> ES:EDI, cld counts upwards).
- * Everything in DimOS is 4-byte aligned for this path (SSD base is page
- * aligned and every transfer is whole sectors); movsl also works on
- * unaligned operands, so there is no head/tail handling to slow it down. */
-static inline void ssd_fast_copy(void *dest, const void *src, u32 dwords) {
-    __asm__ volatile (
-        "cld\n\t"
-        "rep movsl"
-        : "+D"(dest), "+S"(src), "+c"(dwords)
-        :
-        : "memory"
-    );
-}
-
-/* Bulk zero with rep stosl: stores EAX (zero) one dword per iteration,
- * the fastest way to erase the whole RAM disk at boot. */
-static inline void ssd_fast_zero(void *dest, u32 dwords) {
-    __asm__ volatile (
-        "cld\n\t"
-        "rep stosl"
-        : "+D"(dest), "+c"(dwords)
-        : "a"(0u)
-        : "memory"
-    );
-}
-
-static inline u8 *ssd_pointer(u32 lba) {
-    return (u8 *)(SSD_BASE_ADDRESS + lba * SSD_SECTOR_SIZE);
-}
-
-/* Read sector_count sectors starting at lba into buffer.
- * Returns 1 on success, 0 if the request runs past the end of the SSD. */
-static inline u8 ssd_read_sectors(u32 lba, void *buffer, u32 sector_count) {
-    if (sector_count == 0u || lba >= SSD_TOTAL_SECTORS ||
-        sector_count > SSD_TOTAL_SECTORS - lba) {
-        return 0u;
-    }
-    ssd_fast_copy(buffer, ssd_pointer(lba), sector_count * SSD_DWORDS_PER_SECT);
-    return 1u;
-}
-
-/* Write sector_count sectors from buffer to lba. Same bounds contract. */
-static inline u8 ssd_write_sectors(u32 lba, const void *buffer, u32 sector_count) {
-    if (sector_count == 0u || lba >= SSD_TOTAL_SECTORS ||
-        sector_count > SSD_TOTAL_SECTORS - lba) {
-        return 0u;
-    }
-    ssd_fast_copy(ssd_pointer(lba), buffer, sector_count * SSD_DWORDS_PER_SECT);
-    return 1u;
-}
-
-/* Mirror one low-memory window the bootloader preloaded onto the RAM disk. */
-#define SSD_MIRROR(low_address, lba, sectors) \
-    ssd_fast_copy(ssd_pointer(lba), (const void *)(low_address), \
-                  (u32)(sectors) * SSD_DWORDS_PER_SECT)
-
-void ssd_initialize(void) {
-    /* RAM content is undefined on boot: wipe the RAM disk with rep stosl. */
-    ssd_fast_zero((u8 *)SSD_BASE_ADDRESS,
-                  SSD_TOTAL_SECTORS * SSD_DWORDS_PER_SECT);
-
-    /* Copy the preloaded FAT12 surfaces to their real LBA offsets so the
-     * pseudo SSD starts as an in-RAM copy of the boot disk:
-     *   LBA 0        boot sector          physical 0x07C00
-     *   LBA 1..18    both FAT copies      physical 0x07E00
-     *   LBA 19..32   root directory       physical 0x10000
-     *   LBA 33..96   first 64 data sect.  physical 0x30000
-     * Everything past LBA 96 is free user space on the RAM disk. */
-    SSD_MIRROR(0x07C00u, 0u,  1u);
-    SSD_MIRROR(0x07E00u, 1u,  18u);
-    SSD_MIRROR(0x10000u, 19u, 14u);
-    SSD_MIRROR(0x30000u, 33u, 64u);
-}
-
-#define FAT_ROOT ((volatile u8 *)0x10000u)
-#define FAT_TABLE ((volatile u8 *)0x07E00u)
-#define FILE_DATA ((volatile u8 *)0x30000u)
-#define FAT_ROOT_ENTRIES 224u
-#define FAT_FILE_LIMIT 32768u
-
-static u8 file_deleted[FAT_ROOT_ENTRIES];
-
-static u16 fat12_next(u16 cluster) {
-    const u16 offset = (u16)(cluster + cluster / 2u);
-    u16 value = (u16)FAT_TABLE[offset] | ((u16)FAT_TABLE[offset + 1u] << 8u);
-    return (cluster & 1u) != 0u ? (u16)(value >> 4u) : (u16)(value & 0x0FFFu);
-}
-
-static u8 file_name_matches(const volatile u8 *entry, const char *name) {
-    u8 pos = 0u;
-    u8 i = 0u;
-    while (name[i] != '\0' && i < 12u) {
-        char character = name[i++];
-        if (character == '.') {
-            while (pos < 8u) { if (entry[pos++] != ' ') return 0u; }
-            pos = 8u;
-        } else {
-            if (pos >= 11u || (pos == 8u && entry[pos] == ' ')) return 0u;
-            if (ascii_upper((u8)character) != ascii_upper(entry[pos])) return 0u;
-            ++pos;
-        }
-    }
-    if (i == 0u) return 0u;
-    while (pos < 11u) { if (entry[pos++] != ' ') return 0u; }
-    return 1u;
-}
-
-static u16 file_find(const char *name) {
-    u16 index;
-    for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
-        const volatile u8 *entry = FAT_ROOT + index * 32u;
-        if (entry[0] == 0x00u) break;
-        if (entry[0] == 0xE5u || entry[11] == 0x0Fu ||
-            (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
-        if (file_name_matches(entry, name) != 0u) return index;
-    }
-    return 0xFFFFu;
-}
-
-static void file_print_name(const volatile u8 *entry) {
-    u8 index;
-    for (index = 0u; index < 8u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
-    if (entry[8] != ' ') {
-        console_put_character('.');
-        for (index = 8u; index < 11u && entry[index] != ' '; ++index) console_put_character((char)entry[index]);
-    }
-}
-
-static void file_manager_dir(void) {
-    u16 index;
-    console_write("Disk files (FAT12):\n");
-    for (index = 0u; index < FAT_ROOT_ENTRIES; ++index) {
-        const volatile u8 *entry = FAT_ROOT + index * 32u;
-        if (entry[0] == 0x00u) break;
-        if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u) != 0u || file_deleted[index] != 0u) continue;
-        file_print_name(entry);
-        console_write("  ");
-        console_write_unsigned((u32)entry[28] | ((u32)entry[29] << 8u) | ((u32)entry[30] << 16u) | ((u32)entry[31] << 24u));
-        console_write(" bytes\n");
-    }
-}
-
-static void file_type(const char *name) {
-    const u16 index = file_find(name);
-    u16 cluster;
-    u32 remaining;
-    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
-    cluster = (u16)FAT_ROOT[index * 32u + 26u] | ((u16)FAT_ROOT[index * 32u + 27u] << 8u);
-    remaining = (u32)FAT_ROOT[index * 32u + 28u] | ((u32)FAT_ROOT[index * 32u + 29u] << 8u) | ((u32)FAT_ROOT[index * 32u + 30u] << 16u) | ((u32)FAT_ROOT[index * 32u + 31u] << 24u);
-    if (remaining > FAT_FILE_LIMIT) remaining = FAT_FILE_LIMIT;
-    while (remaining != 0u && cluster >= 2u && cluster < 0xFF8u) {
-        const u32 offset = (u32)(cluster - 2u) * 512u;
-        u32 count = remaining < 512u ? remaining : 512u;
-        u32 position;
-        for (position = 0u; position < count; ++position) console_put_character((char)FILE_DATA[offset + position]);
-        remaining -= count;
-        cluster = fat12_next(cluster);
-    }
-    console_put_character('\n');
-}
-
-static void file_delete(const char *name) {
-    const u16 index = file_find(name);
-    const volatile u8 *entry;
-    if (index == 0xFFFFu) { console_write("File not found.\n"); return; }
-    entry = FAT_ROOT + index * 32u;
-    if (file_name_matches(entry, "KERNEL.BIN") != 0u) {
-        console_write("KERNEL.BIN is protected.\n");
+    if (capacity == 0u) {
         return;
     }
-    file_deleted[index] = 1u;
-    console_write("Deleted (session only): "); file_print_name(entry); console_write("\n");
+    while (source[index] != '\0' && index < (u16)(capacity - 1u)) {
+        destination[index] = source[index];
+        ++index;
+    }
+    destination[index] = '\0';
 }
 
-static char *command_argument(char *command) {
-    while (*command != ' ' && *command != '\0') ++command;
-    if (*command == '\0') return command;
-    *command++ = '\0';
-    while (*command == ' ') ++command;
-    return command;
+void text_append(char *destination, const char *source, u16 capacity) {
+    u16 index = text_length(destination);
+
+    while (*source != '\0' && index < (u16)(capacity - 1u)) {
+        destination[index] = *source;
+        ++index;
+        ++source;
+    }
+    destination[index] = '\0';
 }
 
-static void print_help(void) {
-    console_write("Commands:\n");
-    console_write("  DIR    list real FAT12 files\n");
-    console_write("  TYPE   read a file, for example TYPE README.TXT\n");
-    console_write("  DEL    safely hide a file (KERNEL.BIN is protected)\n");
-    console_write("  SNAKE  start the built-in game\n");
-    console_write("  CLEAR  clear the screen\n");
-    console_write("  HELP   show this list\n");
+void text_append_character(char *destination, char character, u16 capacity) {
+    const u16 index = text_length(destination);
+
+    if (index < (u16)(capacity - 1u)) {
+        destination[index] = character;
+        destination[index + 1u] = '\0';
+    }
 }
 
-void kernel_main(void) {
-    char command_buffer[COMMAND_CAPACITY + 1u];
+/* Writes the number as decimal digits and returns how many were written. */
+u16 text_append_number(char *destination, u32 value, u16 capacity) {
+    char digits[10];
+    u16 count = 0u;
+    u16 written = 0u;
 
-    console_clear();
-    keyboard_initialize();
-    pit_initialize();
-    ssd_initialize();
+    if (value == 0u) {
+        text_append_character(destination, '0', capacity);
+        return 1u;
+    }
+    while (value != 0u && count < 10u) {
+        digits[count] = (char)('0' + (char)(value % 10u));
+        value /= 10u;
+        ++count;
+    }
+    while (count != 0u) {
+        --count;
+        text_append_character(destination, digits[count], capacity);
+        ++written;
+    }
+    return written;
+}
 
-    console_write("DimOS protected-mode C kernel\n");
-    console_write("Pseudo SSD ready: 4096 KiB RAM disk at 5 MiB (rep movsl I/O).\n");
-    console_write("PS/2 keyboard ready (v86 compatible). Type HELP.\n\n");
+void text_trim(char *text) {
+    u16 start = 0u;
+    u16 end = text_length(text);
+
+    while (text[start] == ' ') {
+        ++start;
+    }
+    while (end > start && text[end - 1u] == ' ') {
+        --end;
+    }
+    text[end] = '\0';
+    if (start != 0u) {
+        u16 index = start;
+        while (index <= end) {
+            text[index - start] = text[index];
+            ++index;
+        }
+    }
+}
+
+void text_pad_right(char *destination, u16 width, u16 capacity) {
+    u16 length = text_length(destination);
+
+    while (length < width && length < (u16)(capacity - 1u)) {
+        destination[length] = ' ';
+        ++length;
+    }
+    destination[length] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+/* The programmable interval timer                                     */
+/* ------------------------------------------------------------------ */
+
+/* Channel 0 of the timer chip ticks 1193182 times per second. Dividing by
+ * 11932 gives an interrupt rate of about 100 Hz, which is one 10 ms tick. */
+#define TIMER_INPUT_FREQUENCY 1193182u
+#define TIMER_DIVISOR 11932u
+
+#define TIMER_LATCH_CHANNEL_0 0x00u
+
+static u16 timer_last_counter;
+static u32 timer_leftover_counts;
+static u32 elapsed_milliseconds;
+static u16 ticks_waiting;
+
+static u16 timer_read_counter(void) {
+    u8 low;
+    u8 high;
+
+    port_write_byte(PORT_PIT_COMMAND, TIMER_LATCH_CHANNEL_0);
+    low = port_read_byte(PORT_PIT_CHANNEL_0);
+    high = port_read_byte(PORT_PIT_CHANNEL_0);
+    return (u16)((u16)low | (u16)((u16)high << 8u));
+}
+
+void timer_init(void) {
+    /* Channel 0, rate generator, both bytes, binary counting. */
+    port_write_byte(PORT_PIT_COMMAND, 0x34u);
+    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR & 0xFFu));
+    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR >> 8u));
+
+    timer_last_counter = timer_read_counter();
+    timer_leftover_counts = 0u;
+    elapsed_milliseconds = 0u;
+    ticks_waiting = 0u;
+}
+
+void timer_update(void) {
+    const u16 current = timer_read_counter();
+    u16 elapsed;
+
+    /* The counter counts down and wraps around when it reaches zero. */
+    if (timer_last_counter >= current) {
+        elapsed = (u16)(timer_last_counter - current);
+    } else {
+        elapsed = (u16)(timer_last_counter + (TIMER_DIVISOR - current));
+    }
+    timer_last_counter = current;
+    timer_leftover_counts += elapsed;
+
+    while (timer_leftover_counts >= TIMER_DIVISOR) {
+        timer_leftover_counts -= TIMER_DIVISOR;
+        elapsed_milliseconds += TICK_MILLISECONDS;
+        ++ticks_waiting;
+    }
+}
+
+u32 time_milliseconds(void) {
+    return elapsed_milliseconds;
+}
+
+u16 timer_take_ticks(void) {
+    const u16 ticks = ticks_waiting;
+
+    ticks_waiting = 0u;
+    return ticks;
+}
+
+void time_wait(u32 milliseconds) {
+    const u32 start = elapsed_milliseconds;
+
+    while ((elapsed_milliseconds - start) < milliseconds) {
+        timer_update();
+        input_poll();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* The clock chip                                                      */
+/* ------------------------------------------------------------------ */
+
+#define CMOS_SECONDS 0x00u
+#define CMOS_MINUTES 0x02u
+#define CMOS_HOURS 0x04u
+#define CMOS_DAY 0x07u
+#define CMOS_MONTH 0x08u
+#define CMOS_YEAR 0x09u
+#define CMOS_CENTURY 0x32u
+#define CMOS_STATUS_B 0x0Bu
+
+#define CMOS_BINARY_MODE 0x04u
+#define CMOS_TWENTY_FOUR_HOURS 0x02u
+#define CMOS_HOUR_IS_PM 0x80u
+
+static u8 stored_seconds;
+static u8 stored_minutes;
+static u8 stored_hours;
+static u8 stored_day;
+static u8 stored_month;
+static u16 stored_year;
+static u32 seconds_at_boot;
+
+static u8 cmos_read(u8 index) {
+    port_write_byte(PORT_CMOS_ADDRESS, index);
+    return port_read_byte(PORT_CMOS_DATA);
+}
+
+static u8 cmos_value(u8 raw, u8 binary_mode) {
+    if (binary_mode != 0u) {
+        return raw;
+    }
+    /* The chip normally answers in binary coded decimal: 0x25 means 25. */
+    return (u8)(((raw >> 4) * 10u) + (raw & 0x0Fu));
+}
+
+void clock_init(void) {
+    const u8 status = cmos_read(CMOS_STATUS_B);
+    const u8 binary = (u8)((status & CMOS_BINARY_MODE) != 0u);
+    u8 hours = cmos_value(cmos_read(CMOS_HOURS), binary);
+    u8 century;
+
+    if ((status & CMOS_TWENTY_FOUR_HOURS) == 0u &&
+        (hours & CMOS_HOUR_IS_PM) != 0u) {
+        hours = (u8)((hours & (u8)~CMOS_HOUR_IS_PM) + 12u);
+    }
+
+    stored_seconds = cmos_value(cmos_read(CMOS_SECONDS), binary);
+    stored_minutes = cmos_value(cmos_read(CMOS_MINUTES), binary);
+    stored_hours = hours;
+    stored_day = cmos_value(cmos_read(CMOS_DAY), binary);
+    stored_month = cmos_value(cmos_read(CMOS_MONTH), binary);
+
+    century = cmos_read(CMOS_CENTURY);
+    if (century >= 0x19u && century <= 0x21u) {
+        century = (u8)(((century >> 4) * 10u) + (century & 0x0Fu));
+    } else {
+        century = 20u; /* no century register: assume the 2000s */
+    }
+    stored_year = (u16)((u16)century * 100u + cmos_value(cmos_read(CMOS_YEAR), binary));
+
+    if (stored_hours > 23u || stored_minutes > 59u || stored_seconds > 59u ||
+        stored_day < 1u || stored_day > 31u || stored_month < 1u || stored_month > 12u) {
+        /* The clock chip was unset; start from a friendly default. */
+        stored_hours = 12u;
+        stored_minutes = 0u;
+        stored_seconds = 0u;
+        stored_day = 1u;
+        stored_month = 1u;
+        stored_year = 2025u;
+    }
+
+    seconds_at_boot = ((u32)stored_hours * 3600u) +
+                      ((u32)stored_minutes * 60u) + (u32)stored_seconds;
+}
+
+static u32 clock_total_seconds(void) {
+    return seconds_at_boot + (elapsed_milliseconds / 1000u);
+}
+
+u8 clock_seconds(void) {
+    return (u8)(clock_total_seconds() % 60u);
+}
+
+u8 clock_minutes(void) {
+    return (u8)((clock_total_seconds() / 60u) % 60u);
+}
+
+u8 clock_hours(void) {
+    return (u8)((clock_total_seconds() / 3600u) % 24u);
+}
+
+u8 clock_day(void) {
+    return stored_day;
+}
+
+u8 clock_month(void) {
+    return stored_month;
+}
+
+u16 clock_year(void) {
+    return stored_year;
+}
+
+/* ------------------------------------------------------------------ */
+/* Restart                                                             */
+/* ------------------------------------------------------------------ */
+
+void system_restart(void) {
+    u32 guard;
+
+    sound_stop();
+
+    /* The keyboard controller can reset the whole machine. Wait until it is
+     * ready for a command, then ask for the reset pulse. */
+    for (guard = 0u; guard < 200000u; ++guard) {
+        if ((port_read_byte(PORT_KEYBOARD_STATUS) & 0x02u) == 0u) {
+            break;
+        }
+    }
+    port_write_byte(PORT_KEYBOARD_STATUS, PORT_KEYBOARD_RESET);
 
     for (;;) {
-        char *command;
-        char *argument;
+        /* Nothing sensible left to do if the reset did not take. */
+    }
+}
 
-        console_write("> ");
-        read_line(command_buffer, COMMAND_CAPACITY);
-        command = trim_command(command_buffer);
-        argument = command_argument(command);
+/* ------------------------------------------------------------------ */
+/* Start up                                                            */
+/* ------------------------------------------------------------------ */
 
-        if (*command == '\0') {
-            continue;
-        }
-        if (strings_equal(command, "DIR") != 0u) {
-            file_manager_dir();
-        } else if (strings_equal(command, "TYPE") != 0u) {
-            if (*argument == '\0') console_write("Usage: TYPE filename\n");
-            else file_type(argument);
-        } else if (strings_equal(command, "DEL") != 0u) {
-            if (*argument == '\0') console_write("Usage: DEL filename\n");
-            else file_delete(argument);
-        } else if (strings_equal(command, "SNAKE") != 0u) {
-            snake_game();
-            console_clear();
-            console_write("Back at the command line. Type HELP.\n\n");
-        } else if (strings_equal(command, "CLEAR") != 0u ||
-                   strings_equal(command, "CLS") != 0u) {
-            console_clear();
-        } else if (strings_equal(command, "HELP") != 0u) {
-            print_help();
-        } else {
-            console_write("Unknown command. Type HELP.\n");
-        }
+void kernel_main(void) {
+    memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
+
+    timer_init();
+    ram_disk_init();
+    file_system_init();
+    clock_init();
+    gfx_init();
+    input_init();
+    sound_init();
+
+    gui_run();
+
+    for (;;) {
+        /* gui_run never returns. */
     }
 }

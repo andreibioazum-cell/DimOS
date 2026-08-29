@@ -1,5 +1,5 @@
-CXX ?= g++
-CXXFLAGS ?= -O2
+CC ?= gcc
+CFLAGS ?= -O2
 CPPFLAGS ?=
 WARNINGS := -Wall -Wextra -Wpedantic -Werror
 IMAGE_CHECKER := bin/dimos-image-check
@@ -13,9 +13,10 @@ iso: tools
 
 tools: $(IMAGE_CHECKER)
 
-$(IMAGE_CHECKER): tools/image_inspector.cpp
+# The artifact checker is plain C, like the kernel: no C++ anywhere.
+$(IMAGE_CHECKER): tools/image_check.c
 	@mkdir -p $(@D)
-	$(CXX) $(CPPFLAGS) -std=c++17 $(CXXFLAGS) $(WARNINGS) $< -o $@
+	$(CC) $(CPPFLAGS) -std=c11 $(CFLAGS) $(WARNINGS) $< -o $@
 
 verify: tools
 	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img disk_img/dimos.hdd disk_img/dimos.iso

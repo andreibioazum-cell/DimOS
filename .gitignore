@@ -28,3 +28,5 @@ disk_img/
 
 # Other
 lpt/
+__pycache__/
+*.pyc

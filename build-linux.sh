@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
 
-# Build the minimal DimOS image: bootloader + command line/Snake kernel.
+# Build the minimal DimOS images: bootloader + command line/Snake kernel.
+#
+# The primary artifact is dimos.hdd, a hard disk image: the bootable FAT12
+# volume occupies the first 1.44 MB and the rest is zero padding. It boots as
+# an IDE/USB disk in QEMU, on the v86 website (hard disk slot) and on real
+# hardware, because the loader uses LBA and keeps the BIOS drive unit from DL.
+# dimos.iso is the same system as a bootable El Torito CD for real PCs, and
+# dimos.img is the raw 1.44M floppy volume.
 
 set -Eeuo pipefail
 
 readonly FLOPPY_SIZE_BYTES=1474560
+readonly HDD_SIZE_BYTES=8388608
 readonly MAX_KERNEL_LOADER_BYTES=43008
 readonly BOOT_IMAGE="disk_img/dimos.img"
+# FAT12 image + zero padding: boots as an IDE/USB hard disk in QEMU, v86 and
+# on real PCs.
+readonly HDD_IMAGE="disk_img/dimos.hdd"
 # Kept as a blank compatibility disk for existing release automation.
 readonly SECOND_FLOPPY_IMAGE="disk_img/FLOPPY2.img"
 readonly ISO_IMAGE="disk_img/dimos.iso"
 readonly IMAGE_CHECKER="bin/dimos-image-check"
-readonly EMBEDDED_IMAGE_JS="web/dimos-image.js"
 readonly KERNEL_ENTRY_OBJECT="bin/kernel-entry.o"
 readonly KERNEL_C_OBJECT="bin/kernel-c.o"
 readonly KERNEL_ELF="bin/KERNEL.ELF"
@@ -42,7 +52,7 @@ Options:
   --quiet                Print only errors
   --no-boot-recompile    Reuse bin/BOOT.BIN
   --no-kernel-recompile  Reuse bin/KERNEL.BIN
-  --no-iso               Build only the FAT12 floppy image
+  --no-iso               Do not build the El Torito ISO (HDD image still built)
   -h, --help             Show this help
 USAGE
 }
@@ -135,6 +145,17 @@ build_image_checker() {
     fi
 }
 
+create_hdd_image() {
+    # The bootloader reads with LBA (int 13h AH=42h) and keeps the BIOS boot
+    # unit in DL, so the same FAT12 volume boots unchanged as drive 0x80.
+    # Keep the volume in the first 1.44 MB so the fixed BPB/FAT/root layout
+    # still matches, and pad the rest with zeroes so ATA/SeaBIOS sees an
+    # ordinary hard disk instead of a floppy.
+    cp "$BOOT_IMAGE" "$HDD_IMAGE"
+    truncate -s "$HDD_SIZE_BYTES" "$HDD_IMAGE"
+    log_ok "Created $HDD_IMAGE ($(file_size "$HDD_IMAGE") bytes)"
+}
+
 create_iso_image() {
     local staging_directory="disk_img/iso-root"
     rm -rf "$staging_directory"
@@ -156,7 +177,7 @@ create_iso_image() {
     log_ok "Created $ISO_IMAGE ($(file_size "$ISO_IMAGE") bytes)"
 }
 
-for command in nasm mkfs.vfat mcopy mdir truncate gzip base64 sha256sum; do
+for command in nasm mkfs.vfat mcopy mdir truncate; do
     require_command "$command"
 done
 require_command "${CC:-gcc}"
@@ -204,20 +225,21 @@ if [[ -d files ]]; then
     done
 fi
 
-"$IMAGE_CHECKER" bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE"
+create_hdd_image
 
 if (( ! QUIET )); then
     printf '\nDisk contents (kernel plus user files):\n'
     mdir -i "$BOOT_IMAGE" ::/
 fi
 
-(( ! BUILD_ISO )) || create_iso_image
+if (( BUILD_ISO )); then
+    create_iso_image
+fi
 
-# Keep the browser launcher self-contained: index.html boots this payload with
-# no file picking, which is what makes "could not read the boot disk" possible.
-log_info "Embedding the floppy image into $EMBEDDED_IMAGE_JS"
-./tools/embed-image.sh "$BOOT_IMAGE" "$EMBEDDED_IMAGE_JS" >/dev/null
-log_ok "Embedded launcher image: $EMBEDDED_IMAGE_JS"
+checker_arguments=(bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE" "$HDD_IMAGE")
+(( ! BUILD_ISO )) || checker_arguments+=("$ISO_IMAGE")
+"$IMAGE_CHECKER" "${checker_arguments[@]}"
 
 log_ok "Floppy image: $BOOT_IMAGE"
+log_ok "Hard disk image: $HDD_IMAGE"
 (( ! BUILD_ISO )) || log_ok "ISO image: $ISO_IMAGE"

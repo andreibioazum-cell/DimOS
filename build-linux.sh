@@ -220,6 +220,25 @@ mkfs.vfat -F 12 -n EMPTY "$SECOND_FLOPPY_IMAGE" >/dev/null
 
 dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
 mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
+
+# The desktop font: any TrueType file dropped into fonts/font.ttf ships on
+# the disk as FONT.TTF and the kernel rasterizes it at boot (font_ttf.c).
+# It must fit inside the 256 data sectors the bootloader preloads,
+# together with the kernel that sits in front of it.
+if [[ -f fonts/font.ttf ]]; then
+    font_size=$(file_size fonts/font.ttf)
+    kernel_sectors=$(( (kernel_size + 511) / 512 ))
+    font_limit=$(( (256 - kernel_sectors) * 512 ))
+    (( font_size <= font_limit )) || fail \
+"fonts/font.ttf is too big: $font_size bytes, but only $font_limit fit into
+the preloaded disk window next to the kernel. Subset the font to ASCII, e.g.:
+  pyftsubset yourfont.ttf --unicodes=U+0020-007E --no-hinting --output-file=fonts/font.ttf"
+    mcopy -i "$BOOT_IMAGE" fonts/font.ttf ::/FONT.TTF
+    log_ok "Desktop font: fonts/font.ttf ($font_size bytes) -> FONT.TTF"
+else
+    log_info "fonts/font.ttf not found -- the kernel will use the BIOS font"
+fi
+
 # Ship a small ordinary file so the file manager has a real FAT12 file to inspect.
 if [[ -d files ]]; then
     for user_file in files/*; do

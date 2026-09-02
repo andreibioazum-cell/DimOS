@@ -279,6 +279,17 @@ u32 file_system_volume_sectors(void);   /* straight from the boot sector */
 u16 file_system_sector_bytes(void);
 
 /* ------------------------------------------------------------------ */
+/* font_ttf.c -- a real TrueType font (FONT.TTF on the boot volume)    */
+/* ------------------------------------------------------------------ */
+
+/* Parses FONT.TTF and rasterizes ASCII into an 8x8 glyph table laid
+ * out exactly like the BIOS font, so gfx.c can draw with either. */
+u8 font_ttf_load(void);                     /* 1 = the table is ready  */
+u8 font_ttf_build(const u8 *file, u32 size); /* parse an in-memory TTF */
+const u8 *font_ttf_table(void);             /* 128 glyphs * 8 bytes    */
+
+
+/* ------------------------------------------------------------------ */
 /* sound.c -- the PC speaker                                           */
 /* ------------------------------------------------------------------ */
 

@@ -33,6 +33,7 @@ KERNEL_BASE = 0x00020000
 FONT_ADDRESS = 0x0000E000
 FRAME_BUFFER = 0x000A0000
 SIMULATOR = 0x00100000
+FONT_TTF_AREA = 0x00400000   # the kernel copies FONT.TTF here (font_ttf.c)
 RAM_DISK = 0x00500000
 
 CFLAGS = [
@@ -109,6 +110,7 @@ class Machine:
         self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
         self.mu.mem_map(0x00000000, 0x00100000)      # the first megabyte
         self.mu.mem_map(SIMULATOR, 0x00010000)       # shared with this script
+        self.mu.mem_map(FONT_TTF_AREA, 0x00100000)   # FONT.TTF + rasterizer
         self.mu.mem_map(RAM_DISK, 0x00400000)        # the 4 MiB RAM disk
 
         with open(flat, "rb") as handle:
@@ -285,9 +287,11 @@ def plant_boot_disk(machine, flat):
     """Recreates the windows boot.asm fills on real hardware.
 
     The file manager reads the FAT copies at 0x7E00, the root directory at
-    0x10000 and the first 64 data sectors at 0x30000. On real hardware the
+    0x10000 and the first 256 data sectors at 0x30000. On real hardware the
     bootloader puts the disk there; the sandbox has no disk, so this helper
-    synthesizes a tiny FAT12 volume with the same layout."""
+    synthesizes a tiny FAT12 volume with the same layout. When the repo has
+    fonts/font.ttf, it ships on the volume as FONT.TTF exactly like the real
+    build, so the kernel boots with the rasterized TrueType font."""
     fat = bytearray(18 * 512)
 
     def set12(cluster, value):
@@ -305,6 +309,22 @@ def plant_boot_disk(machine, flat):
     set12(40, 0xFFF)                   # README.TXT, one cluster
     set12(42, 43)                      # NOTES.TXT, two clusters
     set12(43, 0xFFF)
+
+    # FONT.TTF occupies a contiguous chain starting at cluster 50, the way
+    # mcopy lays it out on a fresh volume.
+    font_path = os.path.join(REPO, "fonts", "font.ttf")
+    font = b""
+    if os.path.isfile(font_path):
+        with open(font_path, "rb") as handle:
+            font = handle.read()
+    font_clusters = (len(font) + 511) // 512
+    if 50 + font_clusters > 256 + 2:
+        font = b""                     # too big for the preloaded window
+        font_clusters = 0
+    for index in range(font_clusters):
+        last = index == font_clusters - 1
+        set12(50 + index, 0xFFF if last else 51 + index)
+
     machine.mu.mem_write(0x07E00, bytes(fat))
 
     def entry(name, cluster, size):
@@ -324,13 +344,17 @@ def plant_boot_disk(machine, flat):
     root[0:32] = entry("KERNEL  BIN", 2, len(kernel))
     root[32:64] = entry("README  TXT", 40, len(readme))
     root[64:96] = entry("NOTES   TXT", 42, len(notes))
+    if font_clusters:
+        root[96:128] = entry("FONT    TTF", 50, len(font))
     machine.mu.mem_write(0x10000, bytes(root))
 
-    data = bytearray(64 * 512)                # cluster N sits at (N-2)*512
+    data = bytearray(256 * 512)               # cluster N sits at (N-2)*512
     data[0:512] = kernel[:512]
     data[(40 - 2) * 512:(40 - 2) * 512 + len(readme)] = readme
     data[(42 - 2) * 512:(42 - 2) * 512 + 512] = notes[:512]
     data[(43 - 2) * 512:(43 - 2) * 512 + len(notes) - 512] = notes[512:]
+    if font_clusters:
+        data[(50 - 2) * 512:(50 - 2) * 512 + len(font)] = font
     machine.mu.mem_write(0x30000, bytes(data))
 
     # The BIOS keeps the conventional memory count at 0x413 in KiB; real

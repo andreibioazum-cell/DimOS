@@ -5,9 +5,12 @@
  * at 0xA0000. We compose each frame in our own buffer (BACK_BUFFER_ADDRESS)
  * and copy it to the video card once per frame, so nothing ever flickers.
  *
- * Text uses the 8x8 font that every VGA BIOS carries. kernel.asm asks the
- * video BIOS where that font is and stores the address in bios_font_address,
- * so the kernel does not need to ship its own glyph table.
+ * Text is drawn with 8x8 glyphs. When the boot disk carries FONT.TTF
+ * (put any TrueType file into fonts/ before building), font_ttf.c
+ * rasterizes it at boot and that table is used for every character.
+ * Otherwise text falls back to the 8x8 font every VGA BIOS carries:
+ * kernel.asm asks the video BIOS where that font is and stores the
+ * address in bios_font_address.
  */
 
 #include "dimos.h"
@@ -193,6 +196,15 @@ static u8 font_looks_valid(const u8 *glyphs) {
 }
 
 static void font_init(void) {
+    /* First choice: the real TrueType font from FONT.TTF on the boot
+     * disk, rasterized by font_ttf.c. Drop any TTF into fonts/ and the
+     * whole desktop is drawn with it. */
+    if (font_ttf_load() != 0u) {
+        font_glyphs = font_ttf_table();
+        font_ready = 1u;
+        return;
+    }
+    /* Otherwise: the 8x8 font of the video BIOS. */
     font_glyphs = (const u8 *)(u32)bios_font_address;
     font_ready = font_looks_valid(font_glyphs);
 }

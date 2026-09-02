@@ -47,7 +47,7 @@ u8 *font_ttf_work_area;
 
 /* Every glyph cell is 8x8 pixels, each pixel is judged from a 4x4 block
  * of samples, and sample coordinates carry 6 fraction bits (26.6). */
-#define SAMPLES_PER_PIXEL 4
+#define SAMPLES_PER_PIXEL 8
 #define GRID (8 * SAMPLES_PER_PIXEL)
 #define FP_SHIFT 6
 #define FP_HALF (1 << (FP_SHIFT - 1))
@@ -56,7 +56,8 @@ u8 *font_ttf_work_area;
 /* A pixel lights up when at least this many of its 16 samples fall
  * inside the outline. If a whole glyph would vanish that way (a tiny
  * dot, a thin quote), the threshold drops until ink appears. */
-#define INK_THRESHOLD 5u
+#define SAMPLES_PER_CELL (SAMPLES_PER_PIXEL * SAMPLES_PER_PIXEL)
+#define INK_THRESHOLD (SAMPLES_PER_CELL * 5u / 16u)
 
 /* Grid coordinates are clamped into this range so that every product
  * in the scanline math stays far away from 32 bit overflow. */
@@ -112,10 +113,27 @@ static s32 em_ascent;     /* baseline to the top of the design space  */
 static s32 em_descent;    /* baseline to the bottom (a negative number) */
 static u32 cmap_subtable; /* offset of the chosen encoding subtable   */
 
-/* The finished product: 128 glyphs, 8 bytes each, bit 7 = left pixel.
- * The layout matches the BIOS font table exactly, so gfx.c can point
- * at either one with the same drawing code. */
+/* The finished product, in two shapes.
+ *
+ *  - glyph_table: 128 glyphs, 8 bytes each, bit 7 = left pixel. The
+ *    layout matches the BIOS font table exactly, so the old one-bit
+ *    drawing path and the sanity checks below still work.
+ *  - glyph_alpha: 128 glyphs, 64 bytes each (one byte per pixel, row by
+ *    row), holding how much of that pixel the outline covers, from 0
+ *    (nothing) to FONT_ALPHA_MAX (solid ink). This is what gfx.c draws
+ *    with: blending those levels between the text colour and whatever is
+ *    already on screen is what turns 8x8 blocks into smooth letters
+ *    instead of the hard, jagged staircase a one-bit font gives. */
 static u8 glyph_table[128u * 8u];
+static u8 glyph_alpha[128u * 64u];
+
+/* Straight area coverage looks washed out at eight pixels, because a
+ * stem barely one pixel wide never reaches full ink. This curve lifts
+ * the middle of the range so small text stays crisp and readable
+ * without bringing the staircase back. */
+static const u8 alpha_curve[FONT_ALPHA_MAX + 1u] = {
+    0u, 1u, 3u, 4u, 6u, 7u, 8u, 10u, 11u, 12u, 13u, 14u, 14u, 15u, 16u, 16u, 16u
+};
 
 /* ------------------------------------------------------------------ */
 /* Bounds-checked big-endian readers                                   */
@@ -982,14 +1000,18 @@ static void choose_scale(void) {
     glyph_baseline = (cap_top * scale_y_num) / scale_y_den;
 }
 
-/* Rasterize one character into rows[8]. Failures leave it blank. */
-static void rasterize_character(u16 code, u8 *rows) {
+/* Rasterize one character into rows[8] (one bit per pixel) and into
+ * alpha[64] (one coverage level per pixel). Failures leave both blank. */
+static void rasterize_character(u16 code, u8 *rows, u8 *alpha) {
     s32 min_x, max_x, width_fp;
     u16 index;
     u8 coverage[64];
 
     for (index = 0u; index < 8u; ++index) {
         rows[index] = 0u;
+    }
+    for (index = 0u; index < 64u; ++index) {
+        alpha[index] = 0u;
     }
     if (decode_character(code) == 0u || WORK->point_count == 0u) {
         return; /* unmapped or empty: stays blank */
@@ -1025,6 +1047,18 @@ static void rasterize_character(u16 code, u8 *rows) {
     }
     count_coverage(coverage);
     coverage_to_rows(coverage, rows);
+
+    /* The same coverage counts, kept as levels instead of being forced
+     * to black or nothing: this is the anti-aliased glyph. */
+    for (index = 0u; index < 64u; ++index) {
+        u16 level = (u16)(((u16)coverage[index] * FONT_ALPHA_MAX +
+                           (SAMPLES_PER_CELL / 2u)) / SAMPLES_PER_CELL);
+
+        if (level > FONT_ALPHA_MAX) {
+            level = FONT_ALPHA_MAX;
+        }
+        alpha[index] = alpha_curve[level];
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1045,6 +1079,12 @@ u8 font_ttf_build(const u8 *file, u32 size) {
     for (code = 0u; code < 128u * 8u; ++code) {
         glyph_table[code] = 0u;
     }
+    {
+        u32 cell;
+        for (cell = 0u; cell < 128u * 64u; ++cell) {
+            glyph_alpha[cell] = 0u;
+        }
+    }
     if (file == (const u8 *)0 || size < 12u) {
         return 0u;
     }
@@ -1061,7 +1101,8 @@ u8 font_ttf_build(const u8 *file, u32 size) {
     choose_scale();
 
     for (code = 0x20u; code <= 0x7Eu; ++code) {
-        rasterize_character(code, &glyph_table[(u32)code * 8u]);
+        rasterize_character(code, &glyph_table[(u32)code * 8u],
+                            &glyph_alpha[(u32)code * 64u]);
     }
 
     /* The same sanity rules gfx.c applies to the BIOS font: the space
@@ -1093,6 +1134,10 @@ u8 font_ttf_build(const u8 *file, u32 size) {
 
 const u8 *font_ttf_table(void) {
     return glyph_table;
+}
+
+const u8 *font_ttf_alpha_table(void) {
+    return glyph_alpha;
 }
 
 #ifndef DIMOS_HOST_TEST

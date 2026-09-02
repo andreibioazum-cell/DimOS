@@ -55,7 +55,7 @@ static const Color palette[PALETTE_SIZE] = {
     { 0, 0, 128 },       /* COLOR_TITLE_BAR   */
     { 0, 128, 128 },     /* COLOR_DESKTOP     */
     { 255, 255, 255 },   /* COLOR_TEXT_FIELD  */
-    { 0, 0, 170 },       /* COLOR_SELECTION   */
+    { 96, 99, 104 },     /* COLOR_SELECTION   */
     { 128, 128, 128 },   /* COLOR_DISABLED    */
     { 255, 255, 0 },     /* COLOR_ACCENT      */
     { 0, 170, 0 },       /* COLOR_GOOD        */
@@ -115,6 +115,46 @@ static void palette_write_entry(u8 index, Color value) {
     port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.blue >> 2));
 }
 
+/* The 6x6x6 colour cube that lives in slots 32..247. Six evenly spaced
+ * levels per channel is the classic web-safe grid: coarse enough to fit
+ * in the palette, fine enough that a blended edge is indistinguishable
+ * from the exact colour at 320x200. */
+static u8 cube_level(u8 step) {
+    return (u8)(((u16)step * 255u) / (COLOR_CUBE_STEPS - 1u));
+}
+
+static u8 cube_step(u8 value) {
+    return (u8)((((u16)value * (COLOR_CUBE_STEPS - 1u)) + 127u) / 255u);
+}
+
+static Color cube_color(u16 slot) {
+    Color result;
+
+    result.red = cube_level((u8)(slot / (COLOR_CUBE_STEPS * COLOR_CUBE_STEPS)));
+    result.green = cube_level((u8)((slot / COLOR_CUBE_STEPS) % COLOR_CUBE_STEPS));
+    result.blue = cube_level((u8)(slot % COLOR_CUBE_STEPS));
+    return result;
+}
+
+/* The RGB behind any palette index, role or cube. */
+static Color color_of(u8 index) {
+    if (index < PALETTE_SIZE) {
+        return palette[index];
+    }
+    if ((u16)index < COLOR_CUBE_BASE + COLOR_CUBE_COUNT) {
+        return cube_color((u16)(index - COLOR_CUBE_BASE));
+    }
+    return palette[COLOR_BLACK];
+}
+
+/* The cube slot closest to a colour. */
+static u8 nearest_cube(u16 red, u16 green, u16 blue) {
+    return (u8)(COLOR_CUBE_BASE +
+                (u16)cube_step((u8)red) * COLOR_CUBE_STEPS * COLOR_CUBE_STEPS +
+                (u16)cube_step((u8)green) * COLOR_CUBE_STEPS +
+                (u16)cube_step((u8)blue));
+}
+
 static void palette_apply(void) {
     Color black;
     u16 index;
@@ -126,11 +166,72 @@ static void palette_apply(void) {
     for (index = 0u; index < PALETTE_SIZE; ++index) {
         palette_write_entry((u8)index, themed(palette[index], current_theme));
     }
+    /* The blending cube, themed like everything else so a green or amber
+     * screen keeps its smooth edges. */
+    for (index = 0u; index < COLOR_CUBE_COUNT; ++index) {
+        palette_write_entry((u8)(COLOR_CUBE_BASE + index),
+                            themed(cube_color(index), current_theme));
+    }
     /* The slots we never draw with stay black instead of the rainbow the
      * video BIOS leaves behind after a mode change. */
-    for (index = PALETTE_SIZE; index < 256u; ++index) {
+    for (index = COLOR_CUBE_BASE + COLOR_CUBE_COUNT; index < 256u; ++index) {
         palette_write_entry((u8)index, black);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Blending                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Mix a foreground colour into a background one. alpha runs from 0 (all
+ * background) to FONT_ALPHA_MAX (all foreground); everything in between
+ * lands on the nearest cube colour.
+ *
+ * Both ends stay exact, so solid areas keep their palette role and only
+ * the soft edges spend cube slots. The answer for one pair of colours is
+ * remembered, because text and icons ask for the same pair thousands of
+ * times per frame and the division is the expensive part. */
+static u8 shade_foreground = 0xFFu;
+static u8 shade_background = 0xFFu;
+static u8 shade_map[FONT_ALPHA_MAX + 1u];
+static u8 shade_ready;
+
+u8 gfx_shade(u8 foreground, u8 background, u8 alpha) {
+    if (alpha >= (u8)FONT_ALPHA_MAX) {
+        return foreground;
+    }
+    if (alpha == 0u) {
+        return background;
+    }
+    if (foreground == background) {
+        return foreground;
+    }
+    if (shade_ready == 0u || foreground != shade_foreground ||
+        background != shade_background) {
+        const Color front = color_of(foreground);
+        const Color back = color_of(background);
+        u8 level;
+
+        for (level = 0u; level <= (u8)FONT_ALPHA_MAX; ++level) {
+            const u16 red = (u16)(((u32)front.red * level +
+                                   (u32)back.red * (FONT_ALPHA_MAX - level)) /
+                                  FONT_ALPHA_MAX);
+            const u16 green = (u16)(((u32)front.green * level +
+                                     (u32)back.green * (FONT_ALPHA_MAX - level)) /
+                                    FONT_ALPHA_MAX);
+            const u16 blue = (u16)(((u32)front.blue * level +
+                                    (u32)back.blue * (FONT_ALPHA_MAX - level)) /
+                                   FONT_ALPHA_MAX);
+
+            shade_map[level] = nearest_cube(red, green, blue);
+        }
+        shade_map[0] = background;
+        shade_map[FONT_ALPHA_MAX] = foreground;
+        shade_foreground = foreground;
+        shade_background = background;
+        shade_ready = 1u;
+    }
+    return shade_map[alpha];
 }
 
 void gfx_select_theme(u8 theme) {
@@ -138,6 +239,7 @@ void gfx_select_theme(u8 theme) {
         theme = THEME_COLOR;
     }
     current_theme = theme;
+    shade_ready = 0u;
     palette_apply();
 }
 
@@ -149,7 +251,8 @@ u8 gfx_current_theme(void) {
 /* Font                                                                */
 /* ------------------------------------------------------------------ */
 
-static const u8 *font_glyphs;
+static const u8 *font_glyphs;       /* one bit per pixel (BIOS layout)  */
+static const u8 *font_levels;       /* 64 coverage levels per glyph     */
 static u8 font_ready;
 
 /* The BIOS font is only usable if it really looks like a font: the space is
@@ -201,6 +304,7 @@ static void font_init(void) {
      * whole desktop is drawn with it. */
     if (font_ttf_load() != 0u) {
         font_glyphs = font_ttf_table();
+        font_levels = font_ttf_alpha_table();
         font_ready = 1u;
         return;
     }
@@ -242,6 +346,33 @@ void gfx_pixel(s16 x, s16 y, u8 color) {
         return;
     }
     screen[(u16)y * SCREEN_WIDTH + (u16)x] = color;
+}
+
+/* Lay a colour over what is already on screen. alpha 0 changes nothing,
+ * FONT_ALPHA_MAX paints the colour solid, and the levels in between pick
+ * the cube colour that sits that far along. Every smooth edge in DimOS --
+ * letters, icons, the pointer, circles -- is drawn with this. */
+void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha) {
+    u32 offset;
+
+    if (alpha == 0u) {
+        return;
+    }
+    if (x < 0 || y < 0) {
+        return;
+    }
+    if ((u16)x >= SCREEN_WIDTH || (u16)y >= SCREEN_HEIGHT) {
+        return;
+    }
+    if (alpha > (u8)FONT_ALPHA_MAX) {
+        alpha = (u8)FONT_ALPHA_MAX;
+    }
+    offset = (u32)(u16)y * SCREEN_WIDTH + (u32)(u16)x;
+    if (alpha == (u8)FONT_ALPHA_MAX) {
+        screen[offset] = color;
+        return;
+    }
+    screen[offset] = gfx_shade(color, screen[offset], alpha);
 }
 
 void gfx_horizontal_line(s16 x, s16 y, s16 length, u8 color) {
@@ -381,23 +512,47 @@ void gfx_panel(s16 x, s16 y, s16 width, s16 height) {
 void gfx_character(s16 x, s16 y, char character, u8 color) {
     u8 row;
     u8 column;
-    const u8 *glyph;
 
     if (character < 32 || character > 126) {
         character = '?';
     }
     if (font_ready == 0u) {
-        /* No usable BIOS font: show a hollow box so text is still visible. */
+        /* No usable font at all: show a hollow box so text is still
+         * visible instead of the screen going silently blank. */
         gfx_outline(x, y, 7, 8, color);
         return;
     }
 
-    glyph = font_glyphs + (u16)((u8)character * 8u);
-    for (row = 0u; row < 8u; ++row) {
-        const u8 bits = glyph[row];
-        for (column = 0u; column < 8u; ++column) {
-            if ((u8)(bits & (u8)(0x80u >> column)) != 0u) {
-                gfx_pixel((s16)(x + (s16)column), (s16)(y + (s16)row), color);
+    if (font_levels != (const u8 *)0) {
+        /* The TrueType glyph, drawn with its coverage levels: a pixel the
+         * outline fills completely gets the text colour, a pixel it only
+         * clips gets a mixture with whatever lies underneath. That is what
+         * removes the staircase from the letters. */
+        const u8 *levels = font_levels + (u16)((u8)character * 64u);
+
+        for (row = 0u; row < 8u; ++row) {
+            for (column = 0u; column < 8u; ++column) {
+                const u8 alpha = levels[(u16)row * 8u + column];
+
+                if (alpha != 0u) {
+                    gfx_pixel_blend((s16)(x + (s16)column), (s16)(y + (s16)row),
+                                    color, alpha);
+                }
+            }
+        }
+        return;
+    }
+
+    {
+        /* Fallback: the one-bit BIOS font. */
+        const u8 *glyph = font_glyphs + (u16)((u8)character * 8u);
+
+        for (row = 0u; row < 8u; ++row) {
+            const u8 bits = glyph[row];
+            for (column = 0u; column < 8u; ++column) {
+                if ((u8)(bits & (u8)(0x80u >> column)) != 0u) {
+                    gfx_pixel((s16)(x + (s16)column), (s16)(y + (s16)row), color);
+                }
             }
         }
     }
@@ -444,70 +599,296 @@ u16 gfx_text_width(const char *text) {
 /* Pictures written as ASCII art                                       */
 /* ------------------------------------------------------------------ */
 
-/* Art rows use '.' for "leave the pixel alone" and anything else for "draw".
- * Icons and the mouse pointer are written that way because a picture in the
- * source is far easier to read than a table of bytes. */
-void gfx_picture(s16 x, s16 y, const char *const *art, u16 rows, u8 color, u8 background) {
+/* Art rows use '.' for "leave the pixel alone" and anything else for
+ * "draw". Icons are written that way because a picture in the source is
+ * far easier to read than a table of bytes.
+ *
+ * The art is a hard on/off mask, and drawn straight it looks exactly as
+ * blocky as it is written. So every pixel the art lights up is drawn
+ * solid, and the empty pixels around it are given a soft fringe: how
+ * much of it they get depends on how many of their neighbours carry
+ * ink. That keeps the icon itself crisp -- a two pixel wide stroke stays
+ * a two pixel wide stroke -- while the staircase along a diagonal or a
+ * curve is filled in with intermediate shades, which is what stops the
+ * icons looking like blocks. Neighbours count 3 each side by side and 1
+ * across a corner, out of the sixteen levels gfx_pixel_blend() takes.
+ */
+
+#define ART_MAX_WIDTH 64u
+
+/* What one row of art says about a column: 0 = nothing, 1 = the main
+ * colour, 2 = the secondary ("o") colour. */
+static u8 art_cell(const char *const *art, u16 rows, s16 row, s16 column) {
+    const char *line;
+    s16 index;
+
+    if (row < 0 || (u16)row >= rows || column < 0) {
+        return 0u;
+    }
+    line = art[row];
+    for (index = 0; index < column; ++index) {
+        if (line[index] == '\0') {
+            return 0u;
+        }
+    }
+    if (line[column] == '\0' || line[column] == '.') {
+        return 0u;
+    }
+    return (line[column] == 'o') ? 2u : 1u;
+}
+
+static u16 art_width(const char *const *art, u16 rows) {
     u16 row;
+    u16 widest = 0u;
 
     for (row = 0u; row < rows; ++row) {
-        const char *line = art[row];
-        s16 column = 0;
+        u16 length = 0u;
 
-        while (*line != '\0') {
-            if (*line != '.') {
-                gfx_pixel((s16)(x + column), (s16)(y + (s16)row),
-                          (*line == 'o') ? background : color);
+        while (art[row][length] != '\0' && length < ART_MAX_WIDTH) {
+            ++length;
+        }
+        if (length > widest) {
+            widest = length;
+        }
+    }
+    return widest;
+}
+
+/* One smoothed sample of the art: how much ink covers this pixel, and
+ * which of the two colours that ink mostly is. */
+static void art_sample(const char *const *art, u16 rows, s16 row, s16 column,
+                       u8 *alpha, u8 *secondary) {
+    static const s8 offset_row[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+    static const s8 offset_column[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+    static const u8 weight[8] = { 3u, 3u, 3u, 3u, 1u, 1u, 1u, 1u };
+    const u8 centre = art_cell(art, rows, row, column);
+    u16 main_ink = 0u;
+    u16 other_ink = 0u;
+    u8 index;
+
+    if (centre != 0u) {
+        /* A pixel the art fills is drawn solid, so shapes keep their
+         * weight and small icons stay readable. */
+        *alpha = (u8)FONT_ALPHA_MAX;
+        *secondary = (u8)((centre == 2u) ? 1u : 0u);
+        return;
+    }
+
+    for (index = 0u; index < 8u; ++index) {
+        const u8 cell = art_cell(art, rows, (s16)(row + offset_row[index]),
+                                 (s16)(column + offset_column[index]));
+
+        if (cell == 1u) {
+            main_ink = (u16)(main_ink + weight[index]);
+        } else if (cell == 2u) {
+            other_ink = (u16)(other_ink + weight[index]);
+        }
+    }
+    /* An empty pixel only ever gets a fringe: enough to round off a
+     * corner, never enough to smear the picture. */
+    if (main_ink + other_ink > 8u) {
+        const u16 total = (u16)(main_ink + other_ink);
+
+        main_ink = (u16)((main_ink * 8u) / total);
+        other_ink = (u16)((other_ink * 8u) / total);
+    }
+    *alpha = (u8)(main_ink + other_ink);
+    *secondary = (u8)((other_ink > main_ink) ? 1u : 0u);
+}
+
+void gfx_picture(s16 x, s16 y, const char *const *art, u16 rows, u8 color,
+                 u8 background) {
+    const u16 width = art_width(art, rows);
+    s16 row;
+    s16 column;
+
+    /* One pixel of bleed on every side, because a smoothed edge reaches
+     * just past the pixels the art itself lights up. */
+    for (row = -1; row <= (s16)rows; ++row) {
+        for (column = -1; column <= (s16)width; ++column) {
+            u8 alpha;
+            u8 secondary;
+
+            art_sample(art, rows, row, column, &alpha, &secondary);
+            if (alpha == 0u) {
+                continue;
             }
-            ++column;
-            ++line;
+            gfx_pixel_blend((s16)(x + column), (s16)(y + row),
+                            (secondary != 0u) ? background : color, alpha);
         }
     }
 }
 
-void gfx_picture_opaque(s16 x, s16 y, const char *const *art, u16 rows, u8 on, u8 off) {
+void gfx_picture_opaque(s16 x, s16 y, const char *const *art, u16 rows, u8 on,
+                        u8 off) {
+    const u16 width = art_width(art, rows);
+    s16 row;
+    s16 column;
+
+    for (row = 0; row < (s16)rows; ++row) {
+        for (column = 0; column < (s16)width; ++column) {
+            u8 alpha;
+            u8 secondary;
+
+            /* The background is painted first, then the smoothed shape is
+             * laid over it, so this stays opaque and still has soft edges. */
+            gfx_pixel((s16)(x + column), (s16)(y + row), off);
+            art_sample(art, rows, row, column, &alpha, &secondary);
+            (void)secondary;
+            gfx_pixel_blend((s16)(x + column), (s16)(y + row), on, alpha);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* The mouse pointer                                                   */
+/* ------------------------------------------------------------------ */
+
+/* The pointer is not a picture at all: it is a shape, filled with real
+ * area coverage. The arrow is described once as a polygon in sixteenths
+ * of a pixel, rasterized once at boot into a coverage map, and only that
+ * map is blended onto the screen every frame -- so it is smooth without
+ * costing anything per frame.
+ *
+ * Two maps are built: the body of the arrow and a border one pixel wider
+ * that sits behind it, which is what keeps the pointer visible on a dark
+ * desktop as well as on a white page. */
+
+#define POINTER_WIDTH 12u
+#define POINTER_HEIGHT 19u
+#define POINTER_SUBPIXEL 16 /* the polygon is written in 1/16 pixel */
+#define POINTER_SAMPLES 4   /* 4x4 coverage samples per pixel       */
+#define POINTER_POINTS 7
+
+/* Tip at the top left, then down the left edge, into the notch, out
+ * along the tail and back up the right edge. Coordinates are in
+ * sixteenths of a pixel, so the arrow is about 9.4 x 16.6 pixels. */
+static const s16 pointer_x[POINTER_POINTS] = { 0, 0, 48, 80, 115, 82, 150 };
+static const s16 pointer_y[POINTER_POINTS] = { 0, 230, 178, 266, 250, 165, 162 };
+
+static u8 pointer_body[POINTER_WIDTH * POINTER_HEIGHT];
+static u8 pointer_border[POINTER_WIDTH * POINTER_HEIGHT];
+
+/* Is this sample point inside the polygon? Even-odd crossing test, all
+ * in sixteenths of a pixel so nothing needs floating point. */
+static u8 pointer_inside(s32 sample_x, s32 sample_y) {
+    u8 index;
+    u8 inside = 0u;
+
+    for (index = 0u; index < POINTER_POINTS; ++index) {
+        const u8 next = (u8)((index + 1u) % POINTER_POINTS);
+        const s32 x0 = pointer_x[index];
+        const s32 y0 = pointer_y[index];
+        const s32 x1 = pointer_x[next];
+        const s32 y1 = pointer_y[next];
+
+        if ((y0 > sample_y) != (y1 > sample_y)) {
+            const s32 crossing = x0 + ((x1 - x0) * (sample_y - y0)) / (y1 - y0);
+
+            if (sample_x < crossing) {
+                inside = (u8)(inside ^ 1u);
+            }
+        }
+    }
+    return inside;
+}
+
+/* Coverage of the arrow over every pixel of the map: sixteen samples per
+ * pixel, which is the same 0..16 scale the blending takes. */
+static void pointer_build_body(void) {
     u16 row;
+    u16 column;
 
-    for (row = 0u; row < rows; ++row) {
-        const char *line = art[row];
-        s16 column = 0;
+    for (row = 0u; row < POINTER_HEIGHT; ++row) {
+        for (column = 0u; column < POINTER_WIDTH; ++column) {
+            u8 covered = 0u;
+            u8 sub_row;
 
-        while (*line != '\0') {
-            gfx_pixel((s16)(x + column), (s16)(y + (s16)row),
-                      (*line == '.') ? off : on);
-            ++column;
-            ++line;
+            for (sub_row = 0u; sub_row < POINTER_SAMPLES; ++sub_row) {
+                const s32 sample_y =
+                    (s32)row * POINTER_SUBPIXEL +
+                    (s32)(2 * sub_row + 1) * POINTER_SUBPIXEL / (2 * POINTER_SAMPLES);
+                u8 sub_column;
+
+                for (sub_column = 0u; sub_column < POINTER_SAMPLES; ++sub_column) {
+                    const s32 sample_x =
+                        (s32)column * POINTER_SUBPIXEL +
+                        (s32)(2 * sub_column + 1) * POINTER_SUBPIXEL /
+                            (2 * POINTER_SAMPLES);
+
+                    covered = (u8)(covered + pointer_inside(sample_x, sample_y));
+                }
+            }
+            pointer_body[row * POINTER_WIDTH + column] = covered; /* 0..16 */
         }
     }
 }
 
-/* The mouse pointer: a black arrow with a white edge, drawn last so it is
- * always on top. 'X' is the arrow, 'o' is the outline. */
-static const char *const pointer_art[16] = {
-    "Xo........",
-    "XXo.......",
-    "XXXo......",
-    "XXXXo.....",
-    "XXXXXo....",
-    "XXXXXXo...",
-    "XXXXXXXo..",
-    "XXXXXXXXo.",
-    "XXXXXXXXXo",
-    "XXXXXXXooo",
-    "XXXXoXXo..",
-    "XXXo.XXXo.",
-    "XXo...XXXo",
-    "Xo.....XXo",
-    "o.......oo",
-    "..........",
-};
+static void pointer_init(void) {
+    s16 row;
+    s16 column;
+
+    pointer_build_body();
+
+    /* The border is the arrow grown by one pixel in every direction: the
+     * strongest coverage found in the nine pixels around this one. Drawn
+     * first, in white, it keeps a black pointer readable over a dark
+     * desktop and over a white text field alike. */
+    for (row = 0; row < (s16)POINTER_HEIGHT; ++row) {
+        for (column = 0; column < (s16)POINTER_WIDTH; ++column) {
+            u8 strongest = 0u;
+            s16 near_row;
+
+            for (near_row = (s16)(row - 1); near_row <= (s16)(row + 1); ++near_row) {
+                s16 near_column;
+
+                if (near_row < 0 || near_row >= (s16)POINTER_HEIGHT) {
+                    continue;
+                }
+                for (near_column = (s16)(column - 1);
+                     near_column <= (s16)(column + 1); ++near_column) {
+                    u8 value;
+
+                    if (near_column < 0 || near_column >= (s16)POINTER_WIDTH) {
+                        continue;
+                    }
+                    value = pointer_body[(u16)near_row * POINTER_WIDTH +
+                                         (u16)near_column];
+                    if (value > strongest) {
+                        strongest = value;
+                    }
+                }
+            }
+            pointer_border[(u16)row * POINTER_WIDTH + (u16)column] = strongest;
+        }
+    }
+}
 
 void gfx_draw_pointer(s16 x, s16 y) {
-    gfx_picture(x, y, pointer_art, 16u, COLOR_CURSOR, COLOR_HILITE);
+    u16 row;
+    u16 column;
+
+    for (row = 0u; row < POINTER_HEIGHT; ++row) {
+        for (column = 0u; column < POINTER_WIDTH; ++column) {
+            const u16 cell = (u16)(row * POINTER_WIDTH + column);
+
+            gfx_pixel_blend((s16)(x + (s16)column), (s16)(y + (s16)row),
+                            COLOR_HILITE, pointer_border[cell]);
+        }
+    }
+    for (row = 0u; row < POINTER_HEIGHT; ++row) {
+        for (column = 0u; column < POINTER_WIDTH; ++column) {
+            const u16 cell = (u16)(row * POINTER_WIDTH + column);
+
+            gfx_pixel_blend((s16)(x + (s16)column), (s16)(y + (s16)row),
+                            COLOR_CURSOR, pointer_body[cell]);
+        }
+    }
 }
 
 void gfx_init(void) {
     font_init();
+    pointer_init();
     palette_apply();
     gfx_clear(COLOR_DESKTOP);
 }

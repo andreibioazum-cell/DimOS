@@ -24,19 +24,33 @@ typedef unsigned int u32;
 extern u8 *font_ttf_work_area;
 u8 font_ttf_build(const u8 *file, u32 size);
 const u8 *font_ttf_table(void);
+const u8 *font_ttf_alpha_table(void);
 
-static void print_row_of_glyphs(const u8 *table, const char *text) {
+/* DimOS does not draw letters as bare on/off pixels: every pixel carries
+ * a coverage level from 0 to 16 and is blended into the background, which
+ * is what makes small text look smooth instead of blocky. These five
+ * characters stand for that range, from empty to solid ink. */
+static char shade_character(u8 level) {
+    static const char shades[] = ".:+*#";
+
+    if (level > 16u) {
+        level = 16u;
+    }
+    return shades[level / 4u];
+}
+
+static void print_row_of_glyphs(const u8 *levels, const char *text) {
     size_t count = strlen(text);
     size_t item;
     int row;
 
     for (row = 0; row < 8; ++row) {
         for (item = 0; item < count; ++item) {
-            const u8 bits = table[(size_t)(u8)text[item] * 8u + (size_t)row];
+            const u8 *glyph = levels + (size_t)(u8)text[item] * 64u;
             int column;
 
             for (column = 0; column < 8; ++column) {
-                putchar((bits & (0x80u >> column)) ? '#' : '.');
+                putchar(shade_character(glyph[(size_t)row * 8u + (size_t)column]));
             }
             putchar(' ');
         }
@@ -86,7 +100,7 @@ int main(int argc, char **argv) {
     if (argc > 2) {
         int argument;
         for (argument = 2; argument < argc; ++argument) {
-            print_row_of_glyphs(font_ttf_table(), argv[argument]);
+            print_row_of_glyphs(font_ttf_alpha_table(), argv[argument]);
         }
     } else {
         static const char *lines[] = {
@@ -97,7 +111,7 @@ int main(int argc, char **argv) {
         };
         size_t line;
         for (line = 0; line < sizeof(lines) / sizeof(lines[0]); ++line) {
-            print_row_of_glyphs(font_ttf_table(), lines[line]);
+            print_row_of_glyphs(font_ttf_alpha_table(), lines[line]);
         }
     }
     printf("OK: DimOS will boot with this font.\n");

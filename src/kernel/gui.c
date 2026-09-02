@@ -264,18 +264,31 @@ static void clock_text(char *out, u16 capacity) {
     text_append_number(out, clock_minutes(), capacity);
 }
 
+/* A little house, drawn instead of a word: the button that goes back to
+ * the desktop needs no caption. */
+static const char *const home_icon[7] = {
+    "...XX...",
+    "..XXXX..",
+    ".XXXXXX.",
+    "XXXXXXXX",
+    ".XX..XX.",
+    ".XX..XX.",
+    ".XXXXXX."
+};
+
 static void draw_title_bar(void) {
     char buffer[24];
 
     gfx_fill(0, 0, (s16)SCREEN_WIDTH, (s16)TITLE_BAR_HEIGHT, COLOR_TITLE_BAR);
     gfx_horizontal_line(0, (s16)(TITLE_BAR_HEIGHT - 1), (s16)SCREEN_WIDTH, COLOR_BLACK);
 
-    gui_button_colored(2, 2, 44, 8, "DimOS", HOTSPOT_HOME, COLOR_FACE, COLOR_BLACK);
+    /* Home button, no caption at all: the bar carries the name of the
+     * open window and nothing else. */
+    gui_button_colored(2, 1, 16, 10, "", HOTSPOT_HOME, COLOR_FACE, COLOR_BLACK);
+    gfx_picture(6, 3, home_icon, 7u, COLOR_BLACK, COLOR_FACE);
 
     if (active_application != 0xFFFFu) {
-        gfx_text(52, 2, application_list[active_application]->title, COLOR_WHITE);
-    } else {
-        gfx_text(52, 2, "Desktop", COLOR_WHITE);
+        gfx_text(22, 2, application_list[active_application]->title, COLOR_WHITE);
     }
 
     clock_text(buffer, (u16)sizeof(buffer));

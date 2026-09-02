@@ -133,6 +133,16 @@ enum {
     PALETTE_SIZE = 32u
 };
 
+/* Palette slots 32..247 are not roles at all: they hold a fixed 6x6x6
+ * cube of red/green/blue mixtures. Anti-aliasing needs colours *between*
+ * the ones above -- half ink and half window face for the edge of a
+ * letter, a quarter of the icon colour where a curve grazes a pixel --
+ * and the cube supplies the nearest one for any mixture. Nothing draws
+ * with those slots directly; gfx_shade() picks them. */
+#define COLOR_CUBE_BASE PALETTE_SIZE
+#define COLOR_CUBE_STEPS 6u
+#define COLOR_CUBE_COUNT (COLOR_CUBE_STEPS * COLOR_CUBE_STEPS * COLOR_CUBE_STEPS)
+
 enum {
     THEME_COLOR = 0u, /* the DOS palette            */
     THEME_GREEN = 1u, /* green phosphor monitor     */
@@ -151,6 +161,8 @@ void gfx_init(void);
 void gfx_show(void); /* copy the back buffer to the video card */
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
+void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha); /* alpha 0..16 */
+u8 gfx_shade(u8 foreground, u8 background, u8 alpha);   /* mix two colours */
 void gfx_horizontal_line(s16 x, s16 y, s16 length, u8 color);
 void gfx_vertical_line(s16 x, s16 y, s16 length, u8 color);
 void gfx_line(s16 x0, s16 y0, s16 x1, s16 y1, u8 color);
@@ -282,11 +294,16 @@ u16 file_system_sector_bytes(void);
 /* font_ttf.c -- a real TrueType font (FONT.TTF on the boot volume)    */
 /* ------------------------------------------------------------------ */
 
-/* Parses FONT.TTF and rasterizes ASCII into an 8x8 glyph table laid
- * out exactly like the BIOS font, so gfx.c can draw with either. */
+/* Parses FONT.TTF and rasterizes ASCII twice: into an 8x8 one-bit table
+ * laid out exactly like the BIOS font, and into an anti-aliased table
+ * that keeps one coverage level per pixel. gfx.c draws with the second
+ * one, which is what makes the text smooth instead of blocky. */
+#define FONT_ALPHA_MAX 16u /* a pixel the outline covers completely */
+
 u8 font_ttf_load(void);                     /* 1 = the table is ready  */
 u8 font_ttf_build(const u8 *file, u32 size); /* parse an in-memory TTF */
 const u8 *font_ttf_table(void);             /* 128 glyphs * 8 bytes    */
+const u8 *font_ttf_alpha_table(void);       /* 128 glyphs * 64 levels  */
 
 
 /* ------------------------------------------------------------------ */

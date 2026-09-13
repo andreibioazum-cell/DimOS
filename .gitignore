@@ -30,3 +30,7 @@ disk_img/
 lpt/
 __pycache__/
 *.pyc
+
+# Vulkan viewer: generated SPIR-V and captured frames
+tools/vkviewer/shaders/*.spv
+tools/vkviewer/captures/

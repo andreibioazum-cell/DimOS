@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Build the DimOS Vulkan viewer.
+# Build the DimOS Vulkan tools.
 #
-# The viewer is a normal host program: it links against the Khronos
-# Vulkan loader and needs the two shaders compiled to SPIR-V. Nothing
-# here touches the kernel -- src/ builds exactly as it did before.
+# Two host programs, both linking against the Khronos Vulkan loader:
+#
+#   dimos-vkviewer   displays a finished frame from the normal kernel
+#   dimos-vkraster   rasterizes a command list from the kernel built
+#                    without src/kernel/gfx.c, so the GPU decides every
+#                    pixel
+#
+# Nothing here touches the kernel -- src/ builds exactly as it did.
 #
 # Environment:
 #   VULKAN_SDK   prefix holding include/vulkan and lib/libvulkan.so
@@ -44,7 +49,9 @@ echo "Compiling shaders with $GLSLANG"
     -o "$HERE/shaders/dimos.vert.spv" >/dev/null
 "$GLSLANG" -V --target-env vulkan1.0 "$HERE/shaders/dimos.frag" \
     -o "$HERE/shaders/dimos.frag.spv" >/dev/null
-echo "  dimos.vert.spv, dimos.frag.spv"
+"$GLSLANG" -V --target-env vulkan1.0 "$HERE/shaders/raster.comp" \
+    -o "$HERE/shaders/raster.comp.spv" >/dev/null
+echo "  dimos.vert.spv, dimos.frag.spv, raster.comp.spv"
 
 echo "Compiling the viewer"
 "$CC" -std=c11 -O2 -Wall -Wextra \
@@ -54,3 +61,12 @@ echo "Compiling the viewer"
     -Wl,-rpath,"$VULKAN_SDK/lib" \
     -o "$OUT/dimos-vkviewer"
 echo "  $OUT/dimos-vkviewer"
+
+echo "Compiling the rasterizer"
+"$CC" -std=c11 -O2 -Wall -Wextra \
+    -I "$VULKAN_SDK/include" -I "$HERE" \
+    "$HERE/vkraster.c" \
+    -L "$VULKAN_SDK/lib" -lvulkan -lm \
+    -Wl,-rpath,"$VULKAN_SDK/lib" \
+    -o "$OUT/dimos-vkraster"
+echo "  $OUT/dimos-vkraster"

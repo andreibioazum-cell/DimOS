@@ -1,0 +1,395 @@
+#version 450
+/*
+ * raster.comp -- the DimOS rasterizer, as a compute shader.
+ *
+ * This is the part that used to be gfx.c. The kernel no longer turns
+ * anything into pixels: it emits a list of commands, and this shader
+ * decides the colour of every one of the 64000 pixels from that list.
+ * One invocation per pixel, each walking the commands that cover it.
+ *
+ * Everything gfx.c did per pixel on the processor happens here instead:
+ *
+ *   - blending a colour into what lies underneath (gfx_shade), now a
+ *     mix() of two palette entries with the result written as an index
+ *     resolved through the same 6x6x6 cube the VGA DAC holds;
+ *   - a glyph's coverage level, now a fetch from the font atlas;
+ *   - an icon's soft fringe, previously eight neighbour samples per
+ *     pixel per frame, now computed from the art atlas;
+ *   - the mouse arrow, previously two precomputed coverage maps, now the
+ *     polygon evaluated analytically with 4x4 samples.
+ *
+ * The output is an 8 bit palette index image, exactly the format the
+ * kernel used to produce, so the display pass and the palette stay
+ * unchanged and the themes keep working.
+ */
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct Command {
+    uint kind_and_x;    /* kind | x << 16           */
+    uint y_and_width;   /* y    | width << 16       */
+    uint height_colors; /* height | colour << 16 | background << 24 */
+    uint a0_a1;         /* a0   | a1 << 16          */
+    uint reference;
+    uint spare;
+};
+
+layout(set = 0, binding = 0, std430) readonly buffer Commands {
+    Command items[];
+} commands;
+
+/* The palette gfx.c blends in: the untinted table, 0..255 per channel,
+ * exported by the kernel itself. The theme is applied by the DAC after
+ * the blend, exactly as on the real hardware, so mixing here in the
+ * untinted values is what lands on the same cube slot the software
+ * rasterizer would have chosen. */
+layout(set = 0, binding = 1, std430) readonly buffer Palette {
+    uvec4 color[];      /* 256 entries, 0..255 */
+} palette;
+
+/* One byte per pixel: the glyph atlas (128 glyphs, 8x8 coverage levels)
+ * and the art atlas (32 slots, 24x24 cells). Kept as buffers rather than
+ * images so the indexing matches the kernel's tables one to one. */
+layout(set = 0, binding = 2, std430) readonly buffer Glyphs {
+    uint level[];       /* 128 * 64 bytes, packed four per uint */
+} glyphs;
+
+layout(set = 0, binding = 3, std430) readonly buffer Art {
+    uint cell[];        /* 16 * 16 * 16 bytes, packed four per uint */
+} art;
+
+layout(set = 0, binding = 4, std430) readonly buffer Blit {
+    uint pixel[];       /* 320 * 200 bytes, packed four per uint */
+} blit;
+
+layout(set = 0, binding = 5, r8ui) uniform writeonly uimage2D target;
+
+layout(push_constant) uniform Settings {
+    uint command_count;
+    uint font_mode;     /* 1 = anti-aliased TrueType, 0 = 1 bit BIOS font */
+    uint blit_used;
+    uint spare;
+} settings;
+
+const uint KIND_CLEAR = 0u;
+const uint KIND_RECT = 1u;
+const uint KIND_GLYPH = 2u;
+const uint KIND_ART = 3u;
+const uint KIND_CIRCLE = 4u;
+const uint KIND_LINE = 5u;
+const uint KIND_CHECKER = 6u;
+const uint KIND_POINTER = 7u;
+const uint KIND_BLIT = 8u;
+
+const uint CUBE_BASE = 32u;
+const uint CUBE_STEPS = 6u;
+const float ALPHA_MAX = 16.0;
+
+uint byte_at(uint packed_word, uint index) {
+    return (packed_word >> (8u * (index & 3u))) & 0xFFu;
+}
+
+uint glyph_level(uint character, uint row, uint column) {
+    uint offset = character * 64u + row * 8u + column;
+    return byte_at(glyphs.level[offset >> 2], offset);
+}
+
+uint glyph_bit(uint character, uint row, uint column) {
+    /* The BIOS font is one bit per pixel, bit 7 leftmost. */
+    uint offset = character * 8u + row;
+    uint bits = byte_at(glyphs.level[offset >> 2], offset);
+    return ((bits >> (7u - column)) & 1u) != 0u ? uint(ALPHA_MAX) : 0u;
+}
+
+uint art_cell(uint slot, int row, int column) {
+    if (row < 0 || row >= 16 || column < 0 || column >= 16) {
+        return 0u;
+    }
+    uint offset = slot * 256u + uint(row) * 16u + uint(column);
+    return byte_at(art.cell[offset >> 2], offset);
+}
+
+uint blit_pixel(uint x, uint y) {
+    uint offset = y * 320u + x;
+    return byte_at(blit.pixel[offset >> 2], offset);
+}
+
+/* cube_step() from gfx.c, to the integer: (value * 5 + 127) / 255. */
+uint cube_step(uint value) {
+    return (value * (CUBE_STEPS - 1u) + 127u) / 255u;
+}
+
+/* The cube slot closest to a colour -- gfx.c's nearest_cube(). */
+uint nearest_cube(uvec3 rgb) {
+    return CUBE_BASE + cube_step(rgb.r) * CUBE_STEPS * CUBE_STEPS +
+           cube_step(rgb.g) * CUBE_STEPS + cube_step(rgb.b);
+}
+
+/* gfx_shade(), evaluated the way the kernel evaluates it: integer
+ * arithmetic on sixteenths, truncating division, and the two endpoints
+ * returned exactly. Only the processor it runs on has changed. */
+uint shade(uint foreground, uint background, uint alpha) {
+    if (alpha >= uint(ALPHA_MAX)) {
+        return foreground;
+    }
+    if (alpha == 0u || foreground == background) {
+        return background;
+    }
+    uvec3 front = palette.color[foreground].rgb;
+    uvec3 back = palette.color[background].rgb;
+    uvec3 mixed = (front * alpha + back * (uint(ALPHA_MAX) - alpha)) / uint(ALPHA_MAX);
+    return nearest_cube(mixed);
+}
+
+/* Is this pixel on the circle Bresenham would have walked? gfx.c steps
+ * the midpoint algorithm and lights whole pixels, so the GPU answers the
+ * same question per pixel instead of measuring area: for a pixel at
+ * (dx, dy) from the centre, the algorithm reaches it exactly when its
+ * octant coordinate matches the integer radius it is on. */
+bool bresenham_ring(int dx, int dy, int radius) {
+    int a = abs(dx);
+    int b = abs(dy);
+    int outer = max(a, b);
+    int inner = min(a, b);
+    /* The pixel the midpoint algorithm picks for row `inner` is the one
+     * whose distance rounds to the radius. */
+    int expected = int(round(sqrt(float(radius * radius - inner * inner))));
+    return outer == expected && inner <= outer;
+}
+
+bool bresenham_disc(int dx, int dy, int radius) {
+    /* The filled form draws spans between the same walked points, so a
+     * pixel is inside when it is within the span of its row. */
+    int b = abs(dy);
+    if (b > radius) {
+        return false;
+    }
+    int span = int(round(sqrt(float(radius * radius - b * b))));
+    return abs(dx) <= span;
+}
+
+/* Distance from a point to a segment, for the line test below. */
+float segment_distance(vec2 point, vec2 from, vec2 to) {
+    vec2 direction = to - from;
+    float length_squared = dot(direction, direction);
+    if (length_squared < 1e-6) {
+        return length(point - from);
+    }
+    float t = clamp(dot(point - from, direction) / length_squared, 0.0, 1.0);
+    return length(point - (from + t * direction));
+}
+
+/* gfx_line() is Bresenham and lights whole pixels. Per pixel, the test
+ * is whether the ideal line passes close enough that the algorithm
+ * would have stepped onto it: within half a pixel along the minor axis. */
+bool bresenham_line(ivec2 pixel, ivec2 from, ivec2 to) {
+    ivec2 delta = to - from;
+    int steps = max(abs(delta.x), abs(delta.y));
+    if (steps == 0) {
+        return pixel == from;
+    }
+    if (abs(delta.x) >= abs(delta.y)) {
+        if (pixel.x < min(from.x, to.x) || pixel.x > max(from.x, to.x)) {
+            return false;
+        }
+        float t = float(pixel.x - from.x) / float(delta.x);
+        return pixel.y == from.y + int(round(t * float(delta.y)));
+    }
+    if (pixel.y < min(from.y, to.y) || pixel.y > max(from.y, to.y)) {
+        return false;
+    }
+    float t = float(pixel.y - from.y) / float(delta.y);
+    return pixel.x == from.x + int(round(t * float(delta.x)));
+}
+
+/* The mouse arrow, in sixteenths of a pixel -- the same polygon gfx.c
+ * described, evaluated here instead of being baked into a coverage map. */
+const ivec2 POINTER[7] = ivec2[7](
+    ivec2(0, 0), ivec2(0, 230), ivec2(48, 178), ivec2(80, 266),
+    ivec2(115, 250), ivec2(82, 165), ivec2(150, 162)
+);
+
+/* Even-odd crossing test, in sixteenths of a pixel and in integers --
+ * including the division, which truncates toward zero exactly as the
+ * kernel's does. Doing this in floating point moves a few edge samples
+ * and shifts the pixels underneath them. */
+bool pointer_inside(ivec2 sample_point) {
+    bool inside = false;
+    for (int index = 0; index < 7; ++index) {
+        ivec2 a = POINTER[index];
+        ivec2 b = POINTER[(index + 1) % 7];
+        if ((a.y > sample_point.y) != (b.y > sample_point.y)) {
+            int numerator = (b.x - a.x) * (sample_point.y - a.y);
+            int denominator = b.y - a.y;
+            int quotient = abs(numerator) / abs(denominator);
+            int crossing = a.x + ((numerator < 0) != (denominator < 0) ? -quotient
+                                                                       : quotient);
+            if (sample_point.x < crossing) {
+                inside = !inside;
+            }
+        }
+    }
+    return inside;
+}
+
+/* Coverage 0..16, the same scale and the same sample positions
+ * pointer_build_body() uses: (2n + 1) * 16 / 8 sixteenths. */
+uint pointer_coverage(ivec2 local) {
+    uint covered = 0u;
+    for (int sy = 0; sy < 4; ++sy) {
+        int sample_y = local.y * 16 + (2 * sy + 1) * 16 / 8;
+        for (int sx = 0; sx < 4; ++sx) {
+            int sample_x = local.x * 16 + (2 * sx + 1) * 16 / 8;
+            covered += pointer_inside(ivec2(sample_x, sample_y)) ? 1u : 0u;
+        }
+    }
+    return covered;
+}
+
+void main() {
+    ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
+    if (coordinate.x >= 320 || coordinate.y >= 200) {
+        return;
+    }
+
+    uint colour = 0u;
+    vec2 pixel = vec2(coordinate);
+
+    for (uint index = 0u; index < settings.command_count; ++index) {
+        Command command = commands.items[index];
+        uint kind = command.kind_and_x & 0xFFFFu;
+        int x = int(command.kind_and_x >> 16) << 16 >> 16;
+        int y = int(command.y_and_width & 0xFFFFu) << 16 >> 16;
+        int width = int(command.y_and_width >> 16) << 16 >> 16;
+        int height = int(command.height_colors & 0xFFFFu) << 16 >> 16;
+        uint ink = (command.height_colors >> 16) & 0xFFu;
+        uint background = (command.height_colors >> 24) & 0xFFu;
+        int a0 = int(command.a0_a1 & 0xFFFFu) << 16 >> 16;
+        int a1 = int(command.a0_a1 >> 16) << 16 >> 16;
+
+        if (kind == KIND_CLEAR) {
+            colour = ink;
+            continue;
+        }
+
+        /* Everything else is bounded by its box. */
+        if (coordinate.x < x || coordinate.x >= x + width ||
+            coordinate.y < y || coordinate.y >= y + height) {
+            continue;
+        }
+        int local_x = coordinate.x - x;
+        int local_y = coordinate.y - y;
+
+        if (kind == KIND_RECT) {
+            colour = shade(ink, colour, uint(a0));
+        } else if (kind == KIND_GLYPH) {
+            uint character = command.reference & 0x7Fu;
+            uint level = settings.font_mode == 1u
+                ? glyph_level(character, uint(local_y), uint(local_x))
+                : glyph_bit(character, uint(local_y), uint(local_x));
+            if (level > 0u) {
+                colour = shade(ink, colour, level);
+            }
+        } else if (kind == KIND_ART) {
+            /* The art is offset by one pixel of bleed inside the box. */
+            int row = local_y - 1;
+            int column = local_x - 1;
+            uint slot = command.reference;
+            uint centre = art_cell(slot, row, column);
+            uint alpha;
+            uint colour_here;
+
+            if (centre != 0u) {
+                /* A cell the art fills is solid, so shapes keep their
+                 * weight -- the rule gfx.c used. */
+                alpha = uint(ALPHA_MAX);
+                colour_here = (centre == 2u) ? background : ink;
+            } else {
+                /* An empty cell gets a fringe from its neighbours:
+                 * 3 for an edge, 1 for a corner, out of 16. */
+                /* art_sample() from gfx.c: edges weigh 3, corners 1,
+                 * and the fringe is capped at 8 -- integer division,
+                 * so the same truncation. */
+                uint main_ink = 0u;
+                uint other_ink = 0u;
+                const ivec2 offsets[8] = ivec2[8](
+                    ivec2(0, -1), ivec2(0, 1), ivec2(-1, 0), ivec2(1, 0),
+                    ivec2(-1, -1), ivec2(1, -1), ivec2(-1, 1), ivec2(1, 1));
+                const uint weights[8] = uint[8](3u, 3u, 3u, 3u, 1u, 1u, 1u, 1u);
+
+                for (int n = 0; n < 8; ++n) {
+                    uint cell = art_cell(slot, row + offsets[n].y, column + offsets[n].x);
+                    if (cell == 1u) {
+                        main_ink += weights[n];
+                    } else if (cell == 2u) {
+                        other_ink += weights[n];
+                    }
+                }
+                uint total = main_ink + other_ink;
+                if (total > 8u) {
+                    main_ink = (main_ink * 8u) / total;
+                    other_ink = (other_ink * 8u) / total;
+                }
+                alpha = main_ink + other_ink;
+                colour_here = (other_ink > main_ink) ? background : ink;
+            }
+            if (a0 == 1) {
+                /* gfx_picture_opaque: the box is painted first, then the
+                 * smoothed shape is laid over it in the ink colour. */
+                colour = background;
+                if (alpha > 0u) {
+                    colour = shade(ink, colour, alpha);
+                }
+            } else if (alpha > 0u) {
+                colour = shade(colour_here, colour, alpha);
+            }
+        } else if (kind == KIND_CIRCLE) {
+            /* The box was built as centre - radius - 1, so the centre is
+             * one pixel in from the corner plus the radius. */
+            int dx = coordinate.x - (x + a0 + 1);
+            int dy = coordinate.y - (y + a0 + 1);
+            bool lit = (a1 == 1) ? bresenham_disc(dx, dy, a0)
+                                 : bresenham_ring(dx, dy, a0);
+            if (lit) {
+                colour = ink;
+            }
+        } else if (kind == KIND_LINE) {
+            ivec2 from = ivec2(int(command.reference >> 16) << 16 >> 16,
+                               int(command.reference & 0xFFFFu) << 16 >> 16);
+            ivec2 to = ivec2(a0, a1);
+            if (bresenham_line(ivec2(local_x, local_y), from, to)) {
+                colour = ink;
+            }
+        } else if (kind == KIND_CHECKER) {
+            colour = ((local_x + local_y) % 2 == 0) ? ink : background;
+        } else if (kind == KIND_POINTER) {
+            /* The white border is the arrow grown by one pixel: sample
+             * the polygon again, offset, and take the strongest. */
+            uint body = pointer_coverage(ivec2(local_x, local_y));
+            uint border = body;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int near_x = local_x + dx;
+                    int near_y = local_y + dy;
+                    if (near_x < 0 || near_x >= 12 || near_y < 0 || near_y >= 19) {
+                        continue;
+                    }
+                    border = max(border, pointer_coverage(ivec2(near_x, near_y)));
+                }
+            }
+            if (border > 0u) {
+                colour = shade(background, colour, border);
+            }
+            if (body > 0u) {
+                colour = shade(ink, colour, body);
+            }
+        } else if (kind == KIND_BLIT && settings.blit_used == 1u) {
+            uint value = blit_pixel(uint(coordinate.x), uint(coordinate.y));
+            if (value != 0xFFu) {
+                colour = value;
+            }
+        }
+    }
+
+    imageStore(target, coordinate, uvec4(colour, 0u, 0u, 0u));
+}

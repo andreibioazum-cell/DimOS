@@ -27,6 +27,27 @@ static u16 rgb565_color[256];
 static u32 xrgb8888_color[256];
 static u8 first_present = 1u;
 
+/* The 320x200 canvas is deliberately kept for the tiny applications, but a
+ * 1920x1080 VBE screen should not blow an 8x8 glyph up into a 48x48 block.
+ * On the full-HD path text is queued and rasterized directly onto the real
+ * framebuffer at a readable 3x glyph scale. Two command lists let us erase the previous
+ * overlay without redrawing the whole multi-megapixel screen. */
+#define HIGH_TEXT_LIMIT 160u
+#define HIGH_TEXT_LENGTH 64u
+#define HIGH_TEXT_SCALE 3u
+
+typedef struct {
+    s16 x;
+    s16 y;
+    u8 color;
+    char text[HIGH_TEXT_LENGTH];
+} HighText;
+
+static HighText high_text_current[HIGH_TEXT_LIMIT];
+static HighText high_text_previous[HIGH_TEXT_LIMIT];
+static u16 high_text_current_count;
+static u16 high_text_previous_count;
+
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
 /* ------------------------------------------------------------------ */
@@ -334,6 +355,162 @@ static void font_init(void) {
     font_ready = font_looks_valid(font_glyphs);
 }
 
+static u8 high_text_active(void) {
+    return (u8)(video_backend == VIDEO_BACKEND_VBE &&
+                video_bits_per_pixel == 32u && video_width >= 1280u &&
+                video_height >= 720u);
+}
+
+static u8 high_text_alpha(char character, u8 row, u8 column) {
+    if (font_ready == 0u) {
+        return (u8)((row == 0u || row == 7u || column == 0u || column == 7u)
+                        ? FONT_ALPHA_MAX : 0u);
+    }
+    if (character < 32 || character > 126) {
+        character = '?';
+    }
+    if (font_levels != (const u8 *)0) {
+        return font_levels[(u16)((u8)character * 64u + row * 8u + column)];
+    }
+    return (u8)((font_glyphs[(u16)(u8)character * 8u + row] &
+                 (u8)(0x80u >> column)) != 0u ? FONT_ALPHA_MAX : 0u);
+}
+
+static u32 high_text_blend(u32 background, u8 color, u8 alpha) {
+    const Color ink = color_of(color);
+    const u8 back_red = (u8)(background >> 16u);
+    const u8 back_green = (u8)(background >> 8u);
+    const u8 back_blue = (u8)background;
+    const u16 red = (u16)(((u32)ink.red * alpha +
+                           (u32)back_red * (FONT_ALPHA_MAX - alpha)) /
+                          FONT_ALPHA_MAX);
+    const u16 green = (u16)(((u32)ink.green * alpha +
+                             (u32)back_green * (FONT_ALPHA_MAX - alpha)) /
+                            FONT_ALPHA_MAX);
+    const u16 blue = (u16)(((u32)ink.blue * alpha +
+                            (u32)back_blue * (FONT_ALPHA_MAX - alpha)) /
+                           FONT_ALPHA_MAX);
+
+    return ((u32)red << 16u) | ((u32)green << 8u) | (u32)blue;
+}
+
+static void high_text_restore_pixel(volatile u32 *framebuffer, u16 x, u16 y) {
+    const u16 logical_x = (u16)(((u32)x * SCREEN_WIDTH) / video_width);
+    const u16 logical_y = (u16)(((u32)y * SCREEN_HEIGHT) / video_height);
+    const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
+
+    framebuffer[(u32)y * (video_pitch / 4u) + x] = xrgb8888_color[color];
+}
+
+static void high_text_restore(const HighText *commands, u16 count) {
+    volatile u32 *framebuffer;
+    u16 command;
+
+    if (high_text_active() == 0u || video_framebuffer_address == 0u) {
+        return;
+    }
+    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    for (command = 0u; command < count; ++command) {
+        const HighText *item = &commands[command];
+        s32 base_x = (s32)item->x * video_width / SCREEN_WIDTH;
+        s32 base_y = (s32)item->y * video_height / SCREEN_HEIGHT;
+        u16 character;
+
+        if (base_x < 0 || base_y < 0) {
+            continue;
+        }
+        for (character = 0u; item->text[character] != '\0'; ++character) {
+            u16 row;
+            u16 column;
+
+            for (row = 0u; row < 8u * HIGH_TEXT_SCALE; ++row) {
+                const u16 y = (u16)(base_y + row);
+                if (y >= video_height) {
+                    continue;
+                }
+                for (column = 0u; column < 8u * HIGH_TEXT_SCALE; ++column) {
+                    const u16 x = (u16)(base_x + character * 8u * HIGH_TEXT_SCALE + column);
+                    if (x < video_width) {
+                        high_text_restore_pixel(framebuffer, x, y);
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void high_text_queue(s16 x, s16 y, const char *text, u8 color) {
+    HighText *item;
+    u16 index;
+
+    if (high_text_current_count >= HIGH_TEXT_LIMIT) {
+        return;
+    }
+    item = &high_text_current[high_text_current_count++];
+    item->x = x;
+    item->y = y;
+    item->color = color;
+    for (index = 0u; index + 1u < HIGH_TEXT_LENGTH && text[index] != '\0'; ++index) {
+        item->text[index] = text[index];
+    }
+    item->text[index] = '\0';
+}
+
+static void high_text_draw(void) {
+    volatile u32 *framebuffer;
+    u16 command;
+
+    if (high_text_active() == 0u || video_framebuffer_address == 0u) {
+        return;
+    }
+    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    for (command = 0u; command < high_text_current_count; ++command) {
+        const HighText *item = &high_text_current[command];
+        const s32 base_x = (s32)item->x * video_width / SCREEN_WIDTH;
+        const s32 base_y = (s32)item->y * video_height / SCREEN_HEIGHT;
+        u16 character;
+
+        if (base_x < 0 || base_y < 0) {
+            continue;
+        }
+        for (character = 0u; item->text[character] != '\0'; ++character) {
+            u8 row;
+            u8 column;
+
+            for (row = 0u; row < 8u; ++row) {
+                for (column = 0u; column < 8u; ++column) {
+                    const u8 alpha = high_text_alpha(item->text[character], row, column);
+                    u8 dy;
+
+                    if (alpha == 0u) {
+                        continue;
+                    }
+                    for (dy = 0u; dy < HIGH_TEXT_SCALE; ++dy) {
+                        const u16 y = (u16)(base_y + row * HIGH_TEXT_SCALE + dy);
+                        u8 dx;
+
+                        if (y >= video_height) {
+                            continue;
+                        }
+                        for (dx = 0u; dx < HIGH_TEXT_SCALE; ++dx) {
+                            const u16 x = (u16)(base_x +
+                                character * 8u * HIGH_TEXT_SCALE +
+                                column * HIGH_TEXT_SCALE + dx);
+                            volatile u32 *pixel;
+
+                            if (x >= video_width) {
+                                continue;
+                            }
+                            pixel = framebuffer + (u32)y * (video_pitch / 4u) + x;
+                            *pixel = high_text_blend(*pixel, item->color, alpha);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Frame buffer                                                        */
 /* ------------------------------------------------------------------ */
@@ -453,6 +630,15 @@ void gfx_show(void) {
         video_height >= SCREEN_HEIGHT &&
         (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u)) {
         present_vbe();
+        high_text_draw();
+        if (high_text_current_count != 0u) {
+            u16 index;
+
+            high_text_previous_count = high_text_current_count;
+            for (index = 0u; index < high_text_current_count; ++index) {
+                high_text_previous[index] = high_text_current[index];
+            }
+        }
     } else {
         present_vga();
     }
@@ -478,6 +664,12 @@ static void fill_bytes(u8 *target, u32 length, u8 color) {
 }
 
 void gfx_clear(u8 color) {
+    /* Remove the previous high-resolution text before the logical canvas is
+     * replaced with this frame's background. The presenter then only needs
+     * to touch the small text rectangles, not all 2M framebuffer pixels. */
+    high_text_restore(high_text_previous, high_text_previous_count);
+    high_text_previous_count = 0u;
+    high_text_current_count = 0u;
     fill_bytes(screen, SCREEN_BYTES, color);
 }
 
@@ -768,6 +960,15 @@ void gfx_character(s16 x, s16 y, char character, u8 color) {
     u8 row;
     u8 column;
 
+    if (high_text_active() != 0u) {
+        char one[2];
+
+        one[0] = character;
+        one[1] = '\0';
+        high_text_queue(x, y, one, color);
+        return;
+    }
+
     if (character < 32 || character > 126) {
         character = '?';
     }
@@ -814,6 +1015,10 @@ void gfx_character(s16 x, s16 y, char character, u8 color) {
 }
 
 void gfx_text(s16 x, s16 y, const char *text, u8 color) {
+    if (high_text_active() != 0u) {
+        high_text_queue(x, y, text, color);
+        return;
+    }
     while (*text != '\0') {
         gfx_character(x, y, *text, color);
         x = (s16)(x + 8);
@@ -822,6 +1027,18 @@ void gfx_text(s16 x, s16 y, const char *text, u8 color) {
 }
 
 void gfx_text_filled(s16 x, s16 y, const char *text, u8 foreground, u8 background) {
+    if (high_text_active() != 0u) {
+        const s16 start = x;
+        const char *start_text = text;
+
+        while (*text != '\0') {
+            gfx_fill(x, y, 8, 8, background);
+            x = (s16)(x + 8);
+            ++text;
+        }
+        high_text_queue(start, y, start_text, foreground);
+        return;
+    }
     while (*text != '\0') {
         gfx_fill(x, y, 8, 8, background);
         gfx_character(x, y, *text, foreground);

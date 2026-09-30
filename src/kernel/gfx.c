@@ -58,22 +58,22 @@ static const Color palette[PALETTE_SIZE] = {
     { 255, 85, 255 },    /* COLOR_LIGHT_MAGENTA */
     { 255, 255, 85 },    /* COLOR_YELLOW      */
     { 255, 255, 255 },   /* COLOR_WHITE       */
-    { 222, 224, 228 },   /* COLOR_FACE        */
-    { 128, 132, 140 },   /* COLOR_SHADOW      */
+    { 238, 244, 250 },   /* COLOR_FACE        */
+    { 150, 165, 190 },   /* COLOR_SHADOW      */
     { 255, 255, 255 },   /* COLOR_HILITE      */
-    { 25, 32, 48 },      /* COLOR_TITLE_BAR   */
-    { 20, 27, 41 },      /* COLOR_DESKTOP     */
-    { 255, 255, 255 },   /* COLOR_TEXT_FIELD  */
-    { 48, 105, 190 },    /* COLOR_SELECTION   */
-    { 128, 132, 140 },   /* COLOR_DISABLED    */
-    { 255, 196, 64 },    /* COLOR_ACCENT      */
-    { 0, 170, 0 },       /* COLOR_GOOD        */
-    { 255, 85, 0 },      /* COLOR_ALERT       */
-    { 47, 54, 67 },      /* COLOR_PANEL       */
+    { 70, 99, 158 },     /* COLOR_TITLE_BAR   */
+    { 155, 198, 231 },   /* COLOR_DESKTOP     */
+    { 252, 254, 255 },   /* COLOR_TEXT_FIELD  */
+    { 65, 126, 207 },    /* COLOR_SELECTION   */
+    { 175, 190, 211 },   /* COLOR_DISABLED    */
+    { 255, 132, 118 },   /* COLOR_ACCENT      */
+    { 67, 190, 153 },    /* COLOR_GOOD        */
+    { 232, 91, 112 },    /* COLOR_ALERT       */
+    { 90, 124, 174 },    /* COLOR_PANEL       */
     { 255, 255, 255 },   /* COLOR_CANVAS      */
-    { 96, 96, 96 },      /* COLOR_GRID        */
-    { 14, 20, 32 },      /* COLOR_DEEP        */
-    { 0, 0, 0 }          /* COLOR_CURSOR      */
+    { 201, 216, 232 },   /* COLOR_GRID        */
+    { 41, 63, 105 },     /* COLOR_DEEP        */
+    { 31, 47, 78 }       /* COLOR_CURSOR      */
 };
 
 static u8 current_theme = THEME_COLOR;

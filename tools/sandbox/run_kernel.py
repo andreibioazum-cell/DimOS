@@ -382,7 +382,7 @@ CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
 SHADE_BOX = (280, 23)     # the roll-up button left of minimize
 ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
 MENU_BUTTON = (24, 6)     # the little mouse at the panel's left
-DOCK_SHRINK = (56, 190)   # the dock's show-desktop cell
+DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
 DOCK_Y = 190
 
 # The window's inner frame the applications draw into.
@@ -398,22 +398,20 @@ def icon_center(index):
 
 
 def dock_center(index):
-    # The plank style dock: nine 24 px cells, centered with a +16 offset
-    # for the show-desktop cell (see draw_dock in gui.c).
-    left = (320 - 9 * 24) // 2 + 16
-    return (left + index * 24 + 12, DOCK_Y)
+    # The compact glass dock: nine 20 px cells, centred in the pill.
+    left = (320 - 9 * 20) // 2
+    return (left + index * 20 + 10, DOCK_Y)
 
 
 def menu_cell(index):
-    # Whisker menu grid: three columns of 104 px cells on a 38 px step,
-    # top of the grid at y=38 (MENU_Y + 22).
+    # The compact launcher grid: three 52 px columns and 35 px rows.
     column = index % 3
     row = index // 3
-    return (6 + column * 104 + 50, 38 + row * 38 + 16)
+    return (78 + column * 52 + 24, 55 + row * 35 + 15)
 
 
 def menu_class_button(index):
-    return (7 + index * 44 + 20, 165)
+    return (74 + 5 + index * 40 + 18, 165)
 
 
 def calc_key(row, column):

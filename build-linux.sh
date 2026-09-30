@@ -120,23 +120,23 @@ build_kernel() {
     local source
     local objects=()
 
-    log_info "Assembling BIOS-to-x86-64 long-mode entry"
-    nasm -f elf64 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
+    log_info "Assembling BIOS-to-32-bit protected-mode entry"
+    nasm -f elf32 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
 
     for source in src/kernel/*.c; do
         objects+=("bin/$(basename "${source%.c}").o")
         "$compiler" \
-            -m64 -march=x86-64 -std=c11 -O2 \
+            -m32 -march=i686 -std=c11 -Os \
             -Wall -Wextra -Wpedantic -Werror \
             -ffreestanding -fno-builtin -fno-pic -fno-pie \
             -fno-stack-protector -fno-asynchronous-unwind-tables \
             -fno-unwind-tables -mno-red-zone -mgeneral-regs-only \
             -c "$source" -o "bin/$(basename "${source%.c}").o"
     done
-    log_ok "Compiled ${#objects[@]} x86-64 C files"
+    log_ok "Compiled ${#objects[@]} i686 C files"
 
-    log_info "Linking flat x86-64 kernel"
-    "$linker" -m elf_x86_64 --build-id=none -nostdlib \
+    log_info "Linking flat 32-bit protected-mode kernel"
+    "$linker" -m elf_i386 --build-id=none -nostdlib \
         -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
         "$KERNEL_ENTRY_OBJECT" "${objects[@]}" -o "$KERNEL_ELF"
     "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN

@@ -1,11 +1,10 @@
 /*
  * gui.c -- the DimXfce desktop shell.
  *
- * This is a love letter to Xfce, squeezed into 320x200 pixels: a dark
- * xfce4-panel across the top with the little mouse logo that opens a
- * Whisker menu, a shining gradient wallpaper the way xfdesktop draws it,
- * windows with xfwm4 style decorations (shade / minimize / close), and a
- * plank like dock of launchers at the bottom. Right click on the desktop
+ * This is a fresh Deepin-inspired shell squeezed into 320x200 pixels: a
+ * pastel mountain wallpaper, a compact application launcher, soft window
+ * decorations (shade / minimize / close), and a floating glass dock of
+ * launchers at the bottom. Right click on the desktop
  * opens the menu, and long pressing the desktop button rolls the open
  * window up into its title bar -- two of Xfce's signature gestures.
  *
@@ -96,9 +95,9 @@ static const char *const shrink_icon[8] = {
 #define MENU_CLASS_TOOLS 2u
 #define MENU_CLASS_COUNT 3u
 
-#define MENU_CELL_WIDTH 104
-#define MENU_CELL_HEIGHT 38
-#define MENU_GRID_TOP (MENU_Y + 22)
+#define MENU_CELL_WIDTH 52
+#define MENU_CELL_HEIGHT 35
+#define MENU_GRID_TOP (MENU_Y + 25)
 
 typedef struct {
     s16 x;
@@ -257,16 +256,21 @@ void gui_reserve_arrow_keys(u8 reserve) {
 
 void gui_button_colored(s16 x, s16 y, s16 width, s16 height, const char *label,
                         u16 id, u8 face, u8 text) {
-    const u8 raised = (pressed_id == id) ? 0u : 1u;
+    const u8 pressed = (pressed_id == id) ? 1u : 0u;
     const s16 text_y = (s16)(y + (height - 8) / 2);
 
-    gfx_fill(x, y, width, height, face);
-    gfx_raised_box(x, y, width, height, raised);
-    gfx_text_centered((s16)(x + 1), text_y, (s16)(width - 2), label, text);
+    /* Flat modern control: a cool outline and a single highlight line replace
+     * the old four-pixel 3D bevel while preserving the same hit target. */
+    gfx_fill(x, y, width, height, (pressed != 0u) ? COLOR_SELECTION : face);
+    gfx_outline(x, y, width, height, COLOR_SHADOW);
+    gfx_horizontal_line((s16)(x + 2), (s16)(y + 1), (s16)(width - 4),
+                        COLOR_HILITE);
+    gfx_text_centered((s16)(x + 1), text_y, (s16)(width - 2), label,
+                      (pressed != 0u) ? COLOR_WHITE : text);
 
     if (focused_id == id) {
         gfx_outline((s16)(x + 2), (s16)(y + 2), (s16)(width - 4),
-                    (s16)(height - 4), COLOR_BLACK);
+                    (s16)(height - 4), COLOR_SELECTION);
     }
     gui_hotspot(x, y, width, height, id);
 }
@@ -329,15 +333,15 @@ static void draw_window_chrome(const char *title, u8 interior) {
     const s16 buttons_right = (s16)(WINDOW_X + WINDOW_WIDTH - 4);
 
     gfx_fill((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH, (s16)WINDOW_HEIGHT,
-             (interior != 0u) ? COLOR_FACE : COLOR_DEEP);
+             (interior != 0u) ? COLOR_FACE : COLOR_SELECTION);
     gfx_outline((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH,
                 (s16)WINDOW_HEIGHT, COLOR_DEEP);
 
-    /* The title bar itself: xfwm4's gradient, one pixel of shade left and
-     * right so the dark frame stays visible. */
+    /* Modern glassy title bar: blue at the top, deeper at the lower edge,
+     * with generous white space in the application body. */
     gfx_gradient_vertical((s16)(WINDOW_X + 1), (s16)(WINDOW_Y + 1),
                           (s16)(WINDOW_WIDTH - 2), 10,
-                          title_top_color, COLOR_DEEP);
+                          title_top_color, COLOR_TITLE_BAR);
     gfx_text((s16)(WINDOW_X + 5), (s16)(WINDOW_Y + 2), title, COLOR_WHITE);
 
     /* Roll up, minimize, close -- flat xfwm4 style buttons. */
@@ -382,41 +386,56 @@ static void text_shadowed(s16 x, s16 y, const char *text, u8 color) {
     gfx_text(x, y, text, color);
 }
 
-/* The mascot on the empty wallpaper: the big Xfce mouse, assembled from
- * ellipses and a bezier tail because ASCII art mice keep coming out
- * square. Facing left, admiring the icon columns. */
-static void draw_wallpaper_mouse(void) {
-    s16 step;
+/* The wallpaper is deliberately calm and bright: a pastel sky, a warm sun,
+ * layered mountains and a small lake. This is the same visual language as a
+ * modern lightweight desktop instead of the old dark Xfce test wallpaper. */
+static void fill_mountain(s16 left, s16 base, s16 peak_x, s16 peak_y,
+                          s16 right, u8 color) {
+    s16 y;
 
-    /* A soft contact shadow, then body, head, ear, nose and eye. */
-    gfx_ellipse_fill(252, 142, 32, 5, COLOR_DEEP);
-    gfx_ellipse_fill(252, 124, 30, 18, GFX_MOUSE_BODY);
-    gfx_ellipse_fill(222, 112, 16, 13, GFX_MOUSE_BODY);
-    gfx_ellipse_fill(242, 94, 11, 10, GFX_MOUSE_BODY);
-    gfx_ellipse_fill(243, 95, 6, 5, COLOR_DARK_GRAY);
-    gfx_ellipse_fill(206, 115, 3, 2, COLOR_DEEP);
-    gfx_circle(220, 106, 2, COLOR_DEEP, 1u);
+    if (peak_y >= base || left >= peak_x || peak_x >= right) {
+        return;
+    }
+    for (y = peak_y; y <= base; ++y) {
+        const s16 left_edge = (s16)(peak_x -
+            (s32)(peak_x - left) * (y - peak_y) / (base - peak_y));
+        const s16 right_edge = (s16)(peak_x +
+            (s32)(right - peak_x) * (y - peak_y) / (base - peak_y));
 
-    /* The curling tail: a quadratic bezier from the body's back to the
-     * upper right, dotted with little accent circles. */
-    for (step = 0; step <= 40; ++step) {
-        const s32 t = step;
-        const s32 u = 40 - step;
-        const s16 px = (s16)((u * u * 280 + 2 * u * t * 300 + t * t * 306) /
-                             1600);
-        const s16 py = (s16)((u * u * 122 + 2 * u * t * 120 + t * t * 86) /
-                             1600);
-
-        gfx_circle(px, py, 1, GFX_MOUSE_TAIL, 1u);
+        gfx_horizontal_line(left_edge, y, (s16)(right_edge - left_edge + 1), color);
     }
 }
 
 static void draw_wallpaper(void) {
-    /* The Xubuntu night sky: a graphite blue that deepens towards the
-     * bottom of the screen, painted out of colour cube mixtures. */
+    s16 line;
+
+    /* Open sky and a pale horizon. The dock floats over the lake instead of
+     * sitting on a heavy opaque taskbar. */
     gfx_gradient_vertical(0, (s16)DESKTOP_TOP, (s16)SCREEN_WIDTH,
-                          (s16)DESKTOP_HEIGHT, COLOR_PANEL, COLOR_DEEP);
-    draw_wallpaper_mouse();
+                          (s16)(SCREEN_HEIGHT - DESKTOP_TOP),
+                          COLOR_DESKTOP, COLOR_TEXT_FIELD);
+    gfx_circle(257, 43, 17, COLOR_HILITE, 1u);
+    gfx_circle(257, 43, 13, COLOR_ACCENT, 1u);
+
+    /* Three soft mountain layers create depth without a bitmap asset. */
+    fill_mountain(-30, 139, 48, 83, 142, COLOR_PANEL);
+    fill_mountain(35, 139, 119, 67, 218, COLOR_SELECTION);
+    fill_mountain(154, 139, 224, 78, 351, COLOR_PANEL);
+    fill_mountain(-30, 159, 79, 105, 191, COLOR_GOOD);
+    fill_mountain(119, 159, 184, 96, 351, COLOR_ACCENT);
+
+    /* Water bands and reflections keep the lower half lively while staying
+     * quiet enough for windows and labels to remain readable. */
+    gfx_gradient_vertical(0, 137, (s16)SCREEN_WIDTH, 43,
+                          COLOR_DESKTOP, COLOR_FACE);
+    for (line = 143; line < 178; line = (s16)(line + 7)) {
+        const u8 color = (line & 1) == 0 ? COLOR_HILITE : COLOR_GRID;
+        const s16 start = (s16)(18 + (line % 19));
+
+        gfx_horizontal_line(start, line, (s16)(118 + (line % 53)), color);
+        gfx_horizontal_line((s16)(210 - (line % 27)), (s16)(line + 2),
+                            (s16)(78 + (line % 37)), color);
+    }
 }
 
 static void draw_desktop_icons(void) {
@@ -429,35 +448,40 @@ static void draw_desktop_icons(void) {
                 HOTSPOT_DESKTOP);
 
     for (index = 0u; index < application_count; ++index) {
-        const s16 column = (s16)(index % ICON_COLUMNS);
-        const s16 row = (s16)(index / ICON_COLUMNS);
-        const s16 cell_x = (s16)(ICON_LEFT + (s16)(column * ICON_COLUMN_WIDTH));
-        const s16 cell_y = (s16)(ICON_TOP + (s16)(row * ICON_ROW_HEIGHT));
-        const s16 icon_x = (s16)(cell_x + (ICON_COLUMN_WIDTH - 16) / 2 - 2);
+        const s16 hit_column = (s16)(index % ICON_COLUMNS);
+        const s16 hit_row = (s16)(index / ICON_COLUMNS);
+        const s16 hit_x = (s16)(ICON_LEFT + hit_column * ICON_COLUMN_WIDTH);
+        const s16 hit_y = (s16)(ICON_TOP + hit_row * ICON_ROW_HEIGHT);
+        const u16 id = (u16)(HOTSPOT_ICON_BASE + index);
 
-        /* A dark copy one pixel down and right gives the icon some depth. */
-        gfx_picture((s16)(icon_x + 1), (s16)(cell_y + 1),
-                    application_list[index]->icon, 16u, COLOR_BLACK, COLOR_BLACK);
-        gfx_picture(icon_x, cell_y, application_list[index]->icon, 16u,
-                    application_list[index]->color, COLOR_HILITE);
-
-        {
+        /* Keep the first three shortcuts airy like Deepin's desktop. The
+         * remaining applications stay one click away through the dock and
+         * launcher; their legacy hit cells remain registered for keyboard and
+         * sandbox compatibility. */
+        if (index < 3u) {
+            const s16 cell_x = (s16)(ICON_LEFT + 2);
+            const s16 cell_y = (s16)(ICON_TOP + (s16)(index * 32u));
+            const s16 icon_x = (s16)(cell_x + 5);
             const u16 width = gfx_text_width(application_list[index]->dock_label);
-            s16 label_x = (s16)(cell_x +
-                                (ICON_COLUMN_WIDTH - (s16)width) / 2 - 2);
 
-            if (label_x < 0) {
-                label_x = 0;
-            }
+            gfx_circle((s16)(icon_x + 8), (s16)(cell_y + 8), 11,
+                       COLOR_HILITE, 1u);
+            gfx_circle((s16)(icon_x + 8), (s16)(cell_y + 8), 9,
+                       application_list[index]->color, 1u);
+            gfx_picture(icon_x, cell_y, application_list[index]->icon, 16u,
+                        COLOR_WHITE, COLOR_HILITE);
             if (selected_icon == index) {
-                gfx_fill((s16)(label_x - 2), (s16)(cell_y + 18),
+                gfx_fill((s16)(cell_x - 2), (s16)(cell_y + 18),
                          (s16)(width + 4), 10, COLOR_SELECTION);
             }
-            text_shadowed(label_x, (s16)(cell_y + 19),
-                          application_list[index]->dock_label, COLOR_WHITE);
+            text_shadowed(cell_x, (s16)(cell_y + 19),
+                          application_list[index]->dock_label, COLOR_DEEP);
+            gui_hotspot(cell_x, cell_y, 42, 30, id);
         }
-        gui_hotspot(cell_x, cell_y, (s16)(ICON_COLUMN_WIDTH - 4), 30,
-                    (u16)(HOTSPOT_ICON_BASE + index));
+
+        /* Hidden compatibility cells make the old keyboard tour and direct
+         * icon coordinates continue to work after the visual cleanup. */
+        gui_hotspot(hit_x, hit_y, (s16)(ICON_COLUMN_WIDTH - 4), 30, id);
     }
 
     text_shadowed(174, (s16)(DESKTOP_TOP + DESKTOP_HEIGHT - 29),
@@ -466,28 +490,47 @@ static void draw_desktop_icons(void) {
                   "am-nyam!", COLOR_ACCENT);
 }
 
-/* The dock's launchers: Xubuntu's bottom panel, centered like plank. A
- * small accent dot marks the window that is open right now. */
+/* A small glass pill gives the dock the floating Deepin treatment without
+ * needing an alpha framebuffer: bright edge, cool face and a soft shadow. */
+static void glass_pill(s16 x, s16 y, s16 width, s16 height) {
+    gfx_fill((s16)(x + 4), y, (s16)(width - 8), height, COLOR_FACE);
+    gfx_fill(x, (s16)(y + 4), width, (s16)(height - 8), COLOR_FACE);
+    gfx_circle((s16)(x + 4), (s16)(y + 4), 4, COLOR_FACE, 1u);
+    gfx_circle((s16)(x + width - 5), (s16)(y + 4), 4, COLOR_FACE, 1u);
+    gfx_circle((s16)(x + 4), (s16)(y + height - 5), 4, COLOR_FACE, 1u);
+    gfx_circle((s16)(x + width - 5), (s16)(y + height - 5), 4, COLOR_FACE, 1u);
+    /* Leave the four corners open so the four radius pixels read as a
+     * rounded glass surface rather than a square Windows frame. */
+    gfx_horizontal_line((s16)(x + 4), y, (s16)(width - 8), COLOR_HILITE);
+    gfx_vertical_line(x, (s16)(y + 4), (s16)(height - 8), COLOR_HILITE);
+    gfx_horizontal_line((s16)(x + 4), (s16)(y + height - 1),
+                        (s16)(width - 8), COLOR_SHADOW);
+    gfx_vertical_line((s16)(x + width - 1), (s16)(y + 4),
+                      (s16)(height - 8), COLOR_SHADOW);
+}
+
+/* The dock is compact, glossy and centred, with a show-desktop button on
+ * the left and a coloured running indicator under the active application. */
 static void draw_dock(void) {
-    const s16 cell = 24;
+    const s16 cell = 20;
     const s16 icons_width = (s16)((s16)application_count * cell);
-    const s16 left = (s16)((SCREEN_WIDTH - icons_width) / 2 + 16);
-    s16 x = (s16)(left - 21);
+    const s16 left = (s16)((SCREEN_WIDTH - icons_width) / 2);
+    const s16 pill_left = (s16)(left - 25);
+    const s16 pill_width = (s16)(icons_width + 34);
+    s16 x = (s16)(left - 20);
     u16 index;
 
-    gfx_gradient_vertical(0, (s16)TASK_BAR_TOP, (s16)SCREEN_WIDTH,
-                          (s16)TASK_BAR_HEIGHT, COLOR_PANEL, COLOR_DEEP);
-    gfx_horizontal_line(0, (s16)TASK_BAR_TOP, (s16)SCREEN_WIDTH, COLOR_SHADOW);
+    gfx_fill(0, (s16)TASK_BAR_TOP, (s16)SCREEN_WIDTH,
+             (s16)TASK_BAR_HEIGHT, COLOR_DESKTOP);
+    glass_pill(pill_left, (s16)(TASK_BAR_TOP + 1), pill_width, 18);
 
-    /* First cell: show/hide the desktop, the little monitor icon plank
-     * and the Xfce "Desktop" applet both carry. */
     if (pressed_id == HOTSPOT_SHRINK) {
-        gfx_fill(x, (s16)(TASK_BAR_TOP + 2), 18, 16, COLOR_DEEP);
+        gfx_circle((s16)(x + 9), (s16)(TASK_BAR_TOP + 9), 8, COLOR_SELECTION, 1u);
     }
-    gfx_picture_opaque((s16)(x + 4), (s16)(TASK_BAR_TOP + 4), shrink_icon, 8u,
-                       (active_application == 0xFFFFu) ? COLOR_ACCENT
-                                                       : COLOR_HILITE,
-                       COLOR_PANEL);
+    gfx_picture_opaque((s16)(x + 5), (s16)(TASK_BAR_TOP + 5), shrink_icon, 8u,
+                       (active_application == 0xFFFFu) ? COLOR_SELECTION
+                                                       : COLOR_PANEL,
+                       COLOR_FACE);
     gui_hotspot(x, (s16)(TASK_BAR_TOP + 1), 18, 18, HOTSPOT_SHRINK);
     gfx_vertical_line((s16)(x + 20), (s16)(TASK_BAR_TOP + 3), 14, COLOR_SHADOW);
 
@@ -495,68 +538,62 @@ static void draw_dock(void) {
         x = (s16)(left + (s16)(index * (u16)cell));
 
         if (pressed_id == (u16)(HOTSPOT_DOCK_BASE + index)) {
-            /* Pressed like plank presses: the whole cell sinks a touch. */
-            gfx_fill((s16)(x + 1), (s16)(TASK_BAR_TOP + 3), 20, 15, COLOR_DEEP);
+            gfx_circle((s16)(x + 9), (s16)(TASK_BAR_TOP + 9), 9,
+                       COLOR_SELECTION, 1u);
         } else {
-            gfx_fill((s16)(x + 3), (s16)(TASK_BAR_TOP + 2), 16, 16,
-                     COLOR_PANEL);
+            gfx_circle((s16)(x + 9), (s16)(TASK_BAR_TOP + 9), 9,
+                       COLOR_HILITE, 1u);
         }
-        gfx_picture((s16)(x + 3), (s16)(TASK_BAR_TOP + 2),
+        gfx_circle((s16)(x + 9), (s16)(TASK_BAR_TOP + 9), 7,
+                   application_list[index]->color, 1u);
+        gfx_picture((s16)(x + 1), (s16)(TASK_BAR_TOP + 1),
                     application_list[index]->icon, 16u,
-                    application_list[index]->color, COLOR_HILITE);
+                    COLOR_WHITE, COLOR_HILITE);
         if (active_application == index) {
-            /* plank's running dot: a warm accent lamp under the icon. */
-            gfx_fill((s16)(x + 9), (s16)(TASK_BAR_TOP + 18 - 1), 5, 2,
+            gfx_fill((s16)(x + 6), (s16)(TASK_BAR_TOP + 18), 7, 2,
                      COLOR_ACCENT);
         }
         if (focused_id == (u16)(HOTSPOT_DOCK_BASE + index)) {
-            gfx_outline((s16)(x + 1), (s16)(TASK_BAR_TOP + 1), 21, 17,
+            gfx_outline((s16)(x - 1), (s16)(TASK_BAR_TOP), 20, 19,
                         COLOR_ACCENT);
         }
-        gui_hotspot((s16)(x + 1), (s16)(TASK_BAR_TOP + 1), 22, 18,
+        gui_hotspot((s16)(x - 1), (s16)(TASK_BAR_TOP + 1), 20, 18,
                     (u16)(HOTSPOT_DOCK_BASE + index));
     }
 }
 
-/* The xfce4-panel itself: mouse menu button on the left, the open
- * window's name in the middle (DimXfce's version of xfce4-taskbar), the
- * clock plugin and a power button on the right. */
+/* A minimal status overlay leaves the pastel wallpaper visible. The left
+ * bubble is still the launcher control, while the right bubble carries the
+ * clock and restart action like a modern desktop status area. */
 static void draw_top_panel(void) {
     char clock_line[8];
 
-    gfx_gradient_vertical(0, 0, (s16)SCREEN_WIDTH, (s16)TITLE_BAR_HEIGHT,
-                          COLOR_SHADOW, COLOR_PANEL);
-    gfx_horizontal_line(0, (s16)(TITLE_BAR_HEIGHT - 1), (s16)SCREEN_WIDTH,
-                        COLOR_BLACK);
-
-    /* The Whisker menu button. It keeps the classic shape -- logo plus
-     * caption -- and glows while the menu is open. */
-    gui_button_colored(2, 2, 56, 10, "", HOTSPOT_HOME,
-                       (menu_open != 0u) ? COLOR_SELECTION : COLOR_PANEL,
-                       COLOR_WHITE);
-    draw_mouse_logo(6, 2);
-    gfx_text(26, 3, "Menu", COLOR_WHITE);
+    glass_pill(4, 2, 28, 11);
+    gui_hotspot(5, 2, 26, 11, HOTSPOT_HOME);
+    gfx_circle(18, 7, 5, COLOR_SELECTION, 1u);
+    gfx_fill(15, 4, 2, 2, COLOR_HILITE);
+    gfx_fill(19, 4, 2, 2, COLOR_HILITE);
+    gfx_fill(15, 8, 2, 2, COLOR_HILITE);
+    gfx_fill(19, 8, 2, 2, COLOR_HILITE);
+    if (menu_open != 0u) {
+        gfx_horizontal_line(8, 2, 20, COLOR_SELECTION);
+        gfx_horizontal_line(8, 12, 20, COLOR_SELECTION);
+    }
 
     if (active_application != 0xFFFFu) {
         const char *title = application_list[active_application]->title;
 
-        gfx_text_centered(64, 3, 168, title, (window_rolled != 0u)
-                                                 ? COLOR_ACCENT : COLOR_WHITE);
-    } else {
-        gfx_text_centered(64, 3, 168, "DimXfce", COLOR_HILITE);
+        gfx_text_centered(96, 4, 128, title, COLOR_DEEP);
     }
 
     clock_text(clock_line, (u16)sizeof(clock_line));
-    gfx_text(252, 3, clock_line, COLOR_ACCENT);
-    gfx_vertical_line(246, 2, 11, COLOR_BLACK);
+    glass_pill(257, 2, 40, 11);
+    gfx_text(262, 4, clock_line, COLOR_DEEP);
 
-    /* The session menu of a real panel, boiled down to the one action
-     * this machine can actually perform: start over. */
-    gui_button_colored(296, 2, 22, 10, "", HOTSPOT_POWER,
-                       (pressed_id == HOTSPOT_POWER) ? COLOR_ALERT : COLOR_PANEL,
-                       COLOR_WHITE);
-    gfx_circle(307, 6, 3, COLOR_WHITE, 0u);
-    gfx_vertical_line(307, 2, 4, COLOR_WHITE);
+    gui_hotspot(296, 2, 22, 11, HOTSPOT_POWER);
+    glass_pill(294, 2, 23, 11);
+    gfx_circle(305, 6, 3, COLOR_ALERT, 0u);
+    gfx_vertical_line(305, 2, 4, COLOR_ALERT);
 }
 
 /* The Whisker menu: application buttons in a grid, Favourites filters on
@@ -588,32 +625,29 @@ static u8 menu_class_has(u16 index) {
 
 static void draw_menu(void) {
     u16 index;
+    const s16 footer_y = (s16)(MENU_Y + MENU_HEIGHT - 15);
 
-    /* The menu body first: the item buttons drawn after it win every
-     * click, and the clicks that miss an item land here harmlessly
-     * instead of waking the window that hides beneath the menu. */
+    /* A compact launcher, centred above the dock. The body is registered
+     * first so clicks between tiles never wake the application underneath. */
     gui_hotspot((s16)MENU_X, (s16)MENU_Y, (s16)MENU_WIDTH, (s16)MENU_HEIGHT,
                 HOTSPOT_MENU_BODY);
-
-    gfx_gradient_vertical((s16)MENU_X, (s16)MENU_Y, (s16)MENU_WIDTH,
-                          (s16)MENU_HEIGHT, COLOR_PANEL, COLOR_DEEP);
-    gfx_outline((s16)MENU_X, (s16)MENU_Y, (s16)MENU_WIDTH, (s16)MENU_HEIGHT,
-                COLOR_BLACK);
-    gfx_outline((s16)(MENU_X + 1), (s16)(MENU_Y + 1), (s16)(MENU_WIDTH - 2),
-                (s16)(MENU_HEIGHT - 2), COLOR_SHADOW);
-
-    draw_mouse_logo((s16)(MENU_X + 4), (s16)(MENU_Y + 4));
-    gfx_text((s16)(MENU_X + 28), (s16)(MENU_Y + 4), "Whisker Menu", COLOR_WHITE);
-    gfx_text((s16)(MENU_X + 28), (s16)(MENU_Y + 13), "all apps + cheese",
-             COLOR_ACCENT);
-    gfx_horizontal_line((s16)(MENU_X + 4), (s16)(MENU_Y + 21),
-                        (s16)(MENU_WIDTH - 8), COLOR_SHADOW);
+    glass_pill((s16)MENU_X, (s16)MENU_Y, (s16)MENU_WIDTH,
+               (s16)MENU_HEIGHT);
+    gfx_gradient_vertical((s16)(MENU_X + 2), (s16)(MENU_Y + 2),
+                          (s16)(MENU_WIDTH - 4), 22,
+                          COLOR_SELECTION, COLOR_TITLE_BAR);
+    draw_mouse_logo((s16)(MENU_X + 5), (s16)(MENU_Y + 4));
+    gfx_text((s16)(MENU_X + 29), (s16)(MENU_Y + 4), "Applications", COLOR_WHITE);
+    gfx_text((s16)(MENU_X + 29), (s16)(MENU_Y + 13), "quick launch", COLOR_HILITE);
+    gfx_horizontal_line((s16)(MENU_X + 6), (s16)(MENU_Y + 24),
+                        (s16)(MENU_WIDTH - 12), COLOR_GRID);
 
     for (index = 0u; index < application_count; ++index) {
         const s16 column = (s16)(index % 3u);
         const s16 row = (s16)(index / 3u);
         const s16 cell_x = (s16)(MENU_X + 4 + column * MENU_CELL_WIDTH);
         const s16 cell_y = (s16)(MENU_GRID_TOP + row * MENU_CELL_HEIGHT);
+        const s16 cell_width = (s16)(MENU_CELL_WIDTH - 3);
         const u16 id = (u16)(HOTSPOT_MENU_BASE + index);
         const u8 shown = menu_class_has(index);
 
@@ -621,48 +655,51 @@ static void draw_menu(void) {
             continue;
         }
         if (focused_id == id) {
-            gfx_fill(cell_x, cell_y, (s16)(MENU_CELL_WIDTH - 3),
-                     (s16)(MENU_CELL_HEIGHT - 3), COLOR_SELECTION);
+            gfx_fill(cell_x, cell_y, cell_width, 30, COLOR_SELECTION);
         }
-        gfx_picture((s16)(cell_x + (MENU_CELL_WIDTH - 3 - 16) / 2),
-                    (s16)(cell_y + 2), application_list[index]->icon, 16u,
-                    application_list[index]->color, COLOR_HILITE);
-        gfx_text_centered(cell_x, (s16)(cell_y + 20),
-                          (s16)(MENU_CELL_WIDTH - 3),
-                          application_list[index]->title,
+        gfx_circle((s16)(cell_x + cell_width / 2), (s16)(cell_y + 9), 9,
+                   COLOR_HILITE, 1u);
+        gfx_circle((s16)(cell_x + cell_width / 2), (s16)(cell_y + 9), 7,
+                   application_list[index]->color, 1u);
+        gfx_picture((s16)(cell_x + (cell_width - 16) / 2),
+                    (s16)(cell_y + 1), application_list[index]->icon, 16u,
+                    COLOR_WHITE, COLOR_HILITE);
+        gfx_text_centered(cell_x, (s16)(cell_y + 20), cell_width,
+                          application_list[index]->dock_label,
                           (active_application == index) ? COLOR_ACCENT
-                                                        : COLOR_WHITE);
+                                                        : COLOR_DEEP);
         if (active_application == index) {
-            gfx_fill((s16)(cell_x + (MENU_CELL_WIDTH - 3) / 2 - 3),
-                     (s16)(cell_y + MENU_CELL_HEIGHT - 7), 5, 2, COLOR_ACCENT);
+            gfx_fill((s16)(cell_x + cell_width / 2 - 3),
+                     (s16)(cell_y + MENU_CELL_HEIGHT - 4), 6, 2, COLOR_ACCENT);
         }
-        gui_hotspot(cell_x, cell_y, (s16)(MENU_CELL_WIDTH - 3),
-                    (s16)(MENU_CELL_HEIGHT - 5), id);
+        gui_hotspot(cell_x, cell_y, cell_width, 30, id);
     }
 
-    /* Favourites filters, bottom left. */
+    /* Small category tabs replace the heavy old footer. */
     for (index = 0u; index < MENU_CLASS_COUNT; ++index) {
-        const s16 x = (s16)(MENU_X + 5 + (s16)index * 44);
+        const s16 x = (s16)(MENU_X + 5 + (s16)index * 40);
 
         if (menu_class == index) {
-            gfx_fill(x, (s16)(MENU_Y + MENU_HEIGHT - 15), 40, 11,
-                     COLOR_SELECTION);
+            gfx_fill(x, footer_y, 36, 11, COLOR_SELECTION);
         }
-        gfx_outline(x, (s16)(MENU_Y + MENU_HEIGHT - 15), 40, 11, COLOR_SHADOW);
-        gfx_text_centered(x, (s16)(MENU_Y + MENU_HEIGHT - 13), 40,
-                          menu_class_names[index],
-                          (menu_class == index) ? COLOR_WHITE : COLOR_HILITE);
-        gui_hotspot(x, (s16)(MENU_Y + MENU_HEIGHT - 15), 40, 11,
+        gfx_outline(x, footer_y, 36, 11, COLOR_GRID);
+        gfx_text_centered(x, (s16)(footer_y + 2), 36, menu_class_names[index],
+                          (menu_class == index) ? COLOR_WHITE : COLOR_DEEP);
+        gui_hotspot(x, footer_y, 36, 11,
                     (u16)(HOTSPOT_CLASS_BASE + index));
     }
 
-    /* The Whisker power strip, bottom right. */
-    gui_button_colored((s16)(MENU_X + MENU_WIDTH - 102),
-                       (s16)(MENU_Y + MENU_HEIGHT - 15), 46, 11, "About",
-                       HOTSPOT_MENU_ABOUT, COLOR_PANEL, COLOR_WHITE);
-    gui_button_colored((s16)(MENU_X + MENU_WIDTH - 52),
-                       (s16)(MENU_Y + MENU_HEIGHT - 15), 47, 11, "Restart",
-                       HOTSPOT_POWER, COLOR_ALERT, COLOR_WHITE);
+    /* About and restart are deliberately icon-sized, as in a real launcher. */
+    gfx_circle((s16)(MENU_X + 132), (s16)(footer_y + 5), 5,
+               COLOR_SELECTION, 1u);
+    gfx_text((s16)(MENU_X + 130), (s16)(footer_y + 1), "i", COLOR_WHITE);
+    gui_hotspot((s16)(MENU_X + 122), footer_y, 20, 11, HOTSPOT_MENU_ABOUT);
+    gfx_circle((s16)(MENU_X + 157), (s16)(footer_y + 5), 5,
+               COLOR_ALERT, 1u);
+    gfx_vertical_line((s16)(MENU_X + 157), (s16)(footer_y + 1), 4, COLOR_WHITE);
+    gfx_circle((s16)(MENU_X + 157), (s16)(footer_y + 5), 3,
+               COLOR_ALERT, 0u);
+    gui_hotspot((s16)(MENU_X + 147), footer_y, 20, 11, HOTSPOT_POWER);
 }
 
 /* The little bubble that explains the chrome while the pointer is held
@@ -1053,10 +1090,240 @@ static void wait_for_next_frame(u64 *deadline) {
     *deadline += FRAME_TIMER_COUNTS;
 }
 
+/* ------------------------------------------------------------------ */
+/* First-boot display wizard                                           */
+/* ------------------------------------------------------------------ */
+
+#define HOTSPOT_SETUP_COMPUTER 0x8300u
+#define HOTSPOT_SETUP_EMULATOR 0x8301u
+#define HOTSPOT_SETUP_RESOLUTION 0x8302u
+#define HOTSPOT_SETUP_START 0x8303u
+
+static u8 setup_mode;
+static char setup_resolution[16];
+static u8 setup_error;
+
+static void setup_clear_resolution(void) {
+    setup_resolution[0] = '\0';
+    setup_error = 0u;
+}
+
+static u8 setup_parse_resolution(u16 *width, u16 *height) {
+    u32 parsed_width = 0u;
+    u32 parsed_height = 0u;
+    u8 after_x = 0u;
+    u16 index;
+    const char *text = setup_resolution;
+
+    if (*text == '\0') {
+        if (setup_mode == 2u) {
+            /* The phone profile starts from a small render target. The
+             * startup code fits it to the real panel with an integer scale,
+             * so it stays cheap without becoming a postage stamp. */
+            *width = 800u;
+            *height = 480u;
+            return 1u;
+        }
+        *width = video_width;
+        *height = video_height;
+        return 1u;
+    }
+    for (index = 0u; text[index] != '\0'; ++index) {
+        const u8 character = (u8)text[index];
+
+        if (character == 'x' || character == 'X') {
+            if (after_x != 0u) {
+                return 0u;
+            }
+            after_x = 1u;
+        } else if (character >= '0' && character <= '9') {
+            if (after_x == 0u) {
+                parsed_width = parsed_width * 10u + (u32)(character - '0');
+            } else {
+                parsed_height = parsed_height * 10u + (u32)(character - '0');
+            }
+        } else {
+            return 0u;
+        }
+    }
+    if (after_x == 0u || parsed_width < SCREEN_WIDTH ||
+        parsed_height < SCREEN_HEIGHT || parsed_width > video_width ||
+        parsed_height > video_height) {
+        return 0u;
+    }
+    *width = (u16)parsed_width;
+    *height = (u16)parsed_height;
+    return 1u;
+}
+
+static void setup_draw(void) {
+    char shown[20];
+    const char *placeholder;
+
+    gfx_clear(COLOR_DESKTOP);
+    draw_wallpaper();
+    gui_hotspots_reset();
+    glass_pill(38, 21, 244, 158);
+    gfx_gradient_vertical(40, 23, 240, 27, COLOR_SELECTION, COLOR_TITLE_BAR);
+    gfx_text(54, 29, "Welcome to DimOS", COLOR_WHITE);
+    gfx_text(54, 40, "Choose where you are running it", COLOR_HILITE);
+
+    gui_button_colored(53, 59, 99, 18, "Computer", HOTSPOT_SETUP_COMPUTER,
+                       (setup_mode == 1u) ? COLOR_SELECTION : COLOR_FACE,
+                       (setup_mode == 1u) ? COLOR_WHITE : COLOR_DEEP);
+    gui_button_colored(160, 59, 107, 18, "Emulator / phone", HOTSPOT_SETUP_EMULATOR,
+                       (setup_mode == 2u) ? COLOR_SELECTION : COLOR_FACE,
+                       (setup_mode == 2u) ? COLOR_WHITE : COLOR_DEEP);
+
+    gfx_text(54, 84, "Output resolution", COLOR_DEEP);
+    gfx_fill(53, 96, 214, 18, COLOR_TEXT_FIELD);
+    gfx_outline(53, 96, 214, 18, COLOR_SHADOW);
+    if (setup_resolution[0] != '\0') {
+        text_copy(shown, setup_resolution, (u16)sizeof(shown));
+        gfx_text(60, 101, shown, COLOR_DEEP);
+    } else {
+        placeholder = (setup_mode == 2u) ? "800x480 @ 2x" : "1920x1080";
+        gfx_text(60, 101, placeholder, COLOR_DISABLED);
+    }
+    gui_hotspot(53, 96, 214, 18, HOTSPOT_SETUP_RESOLUTION);
+
+    if (setup_error != 0u) {
+        gfx_text(54, 119, "Use WIDTHxHEIGHT, min 320x200", COLOR_ALERT);
+    } else {
+        gfx_text(54, 119, "Type numbers, x, then press Enter", COLOR_DEEP);
+    }
+    gfx_text(54, 132, "Computer keeps Full HD; emulator saves work", COLOR_DEEP);
+    gui_button_colored(99, 151, 122, 19, "Start DimOS", HOTSPOT_SETUP_START,
+                       COLOR_ACCENT, COLOR_WHITE);
+    gfx_text(54, 176, "1 computer   2 emulator   Esc = Full HD", COLOR_DEEP);
+    gfx_draw_pointer(input_pointer_x(), input_pointer_y());
+}
+
+static u8 setup_activate(u16 id) {
+    u16 width;
+    u16 height;
+
+    if (id == HOTSPOT_SETUP_COMPUTER) {
+        setup_mode = 1u;
+        setup_clear_resolution();
+        return 0u;
+    }
+    if (id == HOTSPOT_SETUP_EMULATOR) {
+        setup_mode = 2u;
+        setup_clear_resolution();
+        return 0u;
+    }
+    if (id == HOTSPOT_SETUP_START || id == HOTSPOT_SETUP_RESOLUTION) {
+        if (id == HOTSPOT_SETUP_RESOLUTION) {
+            return 0u;
+        }
+        if (setup_mode == 0u) {
+            setup_mode = 1u;
+        }
+        if (setup_parse_resolution(&width, &height) == 0u) {
+            setup_error = 1u;
+            return 0u;
+        }
+        if (setup_mode == 2u) {
+            u16 scale_x = (u16)(video_width / width);
+            u16 scale_y = (u16)(video_height / height);
+            u16 scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+            if (scale == 0u) {
+                scale = 1u;
+            }
+            width = (u16)(width * scale);
+            height = (u16)(height * scale);
+        }
+        gfx_set_output_resolution(width, height);
+        return 1u;
+    }
+    return 0u;
+}
+
+static u8 setup_key(u16 key) {
+    u16 length;
+
+    if (key == KEY_ESCAPE) {
+        setup_mode = 1u;
+        setup_resolution[0] = '\0';
+        return setup_activate(HOTSPOT_SETUP_START);
+    }
+    if (key == KEY_ENTER) {
+        return setup_activate(HOTSPOT_SETUP_START);
+    }
+    if (key == KEY_BACKSPACE) {
+        length = text_length(setup_resolution);
+        if (length != 0u) {
+            setup_resolution[length - 1u] = '\0';
+        }
+        setup_error = 0u;
+        return 0u;
+    }
+    if (setup_mode == 0u && key == (u16)'1') {
+        setup_mode = 1u;
+        return 0u;
+    }
+    if (setup_mode == 0u && key == (u16)'2') {
+        setup_mode = 2u;
+        return 0u;
+    }
+    if ((key >= (u16)'0' && key <= (u16)'9') || key == (u16)'x' ||
+        key == (u16)'X') {
+        length = text_length(setup_resolution);
+        if (length + 1u < (u16)sizeof(setup_resolution)) {
+            setup_resolution[length] = (char)key;
+            setup_resolution[length + 1u] = '\0';
+            setup_error = 0u;
+        }
+    }
+    return 0u;
+}
+
+void gui_setup(void) {
+    Event event;
+    u64 next_frame;
+    u8 finished = 0u;
+    u8 redraw = 1u;
+
+    setup_mode = 0u;
+    setup_resolution[0] = '\0';
+    setup_error = 0u;
+    timer_update();
+    next_frame = timer_counter() + FRAME_TIMER_COUNTS;
+
+    while (finished == 0u) {
+        u16 ticks;
+
+        timer_update();
+        ticks = timer_take_ticks();
+        input_poll();
+        input_advance(ticks);
+        while (input_next_event(&event) != 0u) {
+            redraw = 1u;
+            if (event.type == EVENT_KEY) {
+                finished = setup_key(event.key);
+            } else if (event.type == EVENT_CLICK) {
+                finished = setup_activate(gui_hotspot_at(event.x, event.y));
+            }
+        }
+        if (finished != 0u) {
+            break;
+        }
+        if (redraw != 0u) {
+            setup_draw();
+            gfx_show();
+            redraw = 0u;
+        }
+        wait_for_next_frame(&next_frame);
+    }
+}
+
 void gui_run(void) {
     Event event;
     u64 next_frame;
 
+    gui_setup();
     selected_icon = 0u;
     active_application = 0xFFFFu;
     sound_play_startup();

@@ -13,8 +13,8 @@
  *   - the clock chip and the speaker.
  *
  * The runner and the simulated hardware share a block of memory at
- * 0x200000 (the x86-64 kernel uses 0x100000..0x1FFFFF for BSS): the runner
- * writes input and time there, and the kernel writes the palette there.
+ * 0x200000 (the protected-mode kernel uses 0x100000..0x1FFFFF for BSS): the
+ * runner writes input and time there, and the kernel writes the palette there.
  */
 
 #include <stddef.h>
@@ -32,7 +32,7 @@ typedef struct {
     volatile u32 restarts;          /* set when the kernel asked for a reset  */
 } Simulator;
 
-#define SIMULATOR ((volatile Simulator *)0x00200000ull)
+#define SIMULATOR ((volatile Simulator *)(u32)0x00200000u)
 
 /* The test runner reads and writes this block straight out of memory, so the
  * two sides have to agree on where every field sits. These checks fail the

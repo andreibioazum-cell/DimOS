@@ -1,13 +1,13 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a 64-bit freestanding x86-64 kernel with a graphical desktop. It
- * prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and keeps
- * 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
+ * DimOS is a freestanding i686 protected-mode kernel with a graphical
+ * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
+ * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
  * "DimXfce": a full Xfce style
- * shell in miniature -- a dark top panel with the Whisker menu behind the
- * little mouse logo, a gradient xfdesktop wallpaper, xfwm4 looking window
- * decorations and an icon dock at the bottom. The whole desktop is usable
+ * shell in miniature -- a pastel mountain wallpaper, a compact application
+ * launcher, soft window decorations and a floating glass dock at the bottom.
+ * The whole desktop is usable
  * with a pointing device alone: nothing needs a keyboard, and the terminal
  * application has its own on-screen keyboard for the commands that do take
  * text.
@@ -16,9 +16,9 @@
  *   - everything is plain C11, freestanding (no libc, no interrupts, no
  *     inline assembly);
  *   - the only assembly in the project is src/bootloader/boot.asm (the 512
- *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery, page
- *     tables and the switch into x86-64 long mode), because those jobs need
- *     CPU instructions and BIOS calls C cannot express;
+ *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery and the
+ *     switch into flat 32-bit protected mode), because those jobs need CPU
+ *     instructions and BIOS calls C cannot express;
  *   - hardware is reached through port_read_byte()/port_write_byte() and
  *     plain pointers, both defined below.
  */
@@ -100,20 +100,20 @@ extern u8 video_bits_per_pixel;
 #define BIOS_FONT_ADDRESS 0x0000E000u
 #define BIOS_FONT_BYTES 1024u /* 128 glyphs, 8 bytes each */
 
-/* Desktop chrome, DimXfce edition: the Xfce panel up top, the xfdesktop
- * area in the middle and the plank style dock at the bottom. The names of
- * the old constants remain, so the applications never notice. */
+/* Desktop chrome, DimXfce edition: a pastel desktop area, a light status
+ * overlay and a floating launcher dock. The names of the old constants
+ * remain, so the applications never notice. */
 #define TITLE_BAR_HEIGHT 14u                    /* the xfce4-panel          */
 #define TASK_BAR_HEIGHT 20u                     /* the dock                 */
 #define DESKTOP_TOP (TITLE_BAR_HEIGHT + 1u)
 #define DESKTOP_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 2u)
 #define TASK_BAR_TOP (SCREEN_HEIGHT - TASK_BAR_HEIGHT)
 
-/* The Whisker menu covers most of the desktop when it pops up. */
-#define MENU_X 2u
-#define MENU_Y (TITLE_BAR_HEIGHT + 2u)
-#define MENU_WIDTH (SCREEN_WIDTH - 4u)
-#define MENU_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 7u)
+/* The launcher is a centred Deepin-style glass panel above the dock. */
+#define MENU_WIDTH 172u
+#define MENU_X ((SCREEN_WIDTH - MENU_WIDTH) / 2u)
+#define MENU_Y 30u
+#define MENU_HEIGHT 145u
 
 /* Application windows fill the desktop area. */
 #define WINDOW_X 6u
@@ -193,6 +193,7 @@ extern u8 *const screen; /* the back buffer, SCREEN_BYTES bytes */
 
 void gfx_init(void);
 void gfx_show(void); /* copy the back buffer to the video card */
+void gfx_set_output_resolution(u16 width, u16 height);
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
 void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha); /* alpha 0..16 */

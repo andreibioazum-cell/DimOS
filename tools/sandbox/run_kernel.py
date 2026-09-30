@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 try:
-    from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
-    from unicorn.x86_const import UC_X86_REG_RIP, UC_X86_REG_RSP
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
+    from unicorn.x86_const import UC_X86_REG_EIP, UC_X86_REG_ESP
     from PIL import Image
 except ModuleNotFoundError:
     # --build only needs the host compiler and linker. Keep that useful in
@@ -43,7 +43,7 @@ FONT_TTF_AREA = 0x00400000   # the kernel copies FONT.TTF here (font_ttf.c)
 RAM_DISK = 0x00500000
 
 CFLAGS = [
-    "gcc", "-m64", "-march=x86-64", "-std=c11", "-O2",
+    "gcc", "-m32", "-march=i686", "-std=c11", "-Os",
     "-Wall", "-Wextra", "-Wpedantic", "-Werror",
     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie",
     "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
@@ -84,7 +84,7 @@ def build():
         objects.append(obj)
 
     elf = os.path.join(BUILD, "kernel.elf")
-    run(["ld", "-m", "elf_x86_64", "--build-id=none", "-nostdlib",
+    run(["ld", "-m", "elf_i386", "--build-id=none", "-nostdlib",
          "-e", "kernel_main",
          "-T", os.path.join(REPO, "src", "kernel", "linker.ld"),
          "-Map=" + os.path.join(BUILD, "kernel.map")] + objects + ["-o", elf],
@@ -115,9 +115,10 @@ def symbols(elf):
 class Machine:
     def __init__(self, flat, table):
         self.symbols = table
-        self.mu = Uc(UC_ARCH_X86, UC_MODE_64)
-        # Long mode identity-maps this low physical range. It includes the
-        # 1 MiB BSS window, simulator block, font workspace and RAM disk.
+        self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
+        # Protected mode addresses this low physical range directly. It
+        # includes the 1 MiB BSS window, simulator block, font workspace and
+        # RAM disk.
         self.mu.mem_map(0x00000000, 0x01200000)
 
         with open(flat, "rb") as handle:
@@ -132,12 +133,15 @@ class Machine:
 
         self.frames = 0
         self.wanted_frames = 0
+        self.setup_sent = False
         self.mu.hook_add(UC_HOOK_CODE, self._on_frame,
                          begin=table["gfx_show"], end=table["gfx_show"])
+        self.mu.hook_add(UC_HOOK_CODE, self._on_setup,
+                         begin=table["gui_setup"], end=table["gui_setup"])
 
-        self.mu.reg_write(UC_X86_REG_RSP, 0x00090000)
-        # kernel.asm would have jumped here after entering x86-64 long mode.
-        self.mu.reg_write(UC_X86_REG_RIP, table["kernel_main"])
+        self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
+        # kernel.asm would have jumped here after entering protected mode.
+        self.mu.reg_write(UC_X86_REG_EIP, table["kernel_main"])
         self.pointer_x = 160
         self.pointer_y = 100
 
@@ -242,9 +246,17 @@ class Machine:
         if self.frames >= self.wanted_frames:
             mu.emu_stop()
 
+    def _on_setup(self, mu, address, size, user_data):
+        if not self.setup_sent:
+            # The real wizard waits for the user. The visual-tour sandbox
+            # chooses Computer and accepts its native full-HD default so the
+            # existing application tour starts on the first desktop frame.
+            self.send_keyboard([0x02, 0x82, 0x1C, 0x9C])
+            self.setup_sent = True
+
     def frames_run(self, count):
         self.wanted_frames = self.frames + count
-        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_RIP), 0,
+        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_EIP), 0,
                           count=200_000_000)
 
     def screenshot(self, name, scale=2):
@@ -381,7 +393,7 @@ CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
 SHADE_BOX = (280, 23)     # the roll-up button left of minimize
 ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
 MENU_BUTTON = (24, 6)     # the little mouse at the panel's left
-DOCK_SHRINK = (56, 190)   # the dock's show-desktop cell
+DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
 DOCK_Y = 190
 
 # The window's inner frame the applications draw into.
@@ -397,22 +409,20 @@ def icon_center(index):
 
 
 def dock_center(index):
-    # The plank style dock: nine 24 px cells, centered with a +16 offset
-    # for the show-desktop cell (see draw_dock in gui.c).
-    left = (320 - 9 * 24) // 2 + 16
-    return (left + index * 24 + 12, DOCK_Y)
+    # The compact glass dock: nine 20 px cells, centred in the pill.
+    left = (320 - 9 * 20) // 2
+    return (left + index * 20 + 10, DOCK_Y)
 
 
 def menu_cell(index):
-    # Whisker menu grid: three columns of 104 px cells on a 38 px step,
-    # top of the grid at y=38 (MENU_Y + 22).
+    # The compact launcher grid: three 52 px columns and 35 px rows.
     column = index % 3
     row = index // 3
-    return (6 + column * 104 + 50, 38 + row * 38 + 16)
+    return (78 + column * 52 + 24, 55 + row * 35 + 15)
 
 
 def menu_class_button(index):
-    return (7 + index * 44 + 20, 165)
+    return (74 + 5 + index * 40 + 18, 165)
 
 
 def calc_key(row, column):

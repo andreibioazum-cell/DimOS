@@ -32,7 +32,8 @@
 #define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
 
 void ram_disk_init(void) {
-    memory_zero((void *)RAM_DISK_ADDRESS, RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);
+    memory_zero((void *)(u32)RAM_DISK_ADDRESS,
+                RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);
 }
 
 u32 ram_disk_sectors(void) {
@@ -44,7 +45,9 @@ u8 ram_disk_read(u32 sector, void *buffer, u32 sector_count) {
         sector_count > (RAM_DISK_SECTORS - sector)) {
         return 0u;
     }
-    memory_copy(buffer, (const void *)(RAM_DISK_ADDRESS + sector * RAM_DISK_SECTOR_BYTES),
+    memory_copy(buffer,
+                (const void *)(u32)(RAM_DISK_ADDRESS +
+                                    sector * RAM_DISK_SECTOR_BYTES),
                 sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
 }
@@ -54,8 +57,9 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
         sector_count > (RAM_DISK_SECTORS - sector)) {
         return 0u;
     }
-    memory_copy((void *)(RAM_DISK_ADDRESS + sector * RAM_DISK_SECTOR_BYTES), buffer,
-                sector_count * RAM_DISK_SECTOR_BYTES);
+    memory_copy((void *)(u32)(RAM_DISK_ADDRESS +
+                               sector * RAM_DISK_SECTOR_BYTES),
+                buffer, sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
 }
 

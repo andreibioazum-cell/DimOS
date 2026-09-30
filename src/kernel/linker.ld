@@ -1,5 +1,5 @@
-OUTPUT_FORMAT(elf64-x86-64)
-OUTPUT_ARCH(i386:x86-64)
+OUTPUT_FORMAT(elf32-i386)
+OUTPUT_ARCH(i386)
 ENTRY(kernel_entry)
 
 KERNEL_LOAD_ADDRESS = 0x00020000;
@@ -38,9 +38,9 @@ SECTIONS
 
     __kernel_load_end = .;
 
-    /* Long mode identity-maps this region before C starts. Keeping BSS out of
-     * the 64 KiB loader window lets x86-64 use natural eight-byte pointers
-     * without stealing space from KERNEL.BIN. */
+    /* Protected mode addresses this region directly. Keeping BSS out of the
+     * 64 KiB loader window keeps the protected-mode image compact without
+     * stealing space from KERNEL.BIN. */
     . = 0x00100000;
     .bss ALIGN(16) (NOLOAD) :
     {

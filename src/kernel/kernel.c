@@ -3,8 +3,8 @@
  * uses (memory, text, restart).
  *
  * The bootloader loads this code at 0x20000 and kernel.asm selects the video
- * hardware, builds identity-mapped page tables and enters x86-64 long mode
- * before calling kernel_main. From here on everything is plain C.
+ * hardware and enters a flat 32-bit protected-mode environment before calling
+ * kernel_main. From here on everything is plain C.
  */
 
 #include "dimos.h"
@@ -41,7 +41,7 @@ void memory_zero(void *destination, u32 length) {
  * the memory size word at 0x413. The address is a parameter so the compiler
  * cannot fold the access away. */
 u16 bios_read_word(u32 address) {
-    const volatile u16 *place = (const volatile u16 *)(u64)address;
+    const volatile u16 *place = (const volatile u16 *)(u32)address;
 
     return *place;
 }
@@ -405,8 +405,8 @@ void system_restart(void) {
 /* ------------------------------------------------------------------ */
 
 /* Port E9 is the traditional Bochs/QEMU debug console. Real hardware simply
- * ignores it; CI uses the marker to prove the built image reached 64-bit C,
- * initialized the selected framebuffer and did not triple-fault. */
+ * ignores it; CI uses the marker to prove the built image reached protected
+ * mode C, initialized the selected framebuffer and did not triple-fault. */
 static void debug_marker(const char *text) {
     while (*text != '\0') {
         port_write_byte(0x00E9u, (u8)*text);
@@ -416,7 +416,7 @@ static void debug_marker(const char *text) {
 
 void kernel_main(void) {
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
-    debug_marker("DIMOS64:LONGMODE\n");
+    debug_marker("DIMOS:PROTECTED\n");
 
     timer_init();
     ram_disk_init();
@@ -427,11 +427,11 @@ void kernel_main(void) {
     sound_init();
     if (video_backend == VIDEO_BACKEND_VBE && video_width == 1920u &&
         video_height == 1080u && video_bits_per_pixel == 32u) {
-        debug_marker("DIMOS64:READY:VBE:1920x1080x32\n");
+        debug_marker("DIMOS:READY:VBE:1920x1080x32\n");
     } else if (video_backend == VIDEO_BACKEND_VBE) {
-        debug_marker("DIMOS64:READY:VBE:FALLBACK\n");
+        debug_marker("DIMOS:READY:VBE:FALLBACK\n");
     } else {
-        debug_marker("DIMOS64:READY:VGA\n");
+        debug_marker("DIMOS:READY:VGA\n");
     }
 
     gui_run();

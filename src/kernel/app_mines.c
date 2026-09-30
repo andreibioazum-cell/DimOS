@@ -316,7 +316,7 @@ static void mines_event(const Event *event) {
 }
 
 const Application application_mines = {
-    "MIN",
+    "Mines",
     "Mines",
     icon,
     COLOR_RED,

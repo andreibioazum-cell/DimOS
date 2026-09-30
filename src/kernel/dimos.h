@@ -2,9 +2,13 @@
  * DimOS kernel -- declarations shared by every C file.
  *
  * DimOS is a 32-bit freestanding kernel with a graphical desktop in VGA mode
- * 13h (320x200, 256 colours). The whole desktop is usable with a pointing
- * device alone: nothing needs a keyboard, and the terminal application has its
- * own on-screen keyboard for the commands that do take text.
+ * 13h (320x200, 256 colours). The desktop is "DimXfce": a full Xfce style
+ * shell in miniature -- a dark top panel with the Whisker menu behind the
+ * little mouse logo, a gradient xfdesktop wallpaper, xfwm4 looking window
+ * decorations and an icon dock at the bottom. The whole desktop is usable
+ * with a pointing device alone: nothing needs a keyboard, and the terminal
+ * application has its own on-screen keyboard for the commands that do take
+ * text.
  *
  * Coding rules for this directory:
  *   - everything is plain C11, freestanding (no libc, no interrupts, no
@@ -74,12 +78,20 @@ u16 bios_read_word(u32 address);   /* a word the BIOS left in low memory */
 #define BIOS_FONT_ADDRESS 0x0000E000u
 #define BIOS_FONT_BYTES 1024u /* 128 glyphs, 8 bytes each */
 
-/* Desktop chrome. */
-#define TITLE_BAR_HEIGHT 12u
-#define TASK_BAR_HEIGHT 18u
+/* Desktop chrome, DimXfce edition: the Xfce panel up top, the xfdesktop
+ * area in the middle and the plank style dock at the bottom. The names of
+ * the old constants remain, so the applications never notice. */
+#define TITLE_BAR_HEIGHT 14u                    /* the xfce4-panel          */
+#define TASK_BAR_HEIGHT 20u                     /* the dock                 */
 #define DESKTOP_TOP (TITLE_BAR_HEIGHT + 1u)
 #define DESKTOP_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 2u)
 #define TASK_BAR_TOP (SCREEN_HEIGHT - TASK_BAR_HEIGHT)
+
+/* The Whisker menu covers most of the desktop when it pops up. */
+#define MENU_X 2u
+#define MENU_Y (TITLE_BAR_HEIGHT + 2u)
+#define MENU_WIDTH (SCREEN_WIDTH - 4u)
+#define MENU_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 7u)
 
 /* Application windows fill the desktop area. */
 #define WINDOW_X 6u
@@ -169,7 +181,11 @@ void gfx_line(s16 x0, s16 y0, s16 x1, s16 y1, u8 color);
 void gfx_fill(s16 x, s16 y, s16 width, s16 height, u8 color);
 void gfx_outline(s16 x, s16 y, s16 width, s16 height, u8 color);
 void gfx_circle(s16 center_x, s16 center_y, s16 radius, u8 color, u8 filled);
+void gfx_ellipse_fill(s16 center_x, s16 center_y, s16 radius_x, s16 radius_y,
+                      u8 color);
 void gfx_checker(s16 x, s16 y, s16 width, s16 height, u8 first, u8 second);
+void gfx_gradient_vertical(s16 x, s16 y, s16 width, s16 height,
+                           u8 top_color, u8 bottom_color);
 void gfx_raised_box(s16 x, s16 y, s16 width, s16 height, u8 raised);
 void gfx_panel(s16 x, s16 y, s16 width, s16 height);
 void gfx_text(s16 x, s16 y, const char *text, u8 color);
@@ -320,9 +336,11 @@ void sound_update(u16 ticks);
 void sound_play(const Note *notes, u16 count, u8 repeat);
 void sound_stop(void);
 u8 sound_is_playing(void);
-void sound_play_startup(void);
+void sound_play_startup(void);   /* the Xfce style login fanfare  */
 void sound_play_march(void);
 void sound_play_waltz(void);
+void sound_play_nom(void);       /* the cheese ball chomp         */
+void sound_play_burp(void);      /* twelve balls later            */
 void sound_beep(void);
 void sound_alert(void);
 
@@ -334,7 +352,7 @@ void sound_alert(void);
 #define HOTSPOT_LIMIT 96u
 
 typedef struct {
-    const char *task_label;   /* three letters for the task bar        */
+    const char *dock_label;   /* short caption for icon and dock       */
     const char *title;        /* full name shown in the title bar      */
     const char *const *icon;  /* 16 rows of 16 characters ASCII art    */
     u8 color;
@@ -365,8 +383,14 @@ void gui_button_colored(s16 x, s16 y, s16 width, s16 height, const char *label,
                         u16 id, u8 face, u8 text);
 void gui_switch(s16 x, s16 y, s16 width, s16 height, const char *label, u16 id, u8 on);
 void gui_window_frame(const char *title);
+void gui_window_title_color(u8 top_color);
 void gui_message_bar(const char *text);
 void gui_reserve_arrow_keys(u8 reserve);
+
+/* The Whisker menu behind the little mouse on the top panel. */
+u8 gui_menu_is_open(void);
+void gui_menu_toggle(void);
+void gui_show_desktop(void);
 
 /* ------------------------------------------------------------------ */
 /* The applications                                                    */
@@ -378,6 +402,7 @@ extern const Application application_mines;
 extern const Application application_paint;
 extern const Application application_calculator;
 extern const Application application_music;
+extern const Application application_cheesy;
 extern const Application application_about;
 extern const Application application_terminal;
 

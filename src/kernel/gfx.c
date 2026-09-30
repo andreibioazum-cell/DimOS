@@ -483,6 +483,49 @@ static void high_text_queue(s16 x, s16 y, const char *text, u8 color) {
     item->text[index] = '\0';
 }
 
+static u8 high_text_lists_equal(void) {
+    const u32 bytes = (u32)high_text_current_count * (u32)sizeof(HighText);
+
+    return (u8)(high_text_current_count == high_text_previous_count &&
+                (bytes == 0u || memory_equal(high_text_current,
+                                             high_text_previous, bytes) != 0u));
+}
+
+/* The overlay only needs repainting when the logical pixels below a text
+ * command changed. Mouse movement elsewhere must not make every label flash
+ * or make v86 rewrite all glyphs again. */
+static u8 high_text_background_changed(void) {
+    u16 command;
+
+    for (command = 0u; command < high_text_current_count; ++command) {
+        const HighText *item = &high_text_current[command];
+        u16 character;
+
+        for (character = 0u; item->text[character] != '\0'; ++character) {
+            u8 row;
+
+            for (row = 0u; row < 8u; ++row) {
+                u8 column;
+                const s16 y = (s16)(item->y + row);
+
+                if (y < 0 || (u16)y >= SCREEN_HEIGHT) {
+                    continue;
+                }
+                for (column = 0u; column < 8u; ++column) {
+                    const s16 x = (s16)(item->x + character * 8u + column);
+                    const u32 offset = (u32)(u16)y * SCREEN_WIDTH + (u16)x;
+
+                    if (x >= 0 && (u16)x < SCREEN_WIDTH &&
+                        screen[offset] != presented[offset]) {
+                        return 1u;
+                    }
+                }
+            }
+        }
+    }
+    return 0u;
+}
+
 static void high_text_draw(void) {
     volatile u32 *framebuffer;
     u16 command;
@@ -710,11 +753,23 @@ void gfx_show(void) {
         video_framebuffer_address != 0u && video_width >= SCREEN_WIDTH &&
         video_height >= SCREEN_HEIGHT &&
         (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u)) {
-        present_vbe();
-        high_text_draw();
-        if (high_text_current_count != 0u) {
+        {
+            const u8 text_changed = (u8)(high_text_lists_equal() == 0u);
+            const u8 text_needs_draw = (u8)(text_changed != 0u ||
+                                             first_present != 0u ||
+                                             high_text_background_changed() != 0u);
             u16 index;
 
+            /* If the command list changed, uncover the old overlay before
+             * the logical presenter writes the new background. When it did
+             * not change, leave the existing physical glyphs alone. */
+            if (text_changed != 0u) {
+                high_text_restore(high_text_previous, high_text_previous_count);
+            }
+            present_vbe();
+            if (text_needs_draw != 0u) {
+                high_text_draw();
+            }
             high_text_previous_count = high_text_current_count;
             for (index = 0u; index < high_text_current_count; ++index) {
                 high_text_previous[index] = high_text_current[index];
@@ -745,11 +800,9 @@ static void fill_bytes(u8 *target, u32 length, u8 color) {
 }
 
 void gfx_clear(u8 color) {
-    /* Remove the previous high-resolution text before the logical canvas is
-     * replaced with this frame's background. The presenter then only needs
-     * to touch the small text rectangles, not all 2M framebuffer pixels. */
-    high_text_restore(high_text_previous, high_text_previous_count);
-    high_text_previous_count = 0u;
+    /* Keep the previous physical text until gfx_show has the new logical
+     * background ready. That ordering prevents labels from flashing while
+     * the mouse moves over an otherwise static desktop. */
     high_text_current_count = 0u;
     fill_bytes(screen, SCREEN_BYTES, color);
 }

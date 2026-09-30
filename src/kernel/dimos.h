@@ -2,8 +2,9 @@
  * DimOS kernel -- declarations shared by every C file.
  *
  * DimOS is a 64-bit freestanding x86-64 kernel with a graphical desktop. It
- * prefers a VBE 2.0 linear framebuffer (640x480 RGB565) and keeps VGA mode 13h
- * as a compatibility fallback. The desktop is "DimXfce": a full Xfce style
+ * prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and keeps
+ * 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
+ * "DimXfce": a full Xfce style
  * shell in miniature -- a dark top panel with the Whisker menu behind the
  * little mouse logo, a gradient xfdesktop wallpaper, xfwm4 looking window
  * decorations and an icon dock at the bottom. The whole desktop is usable

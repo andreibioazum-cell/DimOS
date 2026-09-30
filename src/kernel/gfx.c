@@ -1,11 +1,11 @@
 /*
  * gfx.c -- everything that touches a pixel.
  *
- * DimOS composes a 320x200 indexed canvas in its own back buffer. On VBE 2.0
- * hardware it converts changed pixels to RGB565 and scales them 2x into the
- * adapter's 640x480 linear framebuffer; on old hardware it presents directly
- * to VGA mode 13h. A shadow buffer keeps unchanged pixels off the slow video
- * bus, so a static desktop costs comparisons rather than framebuffer writes.
+ * DimOS composes a 320x200 indexed canvas in its own back buffer. The preferred
+ * VBE path expands changed pixels into a full 1920x1080 XRGB8888 hardware
+ * framebuffer; 640x480 RGB565 and VGA mode 13h remain fallbacks. A shadow
+ * buffer keeps unchanged pixels off the slow video bus, so a static desktop
+ * costs comparisons rather than multi-megabyte framebuffer writes.
  *
  * Text is drawn with 8x8 glyphs. When the boot disk carries FONT.TTF
  * (put any TrueType file into fonts/ before building), font_ttf.c
@@ -23,7 +23,8 @@ extern u32 bios_font_address;
 /* The canvas we draw into and the last canvas successfully presented. */
 u8 *const screen = (u8 *)BACK_BUFFER_ADDRESS;
 static u8 *const presented = (u8 *)PRESENT_BUFFER_ADDRESS;
-static u32 rgb565_pair[256];
+static u16 rgb565_color[256];
+static u32 xrgb8888_color[256];
 static u8 first_present = 1u;
 
 /* ------------------------------------------------------------------ */
@@ -115,14 +116,15 @@ static Color themed(Color original, u8 theme) {
     }
 }
 
-/* The VGA DAC stores six bits per channel. VBE mode 111h instead consumes
- * packed RGB565 pixels, and two identical output pixels fit in one u32 store. */
+/* Cache both direct-colour representations once per theme change. The hot
+ * presenter then performs only table reads and naturally aligned stores. */
 static void palette_write_entry(u8 index, Color value) {
-    const u16 rgb565 = (u16)(((u16)(value.red >> 3u) << 11u) |
-                             ((u16)(value.green >> 2u) << 5u) |
-                             (u16)(value.blue >> 3u));
-
-    rgb565_pair[index] = (u32)rgb565 | ((u32)rgb565 << 16u);
+    rgb565_color[index] = (u16)(((u16)(value.red >> 3u) << 11u) |
+                                ((u16)(value.green >> 2u) << 5u) |
+                                (u16)(value.blue >> 3u));
+    xrgb8888_color[index] = ((u32)value.red << 16u) |
+                            ((u32)value.green << 8u) |
+                            (u32)value.blue;
     if (video_backend == VIDEO_BACKEND_VGA) {
         port_write_byte(PORT_VGA_DAC_WRITE_INDEX, index);
         port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.red >> 2));
@@ -352,15 +354,58 @@ static void present_vga(void) {
     }
 }
 
-static void clear_vbe_framebuffer(volatile u8 *framebuffer) {
-    u16 y;
+/* Logical-pixel boundaries in the physical mode. They are calculated once,
+ * not divided in the hot path. At 1920x1080 this becomes exactly 6 columns
+ * and alternating 5/6 rows per logical pixel, filling every physical pixel. */
+static u16 vbe_x[SCREEN_WIDTH + 1u];
+static u16 vbe_y[SCREEN_HEIGHT + 1u];
+static u8 vbe_map_ready;
 
-    for (y = 0u; y < video_height; ++y) {
-        volatile u32 *row = (volatile u32 *)(framebuffer + (u32)y * video_pitch);
-        u16 pair;
+static void prepare_vbe_map(void) {
+    u16 position;
 
-        for (pair = 0u; pair < video_width / 2u; ++pair) {
-            row[pair] = 0u;
+    for (position = 0u; position <= SCREEN_WIDTH; ++position) {
+        vbe_x[position] =
+            (u16)(((u32)position * video_width) / SCREEN_WIDTH);
+    }
+    for (position = 0u; position <= SCREEN_HEIGHT; ++position) {
+        vbe_y[position] =
+            (u16)(((u32)position * video_height) / SCREEN_HEIGHT);
+    }
+    vbe_map_ready = 1u;
+}
+
+static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
+                                     u8 color) {
+    const u16 left = vbe_x[x];
+    const u16 right = vbe_x[x + 1u];
+    const u16 top = vbe_y[y];
+    const u16 bottom = vbe_y[y + 1u];
+    u16 output_y;
+
+    if (video_bits_per_pixel == 32u) {
+        const u32 direct_color = xrgb8888_color[color];
+
+        for (output_y = top; output_y < bottom; ++output_y) {
+            volatile u32 *pixel = (volatile u32 *)(framebuffer +
+                (u32)output_y * video_pitch) + left;
+            u16 output_x;
+
+            for (output_x = left; output_x < right; ++output_x) {
+                *pixel++ = direct_color;
+            }
+        }
+    } else {
+        const u16 direct_color = rgb565_color[color];
+
+        for (output_y = top; output_y < bottom; ++output_y) {
+            volatile u16 *pixel = (volatile u16 *)(framebuffer +
+                (u32)output_y * video_pitch) + left;
+            u16 output_x;
+
+            for (output_x = left; output_x < right; ++output_x) {
+                *pixel++ = direct_color;
+            }
         }
     }
 }
@@ -370,21 +415,15 @@ static void present_vbe(void) {
         (volatile u8 *)(u64)video_framebuffer_address;
     const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
     u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
-    const u16 top = (u16)((video_height - SCREEN_HEIGHT * 2u) / 2u);
     u16 y;
 
-    if (first_present != 0u) {
-        clear_vbe_framebuffer(framebuffer);
+    if (vbe_map_ready == 0u) {
+        prepare_vbe_map();
     }
-
     for (y = 0u; y < SCREEN_HEIGHT; ++y) {
         const u32 word_base = (u32)y * (SCREEN_WIDTH / 4u);
         const u8 *source = screen + (u32)y * SCREEN_WIDTH;
         u8 *shadow = presented + (u32)y * SCREEN_WIDTH;
-        volatile u32 *row0 = (volatile u32 *)(framebuffer +
-            (u32)(top + y * 2u) * video_pitch);
-        volatile u32 *row1 = (volatile u32 *)(framebuffer +
-            (u32)(top + y * 2u + 1u) * video_pitch);
         u16 group;
 
         for (group = 0u; group < SCREEN_WIDTH / 4u; ++group) {
@@ -399,9 +438,7 @@ static void present_vbe(void) {
                 const u8 color = source[x];
 
                 if (first_present != 0u || shadow[x] != color) {
-                    const u32 pair = rgb565_pair[color];
-                    row0[x] = pair;
-                    row1[x] = pair;
+                    present_vbe_pixel(framebuffer, x, y, color);
                     shadow[x] = color;
                 }
             }
@@ -412,8 +449,9 @@ static void present_vbe(void) {
 
 void gfx_show(void) {
     if (video_backend == VIDEO_BACKEND_VBE &&
-        video_framebuffer_address != 0u && video_width == 640u &&
-        video_height >= 400u && video_bits_per_pixel == 16u) {
+        video_framebuffer_address != 0u && video_width >= SCREEN_WIDTH &&
+        video_height >= SCREEN_HEIGHT &&
+        (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u)) {
         present_vbe();
     } else {
         present_vga();

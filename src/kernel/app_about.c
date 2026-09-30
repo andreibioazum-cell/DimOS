@@ -63,9 +63,12 @@ static void about_draw(void) {
     info_line(y, "Shell", "DimXfce am-nyam shell");
     y = (s16)(y + 10);
 
-    info_line(y, "Video", (video_backend == VIDEO_BACKEND_VBE)
-                              ? "VBE GPU 640x480 RGB565"
-                              : "VGA 320x200 fallback");
+    info_line(y, "Video",
+              (video_backend == VIDEO_BACKEND_VBE && video_width == 1920u)
+                  ? "VBE GPU 1920x1080 XRGB"
+                  : ((video_backend == VIDEO_BACKEND_VBE)
+                         ? "VBE 640x480 fallback"
+                         : "VGA 320x200 fallback"));
     y = (s16)(y + 10);
 
     value[0] = '\0';

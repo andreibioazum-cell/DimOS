@@ -6,8 +6,8 @@
 ; A20, construct identity-mapped page tables, enter IA-32e long mode, and
 ; provide the IN/OUT port helpers used by the C kernel.
 ;
-; Preferred video path: VBE 2.0 mode 111h, 640x480 RGB565 linear framebuffer.
-; Compatibility path: VGA mode 13h, 320x200 indexed framebuffer at A0000h.
+; Preferred video path: a dynamically discovered VBE 2.0 1920x1080 XRGB8888
+; linear framebuffer. Compatibility paths: 640x480 RGB565, then VGA mode 13h.
 ; The bootloader jumps here at 2000:0000.
 ; ==================================================================
 
@@ -28,9 +28,11 @@ PD0_ADDRESS equ 0x00003000
 PAGE_TABLE_BYTES equ 0x00006000       ; PML4 + PDPT + four page directories
 PAGE_LARGE_PRESENT_WRITE equ 0x00000083
 
-VBE_MODE equ 0x0111                   ; 640 x 480 x 16, RGB565 on VBE 2.0+
-VBE_MODE_LINEAR equ (0x4000 | VBE_MODE)
-VBE_ATTRIBUTE_LINEAR equ 0x0080
+VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
+VBE_MODE_LINEAR_BIT equ 0x4000
+VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
+VBE_HD_WIDTH equ 1920
+VBE_HD_HEIGHT equ 1080
 
 [BITS 16]
 global kernel_entry
@@ -59,28 +61,106 @@ kernel_entry:
     mov ds, ax
     mov [dword bios_font_address - KERNEL_BASE], eax
 
-    ; Probe a standard VBE 2.0 linear mode. The mode information block gives
-    ; us the physical framebuffer address and the hardware pitch; no address
-    ; is guessed. If any requirement is missing, old VGA mode 13h is selected.
+    ; Ask VBE for its complete mode list instead of relying on a vendor mode
+    ; number. Mode IDs for 1920x1080 are deliberately not standardized; the
+    ; dimensions, direct-colour masks and physical framebuffer are.
+    mov ax, KERNEL_SEGMENT
+    mov es, ax
+    mov di, vbe_controller_info - KERNEL_BASE
+    mov dword [es:di], 0x32454256    ; "VBE2" requests the VBE 2.0 block
+    mov ax, 0x4F00
+    int 0x10
+    cmp ax, 0x004F
+    jne .try_vbe_fallback
+    mov ax, KERNEL_SEGMENT
+    mov es, ax
+    mov di, vbe_controller_info - KERNEL_BASE
+    cmp dword [es:di], 0x41534556    ; BIOS answered "VESA"
+    jne .try_vbe_fallback
+    cmp word [es:di + 4], 0x0200
+    jb .try_vbe_fallback
+
+    mov si, [es:di + 14]            ; far pointer to zero-terminated mode IDs
+    mov ax, [es:di + 16]
+    mov fs, ax
+
+.find_hd_mode:
+    mov cx, [fs:si]
+    add si, 2
+    cmp cx, 0xFFFF
+    je .try_vbe_fallback
+    push fs
+    push si
+    push cx
     mov ax, KERNEL_SEGMENT
     mov es, ax
     mov di, vbe_mode_info - KERNEL_BASE
     mov ax, 0x4F01
-    mov cx, VBE_MODE
+    int 0x10
+    pop cx
+    pop si
+    pop fs
+    cmp ax, 0x004F
+    jne .find_hd_mode
+    mov ax, [es:di + 0]
+    and ax, VBE_REQUIRED_ATTRIBUTES
+    cmp ax, VBE_REQUIRED_ATTRIBUTES
+    jne .find_hd_mode
+    cmp word [es:di + 18], VBE_HD_WIDTH
+    jne .find_hd_mode
+    cmp word [es:di + 20], VBE_HD_HEIGHT
+    jne .find_hd_mode
+    cmp byte [es:di + 25], 32
+    jne .find_hd_mode
+    cmp byte [es:di + 27], 6        ; direct-colour memory model
+    jne .find_hd_mode
+    cmp byte [es:di + 31], 8        ; XRGB8888 channel masks
+    jne .find_hd_mode
+    cmp byte [es:di + 32], 16
+    jne .find_hd_mode
+    cmp byte [es:di + 33], 8
+    jne .find_hd_mode
+    cmp byte [es:di + 34], 8
+    jne .find_hd_mode
+    cmp byte [es:di + 35], 8
+    jne .find_hd_mode
+    cmp byte [es:di + 36], 0
+    jne .find_hd_mode
+    cmp dword [es:di + 40], 0
+    je .find_hd_mode
+
+    mov bx, cx
+    or bx, VBE_MODE_LINEAR_BIT
+    mov ax, 0x4F02
+    int 0x10
+    cmp ax, 0x004F
+    jne .try_vbe_fallback
+    jmp .store_vbe_mode
+
+.try_vbe_fallback:
+    ; Old adapters may not expose full HD. Keep a conservative standardized
+    ; RGB565 mode before dropping all the way back to indexed VGA mode 13h.
+    mov ax, KERNEL_SEGMENT
+    mov es, ax
+    mov di, vbe_mode_info - KERNEL_BASE
+    mov ax, 0x4F01
+    mov cx, VBE_FALLBACK_MODE
     int 0x10
     cmp ax, 0x004F
     jne .use_vga
-    test word [es:di + 0], VBE_ATTRIBUTE_LINEAR
-    jz .use_vga
+    mov ax, [es:di + 0]
+    and ax, VBE_REQUIRED_ATTRIBUTES
+    cmp ax, VBE_REQUIRED_ATTRIBUTES
+    jne .use_vga
     cmp word [es:di + 18], 640
     jne .use_vga
     cmp word [es:di + 20], 480
     jne .use_vga
     cmp byte [es:di + 25], 16
     jne .use_vga
-    cmp byte [es:di + 27], 6         ; direct-colour memory model
+    cmp byte [es:di + 27], 6
     jne .use_vga
-    cmp byte [es:di + 31], 5         ; RGB565 channel masks
+    cmp byte [es:di + 31], 5
     jne .use_vga
     cmp byte [es:di + 32], 11
     jne .use_vga
@@ -94,13 +174,13 @@ kernel_entry:
     jne .use_vga
     cmp dword [es:di + 40], 0
     je .use_vga
-
     mov ax, 0x4F02
-    mov bx, VBE_MODE_LINEAR
+    mov bx, VBE_FALLBACK_MODE | VBE_MODE_LINEAR_BIT
     int 0x10
     cmp ax, 0x004F
     jne .use_vga
 
+.store_vbe_mode:
     mov ax, KERNEL_SEGMENT
     mov ds, ax
     mov es, ax
@@ -320,6 +400,10 @@ video_height:
     dw 200
 video_bits_per_pixel:
     db 8
+
+align 16
+vbe_controller_info:
+    times 512 db 0
 
 align 16
 vbe_mode_info:

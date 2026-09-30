@@ -48,14 +48,14 @@ typedef char check_restarts_offset[(offsetof(Simulator, restarts) == 0x510u) ? 1
 __attribute__((section(".data"))) u32 bios_font_address;
 
 /* The real-mode entry normally fills these after probing VBE. Exercise the
- * preferred RGB565 presenter in every visual-tour frame; 0x900000 sits just
- * above the kernel's 4 MiB RAM disk in the simulated physical map. */
+ * preferred full-HD XRGB8888 presenter in every visual-tour frame; 0x900000
+ * sits just above the kernel's 4 MiB RAM disk in the simulated physical map. */
 __attribute__((section(".data"))) u8 video_backend = VIDEO_BACKEND_VBE;
 __attribute__((section(".data"))) u32 video_framebuffer_address = 0x00900000u;
-__attribute__((section(".data"))) u16 video_pitch = 640u * 2u;
-__attribute__((section(".data"))) u16 video_width = 640u;
-__attribute__((section(".data"))) u16 video_height = 480u;
-__attribute__((section(".data"))) u8 video_bits_per_pixel = 16u;
+__attribute__((section(".data"))) u16 video_pitch = 1920u * 4u;
+__attribute__((section(".data"))) u16 video_width = 1920u;
+__attribute__((section(".data"))) u16 video_height = 1080u;
+__attribute__((section(".data"))) u8 video_bits_per_pixel = 32u;
 
 /* Timer chip. */
 #define SIMULATOR_TIMER_DIVISOR 65535u

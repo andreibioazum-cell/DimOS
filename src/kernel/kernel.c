@@ -425,9 +425,14 @@ void kernel_main(void) {
     gfx_init();
     input_init();
     sound_init();
-    debug_marker((video_backend == VIDEO_BACKEND_VBE)
-                     ? "DIMOS64:READY:VBE\n"
-                     : "DIMOS64:READY:VGA\n");
+    if (video_backend == VIDEO_BACKEND_VBE && video_width == 1920u &&
+        video_height == 1080u && video_bits_per_pixel == 32u) {
+        debug_marker("DIMOS64:READY:VBE:1920x1080x32\n");
+    } else if (video_backend == VIDEO_BACKEND_VBE) {
+        debug_marker("DIMOS64:READY:VBE:FALLBACK\n");
+    } else {
+        debug_marker("DIMOS64:READY:VGA\n");
+    }
 
     gui_run();
 

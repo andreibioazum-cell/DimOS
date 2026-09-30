@@ -118,7 +118,7 @@ class Machine:
         self.mu = Uc(UC_ARCH_X86, UC_MODE_64)
         # Long mode identity-maps this low physical range. It includes the
         # 1 MiB BSS window, simulator block, font workspace and RAM disk.
-        self.mu.mem_map(0x00000000, 0x00A00000)
+        self.mu.mem_map(0x00000000, 0x01200000)
 
         with open(flat, "rb") as handle:
             image = handle.read()
@@ -254,16 +254,11 @@ class Machine:
         self.frames_run(2)
         backend = self.mu.mem_read(self.symbols["video_backend"], 1)[0]
         if backend == 1:
-            raw = bytes(self.mu.mem_read(VBE_FRAME_BUFFER, 640 * 480 * 2))
-            values = struct.iter_unpack("<H", raw)
-            pixels = []
-            for packed, in values:
-                red = ((packed >> 11) & 31) * 255 // 31
-                green = ((packed >> 5) & 63) * 255 // 63
-                blue = (packed & 31) * 255 // 31
-                pixels.append((red, green, blue))
-            image = Image.new("RGB", (640, 480))
-            image.putdata(pixels)
+            raw = bytes(self.mu.mem_read(VBE_FRAME_BUFFER, 1920 * 1080 * 4))
+            # Little-endian XRGB8888 is byte-ordered B,G,R,X in memory. Pillow's
+            # raw decoder avoids a two-million-element Python conversion loop.
+            image = Image.frombytes("RGB", (1920, 1080), raw, "raw", "BGRX")
+            image = image.resize((960, 540), Image.NEAREST)
         else:
             raw = bytes(self.mu.mem_read(FRAME_BUFFER, 320 * 200))
             colors = self.palette()

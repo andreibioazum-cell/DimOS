@@ -13,7 +13,9 @@ set -Eeuo pipefail
 
 readonly FLOPPY_SIZE_BYTES=1474560
 readonly HDD_SIZE_BYTES=8388608
-readonly MAX_KERNEL_LOADER_BYTES=43008
+# The loader follows KERNEL.BIN's FAT12 chain from 2000:0000, so the only
+# real ceiling is the preloaded data window at 0x30000: 126 sectors.
+readonly MAX_KERNEL_LOADER_BYTES=64512
 readonly BOOT_IMAGE="disk_img/dimos.img"
 # FAT12 image + zero padding: boots as an IDE/USB hard disk in QEMU, v86 and
 # on real PCs.
@@ -118,23 +120,23 @@ build_kernel() {
     local source
     local objects=()
 
-    log_info "Assembling protected-mode entry"
-    nasm -f elf32 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
+    log_info "Assembling BIOS-to-x86-64 long-mode entry"
+    nasm -f elf64 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
 
     for source in src/kernel/*.c; do
         objects+=("bin/$(basename "${source%.c}").o")
         "$compiler" \
-            -m32 -march=i386 -std=c11 -Os \
+            -m64 -march=x86-64 -std=c11 -O2 \
             -Wall -Wextra -Wpedantic -Werror \
             -ffreestanding -fno-builtin -fno-pic -fno-pie \
             -fno-stack-protector -fno-asynchronous-unwind-tables \
-            -fno-unwind-tables -mno-mmx -mno-sse -mno-sse2 \
+            -fno-unwind-tables -mno-red-zone -mgeneral-regs-only \
             -c "$source" -o "bin/$(basename "${source%.c}").o"
     done
-    log_ok "Compiled ${#objects[@]} C files"
+    log_ok "Compiled ${#objects[@]} x86-64 C files"
 
-    log_info "Linking flat kernel"
-    "$linker" -m elf_i386 --build-id=none -nostdlib \
+    log_info "Linking flat x86-64 kernel"
+    "$linker" -m elf_x86_64 --build-id=none -nostdlib \
         -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
         "$KERNEL_ENTRY_OBJECT" "${objects[@]}" -o "$KERNEL_ELF"
     "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN

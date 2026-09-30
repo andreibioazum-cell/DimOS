@@ -2,9 +2,9 @@
  * kernel.c -- start up, time keeping, and the small helpers every other file
  * uses (memory, text, restart).
  *
- * The bootloader loads this code at 0x20000 and kernel.asm switches the
- * processor into 32 bit protected mode before calling kernel_main. From here
- * on everything is plain C.
+ * The bootloader loads this code at 0x20000 and kernel.asm selects the video
+ * hardware, builds identity-mapped page tables and enters x86-64 long mode
+ * before calling kernel_main. From here on everything is plain C.
  */
 
 #include "dimos.h"
@@ -41,7 +41,7 @@ void memory_zero(void *destination, u32 length) {
  * the memory size word at 0x413. The address is a parameter so the compiler
  * cannot fold the access away. */
 u16 bios_read_word(u32 address) {
-    const volatile u16 *place = (const volatile u16 *)address;
+    const volatile u16 *place = (const volatile u16 *)(u64)address;
 
     return *place;
 }
@@ -185,15 +185,18 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 /* The programmable interval timer                                     */
 /* ------------------------------------------------------------------ */
 
-/* Channel 0 of the timer chip ticks 1193182 times per second. Dividing by
- * 11932 gives an interrupt rate of about 100 Hz, which is one 10 ms tick. */
+/* Channel 0 ticks 1,193,182 times per second. A long hardware period makes
+ * polling resilient to expensive frames; software still emits one public
+ * 10 ms tick for application timers every 11,932 input clocks. */
 #define TIMER_INPUT_FREQUENCY 1193182u
-#define TIMER_DIVISOR 11932u
+#define TIMER_DIVISOR 65535u
+#define TIMER_TICK_COUNTS 11932u
 
 #define TIMER_LATCH_CHANNEL_0 0x00u
 
 static u16 timer_last_counter;
 static u32 timer_leftover_counts;
+static u64 elapsed_input_counts;
 static u32 elapsed_milliseconds;
 static u16 ticks_waiting;
 
@@ -215,6 +218,7 @@ void timer_init(void) {
 
     timer_last_counter = timer_read_counter();
     timer_leftover_counts = 0u;
+    elapsed_input_counts = 0u;
     elapsed_milliseconds = 0u;
     ticks_waiting = 0u;
 }
@@ -230,10 +234,11 @@ void timer_update(void) {
         elapsed = (u16)(timer_last_counter + (TIMER_DIVISOR - current));
     }
     timer_last_counter = current;
+    elapsed_input_counts += (u64)elapsed;
     timer_leftover_counts += elapsed;
 
-    while (timer_leftover_counts >= TIMER_DIVISOR) {
-        timer_leftover_counts -= TIMER_DIVISOR;
+    while (timer_leftover_counts >= TIMER_TICK_COUNTS) {
+        timer_leftover_counts -= TIMER_TICK_COUNTS;
         elapsed_milliseconds += TICK_MILLISECONDS;
         ++ticks_waiting;
     }
@@ -241,6 +246,13 @@ void timer_update(void) {
 
 u32 time_milliseconds(void) {
     return elapsed_milliseconds;
+}
+
+/* Raw PIT clocks retain the sub-millisecond precision that the public clock
+ * deliberately rounds away. The compositor uses this monotonic counter for a
+ * true 60 Hz cap instead of rounding every frame to the old 10 ms tick. */
+u64 timer_counter(void) {
+    return elapsed_input_counts;
 }
 
 u16 timer_take_ticks(void) {
@@ -392,8 +404,19 @@ void system_restart(void) {
 /* Start up                                                            */
 /* ------------------------------------------------------------------ */
 
+/* Port E9 is the traditional Bochs/QEMU debug console. Real hardware simply
+ * ignores it; CI uses the marker to prove the built image reached 64-bit C,
+ * initialized the selected framebuffer and did not triple-fault. */
+static void debug_marker(const char *text) {
+    while (*text != '\0') {
+        port_write_byte(0x00E9u, (u8)*text);
+        ++text;
+    }
+}
+
 void kernel_main(void) {
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
+    debug_marker("DIMOS64:LONGMODE\n");
 
     timer_init();
     ram_disk_init();
@@ -402,6 +425,14 @@ void kernel_main(void) {
     gfx_init();
     input_init();
     sound_init();
+    if (video_backend == VIDEO_BACKEND_VBE && video_width == 1920u &&
+        video_height == 1080u && video_bits_per_pixel == 32u) {
+        debug_marker("DIMOS64:READY:VBE:1920x1080x32\n");
+    } else if (video_backend == VIDEO_BACKEND_VBE) {
+        debug_marker("DIMOS64:READY:VBE:FALLBACK\n");
+    } else {
+        debug_marker("DIMOS64:READY:VGA\n");
+    }
 
     gui_run();
 

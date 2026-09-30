@@ -132,7 +132,9 @@ static void command_help(void) {
     terminal_print("  VER          show the version");
     terminal_print("  THEME        switch the palette");
     terminal_print("  BEEP         test the speaker");
-    terminal_print("  SNAKE        open the snake game");
+    terminal_print("  MENU         open the Whisker menu");
+    terminal_print("  XFCE         about this desktop");
+    terminal_print("  CHEESY       the cheese ball kitchen");
     terminal_print("  EXIT         back to the desktop");
 }
 
@@ -281,12 +283,37 @@ static void run_command(char *command) {
         text_append_number(buffer, clock_day(), (u16)sizeof(buffer));
         terminal_print(buffer);
     } else if (text_equal_ignore_case(command, "VER") != 0u) {
-        terminal_print("DimOS 2.0, 32 bit, 320x200 desktop");
+        terminal_print("DimOS 2.0 + DimXfce, x86-64");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
         terminal_print("Palette switched");
     } else if (text_equal_ignore_case(command, "BEEP") != 0u) {
         sound_play_startup();
+    } else if (text_equal_ignore_case(command, "MENU") != 0u ||
+               text_equal_ignore_case(command, "WHISKER") != 0u) {
+        /* Super key of the budget: open the mouse menu from a shell. */
+        gui_menu_toggle();
+    } else if (text_equal_ignore_case(command, "XFCE") != 0u ||
+               text_equal_ignore_case(command, "XFCE4-ABOUT") != 0u) {
+        u16 index;
+
+        terminal_print("DimXfce: Xfce in 320x200");
+        terminal_print("panel+dock+whiskers, real cheese");
+        for (index = 0u; index < gui_application_count(); ++index) {
+            if (text_equal(gui_application(index)->title, "About") != 0u) {
+                gui_open(index);
+            }
+        }
+    } else if (text_equal_ignore_case(command, "CHEESY") != 0u ||
+               text_equal_ignore_case(command, "NYAM") != 0u) {
+        u16 index;
+
+        for (index = 0u; index < gui_application_count(); ++index) {
+            if (text_equal(gui_application(index)->title,
+                           "Cheesy Balls") != 0u) {
+                gui_open(index);
+            }
+        }
     } else if (text_equal_ignore_case(command, "SNAKE") != 0u) {
         gui_open(1u);
     } else if (text_equal_ignore_case(command, "MINES") != 0u) {
@@ -319,7 +346,7 @@ static void press_character(char character) {
 
 static void terminal_open(void) {
     if (history_count == 0u) {
-        terminal_print("DimOS 2.0 terminal");
+        terminal_print("DimXfce terminal");
         terminal_print("Type HELP and press ENT");
         terminal_print("");
     }
@@ -439,7 +466,7 @@ static void terminal_event(const Event *event) {
 }
 
 const Application application_terminal = {
-    "TRM",
+    "Term",
     "Terminal",
     icon,
     COLOR_LIGHT_GRAY,

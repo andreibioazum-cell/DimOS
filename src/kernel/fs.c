@@ -27,7 +27,7 @@
 /* RAM disk                                                            */
 /* ------------------------------------------------------------------ */
 
-#define RAM_DISK_ADDRESS 0x00500000u
+#define RAM_DISK_ADDRESS 0x00500000ull
 #define RAM_DISK_SECTOR_BYTES 512u
 #define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
 

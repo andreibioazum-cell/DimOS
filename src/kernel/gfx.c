@@ -1,9 +1,11 @@
 /*
  * gfx.c -- everything that touches a pixel.
  *
- * DimOS draws in VGA mode 13h: 320x200, one byte per pixel, the picture lives
- * at 0xA0000. We compose each frame in our own buffer (BACK_BUFFER_ADDRESS)
- * and copy it to the video card once per frame, so nothing ever flickers.
+ * DimOS composes a 320x200 indexed canvas in its own back buffer. The preferred
+ * VBE path expands changed pixels into a full 1920x1080 XRGB8888 hardware
+ * framebuffer; 640x480 RGB565 and VGA mode 13h remain fallbacks. A shadow
+ * buffer keeps unchanged pixels off the slow video bus, so a static desktop
+ * costs comparisons rather than multi-megabyte framebuffer writes.
  *
  * Text is drawn with 8x8 glyphs. When the boot disk carries FONT.TTF
  * (put any TrueType file into fonts/ before building), font_ttf.c
@@ -18,8 +20,12 @@
 /* Filled by kernel.asm while the machine is still in real mode. */
 extern u32 bios_font_address;
 
-/* The buffer we draw into. screen[0] is the top left pixel. */
+/* The canvas we draw into and the last canvas successfully presented. */
 u8 *const screen = (u8 *)BACK_BUFFER_ADDRESS;
+static u8 *const presented = (u8 *)PRESENT_BUFFER_ADDRESS;
+static u16 rgb565_color[256];
+static u32 xrgb8888_color[256];
+static u8 first_present = 1u;
 
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
@@ -31,7 +37,10 @@ typedef struct {
     u8 blue;
 } Color;
 
-/* The sixteen classic DOS colours first, then the window manager roles. */
+/* The sixteen classic DOS colours first, then the window manager roles.
+ * The role values are the Greybird palette DimXfce borrows: warm grey
+ * windows, a bright selection blue, a white canvas and a deep graphite
+ * blue that gradients into both the wallpaper and the title bars. */
 static const Color palette[PALETTE_SIZE] = {
     { 0, 0, 0 },         /* COLOR_BLACK       */
     { 0, 0, 170 },       /* COLOR_BLUE        */
@@ -49,21 +58,21 @@ static const Color palette[PALETTE_SIZE] = {
     { 255, 85, 255 },    /* COLOR_LIGHT_MAGENTA */
     { 255, 255, 85 },    /* COLOR_YELLOW      */
     { 255, 255, 255 },   /* COLOR_WHITE       */
-    { 192, 192, 192 },   /* COLOR_FACE        */
-    { 128, 128, 128 },   /* COLOR_SHADOW      */
+    { 222, 224, 228 },   /* COLOR_FACE        */
+    { 128, 132, 140 },   /* COLOR_SHADOW      */
     { 255, 255, 255 },   /* COLOR_HILITE      */
-    { 0, 0, 128 },       /* COLOR_TITLE_BAR   */
-    { 0, 128, 128 },     /* COLOR_DESKTOP     */
+    { 25, 32, 48 },      /* COLOR_TITLE_BAR   */
+    { 20, 27, 41 },      /* COLOR_DESKTOP     */
     { 255, 255, 255 },   /* COLOR_TEXT_FIELD  */
-    { 96, 99, 104 },     /* COLOR_SELECTION   */
-    { 128, 128, 128 },   /* COLOR_DISABLED    */
-    { 255, 255, 0 },     /* COLOR_ACCENT      */
+    { 48, 105, 190 },    /* COLOR_SELECTION   */
+    { 128, 132, 140 },   /* COLOR_DISABLED    */
+    { 255, 196, 64 },    /* COLOR_ACCENT      */
     { 0, 170, 0 },       /* COLOR_GOOD        */
     { 255, 85, 0 },      /* COLOR_ALERT       */
-    { 160, 160, 160 },   /* COLOR_PANEL       */
+    { 47, 54, 67 },      /* COLOR_PANEL       */
     { 255, 255, 255 },   /* COLOR_CANVAS      */
     { 96, 96, 96 },      /* COLOR_GRID        */
-    { 32, 32, 64 },      /* COLOR_DEEP        */
+    { 14, 20, 32 },      /* COLOR_DEEP        */
     { 0, 0, 0 }          /* COLOR_CURSOR      */
 };
 
@@ -107,12 +116,21 @@ static Color themed(Color original, u8 theme) {
     }
 }
 
-/* The video card stores six bits per channel, our table has eight. */
+/* Cache both direct-colour representations once per theme change. The hot
+ * presenter then performs only table reads and naturally aligned stores. */
 static void palette_write_entry(u8 index, Color value) {
-    port_write_byte(PORT_VGA_DAC_WRITE_INDEX, index);
-    port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.red >> 2));
-    port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.green >> 2));
-    port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.blue >> 2));
+    rgb565_color[index] = (u16)(((u16)(value.red >> 3u) << 11u) |
+                                ((u16)(value.green >> 2u) << 5u) |
+                                (u16)(value.blue >> 3u));
+    xrgb8888_color[index] = ((u32)value.red << 16u) |
+                            ((u32)value.green << 8u) |
+                            (u32)value.blue;
+    if (video_backend == VIDEO_BACKEND_VGA) {
+        port_write_byte(PORT_VGA_DAC_WRITE_INDEX, index);
+        port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.red >> 2));
+        port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.green >> 2));
+        port_write_byte(PORT_VGA_DAC_DATA, (u8)(value.blue >> 2));
+    }
 }
 
 /* The 6x6x6 colour cube that lives in slots 32..247. Six evenly spaced
@@ -241,6 +259,9 @@ void gfx_select_theme(u8 theme) {
     current_theme = theme;
     shade_ready = 0u;
     palette_apply();
+    /* Indexed canvas bytes do not change when a VBE theme changes, so force
+     * one complete colour conversion instead of trusting the dirty shadow. */
+    first_present = 1u;
 }
 
 u8 gfx_current_theme(void) {
@@ -309,7 +330,7 @@ static void font_init(void) {
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
-    font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_glyphs = (const u8 *)(u64)bios_font_address;
     font_ready = font_looks_valid(font_glyphs);
 }
 
@@ -317,25 +338,147 @@ static void font_init(void) {
 /* Frame buffer                                                        */
 /* ------------------------------------------------------------------ */
 
-void gfx_show(void) {
-    /* Both buffers start on a four byte boundary and SCREEN_BYTES is a
-     * multiple of four, so copying whole words is safe and quick. */
+static void present_vga(void) {
     const u32 *source = (const u32 *)BACK_BUFFER_ADDRESS;
+    u32 *shadow = (u32 *)PRESENT_BUFFER_ADDRESS;
     volatile u32 *target = (volatile u32 *)0x000A0000u;
-    u32 words = SCREEN_BYTES / 4u;
     u32 index;
 
-    for (index = 0u; index < words; ++index) {
-        target[index] = source[index];
+    for (index = 0u; index < SCREEN_BYTES / 4u; ++index) {
+        const u32 pixels = source[index];
+
+        if (first_present != 0u || shadow[index] != pixels) {
+            target[index] = pixels;
+            shadow[index] = pixels;
+        }
+    }
+}
+
+/* Logical-pixel boundaries in the physical mode. They are calculated once,
+ * not divided in the hot path. At 1920x1080 this becomes exactly 6 columns
+ * and alternating 5/6 rows per logical pixel, filling every physical pixel. */
+static u16 vbe_x[SCREEN_WIDTH + 1u];
+static u16 vbe_y[SCREEN_HEIGHT + 1u];
+static u8 vbe_map_ready;
+
+static void prepare_vbe_map(void) {
+    u16 position;
+
+    for (position = 0u; position <= SCREEN_WIDTH; ++position) {
+        vbe_x[position] =
+            (u16)(((u32)position * video_width) / SCREEN_WIDTH);
+    }
+    for (position = 0u; position <= SCREEN_HEIGHT; ++position) {
+        vbe_y[position] =
+            (u16)(((u32)position * video_height) / SCREEN_HEIGHT);
+    }
+    vbe_map_ready = 1u;
+}
+
+static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
+                                     u8 color) {
+    const u16 left = vbe_x[x];
+    const u16 right = vbe_x[x + 1u];
+    const u16 top = vbe_y[y];
+    const u16 bottom = vbe_y[y + 1u];
+    u16 output_y;
+
+    if (video_bits_per_pixel == 32u) {
+        const u32 direct_color = xrgb8888_color[color];
+
+        for (output_y = top; output_y < bottom; ++output_y) {
+            volatile u32 *pixel = (volatile u32 *)(framebuffer +
+                (u32)output_y * video_pitch) + left;
+            u16 output_x;
+
+            for (output_x = left; output_x < right; ++output_x) {
+                *pixel++ = direct_color;
+            }
+        }
+    } else {
+        const u16 direct_color = rgb565_color[color];
+
+        for (output_y = top; output_y < bottom; ++output_y) {
+            volatile u16 *pixel = (volatile u16 *)(framebuffer +
+                (u32)output_y * video_pitch) + left;
+            u16 output_x;
+
+            for (output_x = left; output_x < right; ++output_x) {
+                *pixel++ = direct_color;
+            }
+        }
+    }
+}
+
+static void present_vbe(void) {
+    volatile u8 *framebuffer =
+        (volatile u8 *)(u64)video_framebuffer_address;
+    const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
+    u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
+    u16 y;
+
+    if (vbe_map_ready == 0u) {
+        prepare_vbe_map();
+    }
+    for (y = 0u; y < SCREEN_HEIGHT; ++y) {
+        const u32 word_base = (u32)y * (SCREEN_WIDTH / 4u);
+        const u8 *source = screen + (u32)y * SCREEN_WIDTH;
+        u8 *shadow = presented + (u32)y * SCREEN_WIDTH;
+        u16 group;
+
+        for (group = 0u; group < SCREEN_WIDTH / 4u; ++group) {
+            const u32 word = source_words[word_base + group];
+            u16 within;
+
+            if (first_present == 0u && shadow_words[word_base + group] == word) {
+                continue;
+            }
+            for (within = 0u; within < 4u; ++within) {
+                const u16 x = (u16)(group * 4u + within);
+                const u8 color = source[x];
+
+                if (first_present != 0u || shadow[x] != color) {
+                    present_vbe_pixel(framebuffer, x, y, color);
+                    shadow[x] = color;
+                }
+            }
+            shadow_words[word_base + group] = word;
+        }
+    }
+}
+
+void gfx_show(void) {
+    if (video_backend == VIDEO_BACKEND_VBE &&
+        video_framebuffer_address != 0u && video_width >= SCREEN_WIDTH &&
+        video_height >= SCREEN_HEIGHT &&
+        (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u)) {
+        present_vbe();
+    } else {
+        present_vga();
+    }
+    first_present = 0u;
+}
+
+static void fill_bytes(u8 *target, u32 length, u8 color) {
+    const u32 packed = (u32)color * 0x01010101u;
+
+    while (length != 0u && ((u64)target & 3u) != 0u) {
+        *target++ = color;
+        --length;
+    }
+    while (length >= 4u) {
+        *(u32 *)target = packed;
+        target += 4;
+        length -= 4u;
+    }
+    while (length != 0u) {
+        *target++ = color;
+        --length;
     }
 }
 
 void gfx_clear(u8 color) {
-    u32 index;
-
-    for (index = 0u; index < SCREEN_BYTES; ++index) {
-        screen[index] = color;
-    }
+    fill_bytes(screen, SCREEN_BYTES, color);
 }
 
 void gfx_pixel(s16 x, s16 y, u8 color) {
@@ -376,32 +519,79 @@ void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha) {
 }
 
 void gfx_horizontal_line(s16 x, s16 y, s16 length, u8 color) {
-    s16 step;
+    s16 right;
 
-    if (y < 0 || (u16)y >= SCREEN_HEIGHT) {
+    if (length <= 0 || y < 0 || (u16)y >= SCREEN_HEIGHT) {
         return;
     }
-    for (step = 0; step < length; ++step) {
-        gfx_pixel((s16)(x + step), y, color);
+    right = (s16)(x + length);
+    if (right <= 0 || x >= (s16)SCREEN_WIDTH) {
+        return;
     }
+    if (x < 0) {
+        x = 0;
+    }
+    if (right > (s16)SCREEN_WIDTH) {
+        right = (s16)SCREEN_WIDTH;
+    }
+    fill_bytes(screen + (u32)(u16)y * SCREEN_WIDTH + (u16)x,
+               (u32)(u16)(right - x), color);
 }
 
 void gfx_vertical_line(s16 x, s16 y, s16 length, u8 color) {
-    s16 step;
+    s16 bottom;
+    u8 *pixel;
 
-    if (x < 0 || (u16)x >= SCREEN_WIDTH) {
+    if (length <= 0 || x < 0 || (u16)x >= SCREEN_WIDTH) {
         return;
     }
-    for (step = 0; step < length; ++step) {
-        gfx_pixel(x, (s16)(y + step), color);
+    bottom = (s16)(y + length);
+    if (bottom <= 0 || y >= (s16)SCREEN_HEIGHT) {
+        return;
+    }
+    if (y < 0) {
+        y = 0;
+    }
+    if (bottom > (s16)SCREEN_HEIGHT) {
+        bottom = (s16)SCREEN_HEIGHT;
+    }
+    pixel = screen + (u32)(u16)y * SCREEN_WIDTH + (u16)x;
+    while (y < bottom) {
+        *pixel = color;
+        pixel += SCREEN_WIDTH;
+        ++y;
     }
 }
 
 void gfx_fill(s16 x, s16 y, s16 width, s16 height, u8 color) {
+    s16 right;
+    s16 bottom;
     s16 row;
 
-    for (row = 0; row < height; ++row) {
-        gfx_horizontal_line(x, (s16)(y + row), width, color);
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    right = (s16)(x + width);
+    bottom = (s16)(y + height);
+    if (right <= 0 || bottom <= 0 || x >= (s16)SCREEN_WIDTH ||
+        y >= (s16)SCREEN_HEIGHT) {
+        return;
+    }
+    if (x < 0) {
+        x = 0;
+    }
+    if (y < 0) {
+        y = 0;
+    }
+    if (right > (s16)SCREEN_WIDTH) {
+        right = (s16)SCREEN_WIDTH;
+    }
+    if (bottom > (s16)SCREEN_HEIGHT) {
+        bottom = (s16)SCREEN_HEIGHT;
+    }
+    for (row = y; row < bottom; ++row) {
+        fill_bytes(screen + (u32)(u16)row * SCREEN_WIDTH + (u16)x,
+                   (u32)(u16)(right - x), color);
     }
 }
 
@@ -412,24 +602,29 @@ void gfx_outline(s16 x, s16 y, s16 width, s16 height, u8 color) {
     gfx_vertical_line((s16)(x + width - 1), y, height, color);
 }
 
-/* Bresenham's line: step along the longer axis and nudge the other one. */
+/* Bresenham's line for all octants: the doubled error of a step must be
+ * evaluated ONCE, before either axis moves. Reading it again after the
+ * first correction turns the walk into a drunkard's search for the end
+ * point -- a diagonal in Paint once took millions of pixels to arrive. */
 void gfx_line(s16 x0, s16 y0, s16 x1, s16 y1, u8 color) {
-    s16 dx = (s16)((x1 > x0) ? (x1 - x0) : (x0 - x1));
-    s16 dy = (s16)((y1 > y0) ? (y1 - y0) : (y0 - y1));
-    s16 step_x = (x0 < x1) ? 1 : -1;
-    s16 step_y = (y0 < y1) ? 1 : -1;
+    const s16 dx = (s16)((x1 > x0) ? (x1 - x0) : (x0 - x1));
+    const s16 dy = (s16)((y1 > y0) ? (y1 - y0) : (y0 - y1));
+    const s16 step_x = (x0 < x1) ? 1 : -1;
+    const s16 step_y = (y0 < y1) ? 1 : -1;
     s16 error = (s16)(dx - dy);
 
     for (;;) {
+        const s16 twice_error = (s16)(2 * error);
+
         gfx_pixel(x0, y0, color);
         if (x0 == x1 && y0 == y1) {
             return;
         }
-        if ((s16)(2 * error) > -dy) {
+        if (twice_error > (s16)-dy) {
             error = (s16)(error - dy);
             x0 = (s16)(x0 + step_x);
         }
-        if ((s16)(2 * error) < dx) {
+        if (twice_error < dx) {
             error = (s16)(error + dx);
             y0 = (s16)(y0 + step_y);
         }
@@ -472,6 +667,45 @@ void gfx_circle(s16 center_x, s16 center_y, s16 radius, u8 color, u8 filled) {
     }
 }
 
+/* The integer square root of a small value: the classic bit walking
+ * method, plenty fast for radii under a hundred. */
+static u8 integer_sqrt(u16 value) {
+    u8 root = 0u;
+    u8 add = 128u;
+
+    while ((u16)((u16)add * (u16)add) > value && add > 1u) {
+        add = (u8)(add >> 1);
+    }
+    while (add != 0u) {
+        const u8 trial = (u8)(root + add);
+
+        if ((u16)((u16)trial * (u16)trial) <= value) {
+            root = trial;
+        }
+        add = (u8)(add >> 1);
+    }
+    return root;
+}
+
+/* A filled ellipse: for every scanline the half width drops the way a
+ * circle's would, just stretched differently in x and y. The wallpaper
+ * builds its big mouse mascot out of these -- circles alone leave the
+ * poor thing looking square. */
+void gfx_ellipse_fill(s16 center_x, s16 center_y, s16 radius_x, s16 radius_y,
+                      u8 color) {
+    s16 row;
+
+    for (row = (s16)-radius_y; row <= radius_y; ++row) {
+        const u16 rest = (u16)((u16)radius_y * (u16)radius_y -
+                               (u16)(row * row));
+        const s16 half = (s16)(((u16)radius_x * integer_sqrt(rest)) /
+                               (u16)radius_y);
+
+        gfx_horizontal_line((s16)(center_x - half), (s16)(center_y + row),
+                            (s16)(2 * half + 1), color);
+    }
+}
+
 /* Two colour checkerboard, the classic way to fake a third colour. */
 void gfx_checker(s16 x, s16 y, s16 width, s16 height, u8 first, u8 second) {
     s16 row;
@@ -503,6 +737,27 @@ void gfx_panel(s16 x, s16 y, s16 width, s16 height) {
     gfx_outline(x, y, width, height, COLOR_SHADOW);
     gfx_horizontal_line((s16)(x + 1), (s16)(y + 1), (s16)(width - 2), COLOR_HILITE);
     gfx_vertical_line((s16)(x + 1), (s16)(y + 1), (s16)(height - 2), COLOR_HILITE);
+}
+
+/* A vertical gradient between two colours. There is no true colour in
+ * mode 13h, so every band is the colour cube slot that sits that far
+ * between the two ends -- the same trick anti-aliasing uses for soft
+ * edges, stretched over a whole bar. The Xfce wallpaper, the window
+ * title bars and the Whisker menu header are all painted with this. */
+void gfx_gradient_vertical(s16 x, s16 y, s16 width, s16 height,
+                           u8 top_color, u8 bottom_color) {
+    s16 row;
+
+    for (row = 0; row < height; ++row) {
+        /* Band 0 is exactly the top colour, the last band is one step
+         * short of the bottom one: a full bottom row belongs to whatever
+         * is drawn next, not to this gradient. */
+        u8 alpha = (u8)(((u32)row * (FONT_ALPHA_MAX - 1u)) /
+                        (u32)((height > 1) ? (height - 1) : 1));
+        u8 color = gfx_shade(bottom_color, top_color, alpha);
+
+        gfx_horizontal_line(x, (s16)(y + row), width, color);
+    }
 }
 
 /* ------------------------------------------------------------------ */

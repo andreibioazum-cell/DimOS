@@ -51,6 +51,9 @@ static const char *const note_names[NOTE_KEYS] = {
 static char message[40];
 
 static void music_open(void) {
+    /* A media player dresses its own window: this one wears a black
+     * title bar instead of the desktop's selection blue. */
+    gui_window_title_color(COLOR_DEEP);
     text_copy(message, "Pick a tune or poke a note", (u16)sizeof(message));
 }
 
@@ -136,7 +139,7 @@ static void music_event(const Event *event) {
 }
 
 const Application application_music = {
-    "TUN",
+    "Music",
     "Music",
     icon,
     COLOR_YELLOW,

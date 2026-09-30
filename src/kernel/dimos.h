@@ -193,6 +193,7 @@ extern u8 *const screen; /* the back buffer, SCREEN_BYTES bytes */
 
 void gfx_init(void);
 void gfx_show(void); /* copy the back buffer to the video card */
+void gfx_set_output_resolution(u16 width, u16 height);
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
 void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha); /* alpha 0..16 */

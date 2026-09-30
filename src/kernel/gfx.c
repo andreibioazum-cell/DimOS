@@ -34,7 +34,6 @@ static u8 first_present = 1u;
  * overlay without redrawing the whole multi-megapixel screen. */
 #define HIGH_TEXT_LIMIT 160u
 #define HIGH_TEXT_LENGTH 64u
-#define HIGH_TEXT_SCALE 3u
 
 typedef struct {
     s16 x;
@@ -47,6 +46,14 @@ static HighText high_text_current[HIGH_TEXT_LIMIT];
 static HighText high_text_previous[HIGH_TEXT_LIMIT];
 static u16 high_text_current_count;
 static u16 high_text_previous_count;
+
+/* Software output window selected by the startup display wizard. The BIOS
+ * mode remains the real framebuffer, while the smaller target lets v86 and
+ * other emulators touch far fewer physical pixels per frame. */
+static u16 render_width;
+static u16 render_height;
+static u16 render_left;
+static u16 render_top;
 
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
@@ -357,8 +364,18 @@ static void font_init(void) {
 
 static u8 high_text_active(void) {
     return (u8)(video_backend == VIDEO_BACKEND_VBE &&
-                video_bits_per_pixel == 32u && video_width >= 1280u &&
-                video_height >= 720u);
+                video_bits_per_pixel == 32u && render_width >= 480u &&
+                render_height >= 300u);
+}
+
+static u8 high_text_scale(void) {
+    if (render_width >= 1280u) {
+        return 3u;
+    }
+    if (render_width >= 640u) {
+        return 2u;
+    }
+    return 1u;
 }
 
 static u8 high_text_alpha(char character, u8 row, u8 column) {
@@ -395,8 +412,10 @@ static u32 high_text_blend(u32 background, u8 color, u8 alpha) {
 }
 
 static void high_text_restore_pixel(volatile u32 *framebuffer, u16 x, u16 y) {
-    const u16 logical_x = (u16)(((u32)x * SCREEN_WIDTH) / video_width);
-    const u16 logical_y = (u16)(((u32)y * SCREEN_HEIGHT) / video_height);
+    const u16 logical_x = (u16)(((u32)(x - render_left) * SCREEN_WIDTH) /
+                               render_width);
+    const u16 logical_y = (u16)(((u32)(y - render_top) * SCREEN_HEIGHT) /
+                                render_height);
     const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
 
     framebuffer[(u32)y * (video_pitch / 4u) + x] = xrgb8888_color[color];
@@ -412,8 +431,11 @@ static void high_text_restore(const HighText *commands, u16 count) {
     framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
-        s32 base_x = (s32)item->x * video_width / SCREEN_WIDTH;
-        s32 base_y = (s32)item->y * video_height / SCREEN_HEIGHT;
+        const u8 scale = high_text_scale();
+        s32 base_x = (s32)render_left +
+                     (s32)item->x * render_width / SCREEN_WIDTH;
+        s32 base_y = (s32)render_top +
+                     (s32)item->y * render_height / SCREEN_HEIGHT;
         u16 character;
 
         if (base_x < 0 || base_y < 0) {
@@ -423,13 +445,13 @@ static void high_text_restore(const HighText *commands, u16 count) {
             u16 row;
             u16 column;
 
-            for (row = 0u; row < 8u * HIGH_TEXT_SCALE; ++row) {
+            for (row = 0u; row < 8u * scale; ++row) {
                 const u16 y = (u16)(base_y + row);
                 if (y >= video_height) {
                     continue;
                 }
-                for (column = 0u; column < 8u * HIGH_TEXT_SCALE; ++column) {
-                    const u16 x = (u16)(base_x + character * 8u * HIGH_TEXT_SCALE + column);
+                for (column = 0u; column < 8u * scale; ++column) {
+                    const u16 x = (u16)(base_x + character * 8u * scale + column);
                     if (x < video_width) {
                         high_text_restore_pixel(framebuffer, x, y);
                     }
@@ -466,8 +488,11 @@ static void high_text_draw(void) {
     framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
-        const s32 base_x = (s32)item->x * video_width / SCREEN_WIDTH;
-        const s32 base_y = (s32)item->y * video_height / SCREEN_HEIGHT;
+        const u8 scale = high_text_scale();
+        const s32 base_x = (s32)render_left +
+                           (s32)item->x * render_width / SCREEN_WIDTH;
+        const s32 base_y = (s32)render_top +
+                           (s32)item->y * render_height / SCREEN_HEIGHT;
         u16 character;
 
         if (base_x < 0 || base_y < 0) {
@@ -485,17 +510,17 @@ static void high_text_draw(void) {
                     if (alpha == 0u) {
                         continue;
                     }
-                    for (dy = 0u; dy < HIGH_TEXT_SCALE; ++dy) {
-                        const u16 y = (u16)(base_y + row * HIGH_TEXT_SCALE + dy);
+                    for (dy = 0u; dy < scale; ++dy) {
+                        const u16 y = (u16)(base_y + row * scale + dy);
                         u8 dx;
 
                         if (y >= video_height) {
                             continue;
                         }
-                        for (dx = 0u; dx < HIGH_TEXT_SCALE; ++dx) {
+                        for (dx = 0u; dx < scale; ++dx) {
                             const u16 x = (u16)(base_x +
-                                character * 8u * HIGH_TEXT_SCALE +
-                                column * HIGH_TEXT_SCALE + dx);
+                                character * 8u * scale +
+                                column * scale + dx);
                             volatile u32 *pixel;
 
                             if (x >= video_width) {
@@ -532,8 +557,9 @@ static void present_vga(void) {
 }
 
 /* Logical-pixel boundaries in the physical mode. They are calculated once,
- * not divided in the hot path. At 1920x1080 this becomes exactly 6 columns
- * and alternating 5/6 rows per logical pixel, filling every physical pixel. */
+ * not divided in the hot path. The startup wizard can make this a small
+ * centred viewport, so an emulator need not repaint a full 1920x1080 surface
+ * on every changed logical pixel. */
 static u16 vbe_x[SCREEN_WIDTH + 1u];
 static u16 vbe_y[SCREEN_HEIGHT + 1u];
 static u8 vbe_map_ready;
@@ -541,15 +567,65 @@ static u8 vbe_map_ready;
 static void prepare_vbe_map(void) {
     u16 position;
 
+    if (render_width == 0u || render_height == 0u) {
+        render_width = video_width;
+        render_height = video_height;
+        render_left = 0u;
+        render_top = 0u;
+    }
     for (position = 0u; position <= SCREEN_WIDTH; ++position) {
-        vbe_x[position] =
-            (u16)(((u32)position * video_width) / SCREEN_WIDTH);
+        vbe_x[position] = (u16)(render_left +
+            ((u32)position * render_width) / SCREEN_WIDTH);
     }
     for (position = 0u; position <= SCREEN_HEIGHT; ++position) {
-        vbe_y[position] =
-            (u16)(((u32)position * video_height) / SCREEN_HEIGHT);
+        vbe_y[position] = (u16)(render_top +
+            ((u32)position * render_height) / SCREEN_HEIGHT);
     }
     vbe_map_ready = 1u;
+}
+
+void gfx_set_output_resolution(u16 width, u16 height) {
+    u32 color;
+
+    if (video_backend != VIDEO_BACKEND_VBE || video_width == 0u ||
+        video_height == 0u) {
+        return;
+    }
+    if (width < SCREEN_WIDTH) {
+        width = SCREEN_WIDTH;
+    }
+    if (height < SCREEN_HEIGHT) {
+        height = SCREEN_HEIGHT;
+    }
+    if (width > video_width) {
+        width = video_width;
+    }
+    if (height > video_height) {
+        height = video_height;
+    }
+    render_width = width;
+    render_height = height;
+    render_left = (u16)((video_width - width) / 2u);
+    render_top = (u16)((video_height - height) / 2u);
+    vbe_map_ready = 0u;
+    first_present = 1u;
+
+    /* Clear the letterbox once. Subsequent frames only touch the selected
+     * viewport, which is the useful optimization for v86's small profile. */
+    color = xrgb8888_color[COLOR_DESKTOP];
+    if (video_bits_per_pixel == 32u) {
+        volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+        u16 y;
+
+        for (y = 0u; y < video_height; ++y) {
+            u32 x;
+            volatile u32 *row = framebuffer + (u32)y * (video_pitch / 4u);
+
+            for (x = 0u; x < video_width; ++x) {
+                row[x] = color;
+            }
+        }
+    }
 }
 
 static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
@@ -1362,5 +1438,9 @@ void gfx_init(void) {
     font_init();
     pointer_init();
     palette_apply();
+    render_width = video_width;
+    render_height = video_height;
+    render_left = 0u;
+    render_top = 0u;
     gfx_clear(COLOR_DESKTOP);
 }

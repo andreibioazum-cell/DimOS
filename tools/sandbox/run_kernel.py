@@ -133,8 +133,11 @@ class Machine:
 
         self.frames = 0
         self.wanted_frames = 0
+        self.setup_sent = False
         self.mu.hook_add(UC_HOOK_CODE, self._on_frame,
                          begin=table["gfx_show"], end=table["gfx_show"])
+        self.mu.hook_add(UC_HOOK_CODE, self._on_setup,
+                         begin=table["gui_setup"], end=table["gui_setup"])
 
         self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
         # kernel.asm would have jumped here after entering protected mode.
@@ -242,6 +245,14 @@ class Machine:
         self.frames += 1
         if self.frames >= self.wanted_frames:
             mu.emu_stop()
+
+    def _on_setup(self, mu, address, size, user_data):
+        if not self.setup_sent:
+            # The real wizard waits for the user. The visual-tour sandbox
+            # chooses Computer and accepts its native full-HD default so the
+            # existing application tour starts on the first desktop frame.
+            self.send_keyboard([0x02, 0x82, 0x1C, 0x9C])
+            self.setup_sent = True
 
     def frames_run(self, count):
         self.wanted_frames = self.frames + count

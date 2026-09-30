@@ -1090,10 +1090,228 @@ static void wait_for_next_frame(u64 *deadline) {
     *deadline += FRAME_TIMER_COUNTS;
 }
 
+/* ------------------------------------------------------------------ */
+/* First-boot display wizard                                           */
+/* ------------------------------------------------------------------ */
+
+#define HOTSPOT_SETUP_COMPUTER 0x8300u
+#define HOTSPOT_SETUP_EMULATOR 0x8301u
+#define HOTSPOT_SETUP_RESOLUTION 0x8302u
+#define HOTSPOT_SETUP_START 0x8303u
+
+static u8 setup_mode;
+static char setup_resolution[16];
+static u8 setup_error;
+
+static void setup_clear_resolution(void) {
+    setup_resolution[0] = '\0';
+    setup_error = 0u;
+}
+
+static u8 setup_parse_resolution(u16 *width, u16 *height) {
+    u32 parsed_width = 0u;
+    u32 parsed_height = 0u;
+    u8 after_x = 0u;
+    u16 index;
+    const char *text = setup_resolution;
+
+    if (*text == '\0') {
+        if (setup_mode == 2u) {
+            /* The phone profile is a 480x320 render target presented at 2x,
+             * so it stays cheap for v86 but remains usable in a 1920 canvas. */
+            *width = 960u;
+            *height = 640u;
+            return 1u;
+        }
+        *width = video_width;
+        *height = video_height;
+        return 1u;
+    }
+    for (index = 0u; text[index] != '\0'; ++index) {
+        const u8 character = (u8)text[index];
+
+        if (character == 'x' || character == 'X') {
+            if (after_x != 0u) {
+                return 0u;
+            }
+            after_x = 1u;
+        } else if (character >= '0' && character <= '9') {
+            if (after_x == 0u) {
+                parsed_width = parsed_width * 10u + (u32)(character - '0');
+            } else {
+                parsed_height = parsed_height * 10u + (u32)(character - '0');
+            }
+        } else {
+            return 0u;
+        }
+    }
+    if (after_x == 0u || parsed_width < SCREEN_WIDTH ||
+        parsed_height < SCREEN_HEIGHT || parsed_width > video_width ||
+        parsed_height > video_height) {
+        return 0u;
+    }
+    *width = (u16)parsed_width;
+    *height = (u16)parsed_height;
+    return 1u;
+}
+
+static void setup_draw(void) {
+    char shown[20];
+    const char *placeholder;
+
+    gfx_clear(COLOR_DESKTOP);
+    draw_wallpaper();
+    gui_hotspots_reset();
+    glass_pill(38, 21, 244, 158);
+    gfx_gradient_vertical(40, 23, 240, 27, COLOR_SELECTION, COLOR_TITLE_BAR);
+    gfx_text(54, 29, "Welcome to DimOS", COLOR_WHITE);
+    gfx_text(54, 40, "Choose where you are running it", COLOR_HILITE);
+
+    gui_button_colored(53, 59, 99, 18, "Computer", HOTSPOT_SETUP_COMPUTER,
+                       (setup_mode == 1u) ? COLOR_SELECTION : COLOR_FACE,
+                       (setup_mode == 1u) ? COLOR_WHITE : COLOR_DEEP);
+    gui_button_colored(160, 59, 107, 18, "Emulator / phone", HOTSPOT_SETUP_EMULATOR,
+                       (setup_mode == 2u) ? COLOR_SELECTION : COLOR_FACE,
+                       (setup_mode == 2u) ? COLOR_WHITE : COLOR_DEEP);
+
+    gfx_text(54, 84, "Output resolution", COLOR_DEEP);
+    gfx_fill(53, 96, 214, 18, COLOR_TEXT_FIELD);
+    gfx_outline(53, 96, 214, 18, COLOR_SHADOW);
+    if (setup_resolution[0] != '\0') {
+        text_copy(shown, setup_resolution, (u16)sizeof(shown));
+        gfx_text(60, 101, shown, COLOR_DEEP);
+    } else {
+        placeholder = (setup_mode == 2u) ? "480x320 @ 2x" : "1920x1080";
+        gfx_text(60, 101, placeholder, COLOR_DISABLED);
+    }
+    gui_hotspot(53, 96, 214, 18, HOTSPOT_SETUP_RESOLUTION);
+
+    if (setup_error != 0u) {
+        gfx_text(54, 119, "Use WIDTHxHEIGHT, min 320x200", COLOR_ALERT);
+    } else {
+        gfx_text(54, 119, "Type numbers, x, then press Enter", COLOR_DEEP);
+    }
+    gfx_text(54, 132, "Computer keeps Full HD; emulator saves work", COLOR_DEEP);
+    gui_button_colored(99, 151, 122, 19, "Start DimOS", HOTSPOT_SETUP_START,
+                       COLOR_ACCENT, COLOR_WHITE);
+    gfx_text(54, 176, "1 computer   2 emulator   Esc = Full HD", COLOR_DEEP);
+    gfx_draw_pointer(input_pointer_x(), input_pointer_y());
+}
+
+static u8 setup_activate(u16 id) {
+    u16 width;
+    u16 height;
+
+    if (id == HOTSPOT_SETUP_COMPUTER) {
+        setup_mode = 1u;
+        setup_clear_resolution();
+        return 0u;
+    }
+    if (id == HOTSPOT_SETUP_EMULATOR) {
+        setup_mode = 2u;
+        setup_clear_resolution();
+        return 0u;
+    }
+    if (id == HOTSPOT_SETUP_START || id == HOTSPOT_SETUP_RESOLUTION) {
+        if (id == HOTSPOT_SETUP_RESOLUTION) {
+            return 0u;
+        }
+        if (setup_mode == 0u) {
+            setup_mode = 1u;
+        }
+        if (setup_parse_resolution(&width, &height) == 0u) {
+            setup_error = 1u;
+            return 0u;
+        }
+        if (setup_mode == 2u && width <= (u16)(video_width / 2u) &&
+            height <= (u16)(video_height / 2u)) {
+            width = (u16)(width * 2u);
+            height = (u16)(height * 2u);
+        }
+        gfx_set_output_resolution(width, height);
+        return 1u;
+    }
+    return 0u;
+}
+
+static u8 setup_key(u16 key) {
+    u16 length;
+
+    if (key == KEY_ESCAPE) {
+        setup_mode = 1u;
+        setup_resolution[0] = '\0';
+        return setup_activate(HOTSPOT_SETUP_START);
+    }
+    if (key == KEY_ENTER) {
+        return setup_activate(HOTSPOT_SETUP_START);
+    }
+    if (key == KEY_BACKSPACE) {
+        length = text_length(setup_resolution);
+        if (length != 0u) {
+            setup_resolution[length - 1u] = '\0';
+        }
+        setup_error = 0u;
+        return 0u;
+    }
+    if (setup_mode == 0u && key == (u16)'1') {
+        setup_mode = 1u;
+        return 0u;
+    }
+    if (setup_mode == 0u && key == (u16)'2') {
+        setup_mode = 2u;
+        return 0u;
+    }
+    if ((key >= (u16)'0' && key <= (u16)'9') || key == (u16)'x' ||
+        key == (u16)'X') {
+        length = text_length(setup_resolution);
+        if (length + 1u < (u16)sizeof(setup_resolution)) {
+            setup_resolution[length] = (char)key;
+            setup_resolution[length + 1u] = '\0';
+            setup_error = 0u;
+        }
+    }
+    return 0u;
+}
+
+void gui_setup(void) {
+    Event event;
+    u64 next_frame;
+    u8 finished = 0u;
+
+    setup_mode = 0u;
+    setup_resolution[0] = '\0';
+    setup_error = 0u;
+    timer_update();
+    next_frame = timer_counter() + FRAME_TIMER_COUNTS;
+
+    while (finished == 0u) {
+        u16 ticks;
+
+        timer_update();
+        ticks = timer_take_ticks();
+        input_poll();
+        input_advance(ticks);
+        while (input_next_event(&event) != 0u) {
+            if (event.type == EVENT_KEY) {
+                finished = setup_key(event.key);
+            } else if (event.type == EVENT_CLICK) {
+                finished = setup_activate(gui_hotspot_at(event.x, event.y));
+            }
+        }
+        if (finished != 0u) {
+            break;
+        }
+        setup_draw();
+        gfx_show();
+        wait_for_next_frame(&next_frame);
+    }
+}
+
 void gui_run(void) {
     Event event;
     u64 next_frame;
 
+    gui_setup();
     selected_icon = 0u;
     active_application = 0xFFFFu;
     sound_play_startup();

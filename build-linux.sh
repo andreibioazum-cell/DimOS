@@ -13,7 +13,9 @@ set -Eeuo pipefail
 
 readonly FLOPPY_SIZE_BYTES=1474560
 readonly HDD_SIZE_BYTES=8388608
-readonly MAX_KERNEL_LOADER_BYTES=43008
+# The loader follows KERNEL.BIN's FAT12 chain from 2000:0000, so the only
+# real ceiling is the preloaded data window at 0x30000: 126 sectors.
+readonly MAX_KERNEL_LOADER_BYTES=64512
 readonly BOOT_IMAGE="disk_img/dimos.img"
 # FAT12 image + zero padding: boots as an IDE/USB hard disk in QEMU, v86 and
 # on real PCs.

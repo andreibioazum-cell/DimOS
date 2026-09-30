@@ -127,8 +127,11 @@ void sound_update(u16 ticks) {
 /* The tunes                                                           */
 /* ------------------------------------------------------------------ */
 
+/* The DimXfce login fanfare: the session-manager's own "ta-dam", a
+ * rising major arpeggio that lands on the desktop with a bow. */
 static const Note startup_chime[] = {
-    { NOTE_C5, 5u }, { NOTE_E5, 5u }, { NOTE_G5, 5u }, { NOTE_C6, 14u },
+    { NOTE_G4, 4u }, { NOTE_C5, 4u }, { NOTE_E5, 4u }, { NOTE_G5, 6u },
+    { NOTE_E5, 3u }, { NOTE_G5, 3u }, { NOTE_C6, 16u },
 };
 
 static const Note march[] = {
@@ -153,6 +156,16 @@ static const Note two_tone[] = {
     { NOTE_E5, 4u }, { NOTE_A4, 6u },
 };
 
+/* The cheese kitchen: a quick gulp and a long low burp of satisfaction. */
+static const Note nom_gulp[] = {
+    { NOTE_A4, 3u }, { NOTE_E4, 4u },
+};
+
+static const Note burp_rumble[] = {
+    { NOTE_G4, 7u }, { NOTE_E4, 7u }, { NOTE_C4, 13u }, { REST, 2u },
+    { NOTE_C4, 6u },
+};
+
 void sound_play_startup(void) {
     sound_play(startup_chime, (u16)(sizeof(startup_chime) / sizeof(startup_chime[0])), 0u);
 }
@@ -163,6 +176,14 @@ void sound_play_march(void) {
 
 void sound_play_waltz(void) {
     sound_play(waltz, (u16)(sizeof(waltz) / sizeof(waltz[0])), 0u);
+}
+
+void sound_play_nom(void) {
+    sound_play(nom_gulp, (u16)(sizeof(nom_gulp) / sizeof(nom_gulp[0])), 0u);
+}
+
+void sound_play_burp(void) {
+    sound_play(burp_rumble, (u16)(sizeof(burp_rumble) / sizeof(burp_rumble[0])), 0u);
 }
 
 void sound_beep(void) {

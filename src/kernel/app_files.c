@@ -26,6 +26,8 @@
 #define ID_SCROLL_UP 25u
 #define ID_SCROLL_DOWN 26u
 #define ID_SCROLL_TOP 27u
+#define ID_SCROLL_PAGE_UP 28u
+#define ID_SCROLL_PAGE_DOWN 29u
 
 static const char *const icon[16] = {
     "................",
@@ -210,10 +212,15 @@ static void files_draw(void) {
                    (s16)(WINDOW_TOP + 2), 60, 14, "Up", ID_SCROLL_UP);
         gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
                    (s16)(WINDOW_TOP + 20), 60, 14, "Down", ID_SCROLL_DOWN);
+        /* The Thunar scrollbar jump: a whole page at once. */
         gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 38), 60, 14, "Top", ID_SCROLL_TOP);
+                   (s16)(WINDOW_TOP + 38), 60, 14, "[+]", ID_SCROLL_PAGE_DOWN);
         gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 62), 60, 16, "Close", ID_BACK);
+                   (s16)(WINDOW_TOP + 56), 60, 14, "[-]", ID_SCROLL_PAGE_UP);
+        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
+                   (s16)(WINDOW_TOP + 74), 60, 14, "Top", ID_SCROLL_TOP);
+        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
+                   (s16)(WINDOW_TOP + 94), 60, 16, "Close", ID_BACK);
     }
 
     gui_message_bar(message);
@@ -231,6 +238,20 @@ static void files_event(const Event *event) {
             --text_top;
         } else if (event->key == ID_SCROLL_DOWN && text_top + 1u < text_lines) {
             ++text_top;
+        } else if (event->key == ID_SCROLL_PAGE_UP) {
+            /* A page up lands exactly a screen back, like Thunar's bar. */
+            text_top = (text_top > (u16)(TEXT_ROWS - 1u))
+                           ? (u16)(text_top - (TEXT_ROWS - 1u)) : 0u;
+        } else if (event->key == ID_SCROLL_PAGE_DOWN) {
+            u16 last = 0u;
+
+            if (text_lines > (u16)TEXT_ROWS) {
+                last = (u16)(text_lines - TEXT_ROWS);
+            }
+            text_top = (u16)(text_top + (TEXT_ROWS - 1u));
+            if (text_top > last) {
+                text_top = last;
+            }
         } else if (event->key == ID_SCROLL_TOP) {
             text_top = 0u;
         } else if (event->key == ID_BACK) {
@@ -289,7 +310,7 @@ static void files_event(const Event *event) {
 }
 
 const Application application_files = {
-    "FIL",
+    "Files",
     "Files",
     icon,
     COLOR_YELLOW,

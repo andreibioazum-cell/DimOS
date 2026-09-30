@@ -31,7 +31,10 @@ typedef struct {
     u8 blue;
 } Color;
 
-/* The sixteen classic DOS colours first, then the window manager roles. */
+/* The sixteen classic DOS colours first, then the window manager roles.
+ * The role values are the Greybird palette DimXfce borrows: warm grey
+ * windows, a bright selection blue, a white canvas and a deep graphite
+ * blue that gradients into both the wallpaper and the title bars. */
 static const Color palette[PALETTE_SIZE] = {
     { 0, 0, 0 },         /* COLOR_BLACK       */
     { 0, 0, 170 },       /* COLOR_BLUE        */
@@ -49,21 +52,21 @@ static const Color palette[PALETTE_SIZE] = {
     { 255, 85, 255 },    /* COLOR_LIGHT_MAGENTA */
     { 255, 255, 85 },    /* COLOR_YELLOW      */
     { 255, 255, 255 },   /* COLOR_WHITE       */
-    { 192, 192, 192 },   /* COLOR_FACE        */
-    { 128, 128, 128 },   /* COLOR_SHADOW      */
+    { 222, 224, 228 },   /* COLOR_FACE        */
+    { 128, 132, 140 },   /* COLOR_SHADOW      */
     { 255, 255, 255 },   /* COLOR_HILITE      */
-    { 0, 0, 128 },       /* COLOR_TITLE_BAR   */
-    { 0, 128, 128 },     /* COLOR_DESKTOP     */
+    { 25, 32, 48 },      /* COLOR_TITLE_BAR   */
+    { 20, 27, 41 },      /* COLOR_DESKTOP     */
     { 255, 255, 255 },   /* COLOR_TEXT_FIELD  */
-    { 96, 99, 104 },     /* COLOR_SELECTION   */
-    { 128, 128, 128 },   /* COLOR_DISABLED    */
-    { 255, 255, 0 },     /* COLOR_ACCENT      */
+    { 48, 105, 190 },    /* COLOR_SELECTION   */
+    { 128, 132, 140 },   /* COLOR_DISABLED    */
+    { 255, 196, 64 },    /* COLOR_ACCENT      */
     { 0, 170, 0 },       /* COLOR_GOOD        */
     { 255, 85, 0 },      /* COLOR_ALERT       */
-    { 160, 160, 160 },   /* COLOR_PANEL       */
+    { 47, 54, 67 },      /* COLOR_PANEL       */
     { 255, 255, 255 },   /* COLOR_CANVAS      */
     { 96, 96, 96 },      /* COLOR_GRID        */
-    { 32, 32, 64 },      /* COLOR_DEEP        */
+    { 14, 20, 32 },      /* COLOR_DEEP        */
     { 0, 0, 0 }          /* COLOR_CURSOR      */
 };
 
@@ -412,24 +415,29 @@ void gfx_outline(s16 x, s16 y, s16 width, s16 height, u8 color) {
     gfx_vertical_line((s16)(x + width - 1), y, height, color);
 }
 
-/* Bresenham's line: step along the longer axis and nudge the other one. */
+/* Bresenham's line for all octants: the doubled error of a step must be
+ * evaluated ONCE, before either axis moves. Reading it again after the
+ * first correction turns the walk into a drunkard's search for the end
+ * point -- a diagonal in Paint once took millions of pixels to arrive. */
 void gfx_line(s16 x0, s16 y0, s16 x1, s16 y1, u8 color) {
-    s16 dx = (s16)((x1 > x0) ? (x1 - x0) : (x0 - x1));
-    s16 dy = (s16)((y1 > y0) ? (y1 - y0) : (y0 - y1));
-    s16 step_x = (x0 < x1) ? 1 : -1;
-    s16 step_y = (y0 < y1) ? 1 : -1;
+    const s16 dx = (s16)((x1 > x0) ? (x1 - x0) : (x0 - x1));
+    const s16 dy = (s16)((y1 > y0) ? (y1 - y0) : (y0 - y1));
+    const s16 step_x = (x0 < x1) ? 1 : -1;
+    const s16 step_y = (y0 < y1) ? 1 : -1;
     s16 error = (s16)(dx - dy);
 
     for (;;) {
+        const s16 twice_error = (s16)(2 * error);
+
         gfx_pixel(x0, y0, color);
         if (x0 == x1 && y0 == y1) {
             return;
         }
-        if ((s16)(2 * error) > -dy) {
+        if (twice_error > (s16)-dy) {
             error = (s16)(error - dy);
             x0 = (s16)(x0 + step_x);
         }
-        if ((s16)(2 * error) < dx) {
+        if (twice_error < dx) {
             error = (s16)(error + dx);
             y0 = (s16)(y0 + step_y);
         }
@@ -472,6 +480,45 @@ void gfx_circle(s16 center_x, s16 center_y, s16 radius, u8 color, u8 filled) {
     }
 }
 
+/* The integer square root of a small value: the classic bit walking
+ * method, plenty fast for radii under a hundred. */
+static u8 integer_sqrt(u16 value) {
+    u8 root = 0u;
+    u8 add = 128u;
+
+    while ((u16)((u16)add * (u16)add) > value && add > 1u) {
+        add = (u8)(add >> 1);
+    }
+    while (add != 0u) {
+        const u8 trial = (u8)(root + add);
+
+        if ((u16)((u16)trial * (u16)trial) <= value) {
+            root = trial;
+        }
+        add = (u8)(add >> 1);
+    }
+    return root;
+}
+
+/* A filled ellipse: for every scanline the half width drops the way a
+ * circle's would, just stretched differently in x and y. The wallpaper
+ * builds its big mouse mascot out of these -- circles alone leave the
+ * poor thing looking square. */
+void gfx_ellipse_fill(s16 center_x, s16 center_y, s16 radius_x, s16 radius_y,
+                      u8 color) {
+    s16 row;
+
+    for (row = (s16)-radius_y; row <= radius_y; ++row) {
+        const u16 rest = (u16)((u16)radius_y * (u16)radius_y -
+                               (u16)(row * row));
+        const s16 half = (s16)(((u16)radius_x * integer_sqrt(rest)) /
+                               (u16)radius_y);
+
+        gfx_horizontal_line((s16)(center_x - half), (s16)(center_y + row),
+                            (s16)(2 * half + 1), color);
+    }
+}
+
 /* Two colour checkerboard, the classic way to fake a third colour. */
 void gfx_checker(s16 x, s16 y, s16 width, s16 height, u8 first, u8 second) {
     s16 row;
@@ -503,6 +550,27 @@ void gfx_panel(s16 x, s16 y, s16 width, s16 height) {
     gfx_outline(x, y, width, height, COLOR_SHADOW);
     gfx_horizontal_line((s16)(x + 1), (s16)(y + 1), (s16)(width - 2), COLOR_HILITE);
     gfx_vertical_line((s16)(x + 1), (s16)(y + 1), (s16)(height - 2), COLOR_HILITE);
+}
+
+/* A vertical gradient between two colours. There is no true colour in
+ * mode 13h, so every band is the colour cube slot that sits that far
+ * between the two ends -- the same trick anti-aliasing uses for soft
+ * edges, stretched over a whole bar. The Xfce wallpaper, the window
+ * title bars and the Whisker menu header are all painted with this. */
+void gfx_gradient_vertical(s16 x, s16 y, s16 width, s16 height,
+                           u8 top_color, u8 bottom_color) {
+    s16 row;
+
+    for (row = 0; row < height; ++row) {
+        /* Band 0 is exactly the top colour, the last band is one step
+         * short of the bottom one: a full bottom row belongs to whatever
+         * is drawn next, not to this gradient. */
+        u8 alpha = (u8)(((u32)row * (FONT_ALPHA_MAX - 1u)) /
+                        (u32)((height > 1) ? (height - 1) : 1));
+        u8 color = gfx_shade(bottom_color, top_color, alpha);
+
+        gfx_horizontal_line(x, (s16)(y + row), width, color);
+    }
 }
 
 /* ------------------------------------------------------------------ */

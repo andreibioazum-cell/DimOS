@@ -404,8 +404,19 @@ void system_restart(void) {
 /* Start up                                                            */
 /* ------------------------------------------------------------------ */
 
+/* Port E9 is the traditional Bochs/QEMU debug console. Real hardware simply
+ * ignores it; CI uses the marker to prove the built image reached 64-bit C,
+ * initialized the selected framebuffer and did not triple-fault. */
+static void debug_marker(const char *text) {
+    while (*text != '\0') {
+        port_write_byte(0x00E9u, (u8)*text);
+        ++text;
+    }
+}
+
 void kernel_main(void) {
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
+    debug_marker("DIMOS64:LONGMODE\n");
 
     timer_init();
     ram_disk_init();
@@ -414,6 +425,9 @@ void kernel_main(void) {
     gfx_init();
     input_init();
     sound_init();
+    debug_marker((video_backend == VIDEO_BACKEND_VBE)
+                     ? "DIMOS64:READY:VBE\n"
+                     : "DIMOS64:READY:VGA\n");
 
     gui_run();
 

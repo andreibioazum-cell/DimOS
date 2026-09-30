@@ -31,6 +31,7 @@ jobs:
             dosfstools \
             mtools \
             nasm \
+            qemu-system-x86 \
             xorriso
 
       - name: Build bootable images
@@ -38,6 +39,24 @@ jobs:
 
       - name: Validate bootable images
         run: make verify
+
+      - name: Boot x86-64 kernel and VBE in QEMU
+        run: |
+          status=0
+          timeout 10s qemu-system-x86_64 \
+            -machine pc,accel=tcg \
+            -m 32M \
+            -drive file=disk_img/dimos.hdd,format=raw,if=ide \
+            -boot c \
+            -display none \
+            -serial none \
+            -monitor none \
+            -no-reboot \
+            -no-shutdown \
+            -debugcon file:qemu-debug.log || status=$?
+          test "$status" -eq 124
+          grep -F "DIMOS64:LONGMODE" qemu-debug.log
+          grep -E "DIMOS64:READY:(VBE|VGA)" qemu-debug.log
 
       - name: Create checksums
         run: |

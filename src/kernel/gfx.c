@@ -387,7 +387,12 @@ static u8 high_text_alpha(char character, u8 row, u8 column) {
         character = '?';
     }
     if (font_levels != (const u8 *)0) {
-        return font_levels[(u16)((u8)character * 64u + row * 8u + column)];
+        const u8 alpha = font_levels[(u16)((u8)character * 64u +
+                                          row * 8u + column)];
+
+        /* The source glyph is only 8x8. Lift hairline coverage a little
+         * when it is enlarged so it remains readable in a scaled preview. */
+        return (u8)(alpha != 0u && alpha < 6u ? 6u : alpha);
     }
     return (u8)((font_glyphs[(u16)(u8)character * 8u + row] &
                  (u8)(0x80u >> column)) != 0u ? FONT_ALPHA_MAX : 0u);

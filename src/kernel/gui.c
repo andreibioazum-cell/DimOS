@@ -1117,10 +1117,11 @@ static u8 setup_parse_resolution(u16 *width, u16 *height) {
 
     if (*text == '\0') {
         if (setup_mode == 2u) {
-            /* The phone profile is a 480x320 render target presented at 2x,
-             * so it stays cheap for v86 but remains usable in a 1920 canvas. */
-            *width = 960u;
-            *height = 640u;
+            /* The phone profile starts from a small render target. The
+             * startup code fits it to the real panel with an integer scale,
+             * so it stays cheap without becoming a postage stamp. */
+            *width = 800u;
+            *height = 480u;
             return 1u;
         }
         *width = video_width;
@@ -1181,7 +1182,7 @@ static void setup_draw(void) {
         text_copy(shown, setup_resolution, (u16)sizeof(shown));
         gfx_text(60, 101, shown, COLOR_DEEP);
     } else {
-        placeholder = (setup_mode == 2u) ? "480x320 @ 2x" : "1920x1080";
+        placeholder = (setup_mode == 2u) ? "800x480 @ 2x" : "1920x1080";
         gfx_text(60, 101, placeholder, COLOR_DISABLED);
     }
     gui_hotspot(53, 96, 214, 18, HOTSPOT_SETUP_RESOLUTION);
@@ -1223,10 +1224,16 @@ static u8 setup_activate(u16 id) {
             setup_error = 1u;
             return 0u;
         }
-        if (setup_mode == 2u && width <= (u16)(video_width / 2u) &&
-            height <= (u16)(video_height / 2u)) {
-            width = (u16)(width * 2u);
-            height = (u16)(height * 2u);
+        if (setup_mode == 2u) {
+            u16 scale_x = (u16)(video_width / width);
+            u16 scale_y = (u16)(video_height / height);
+            u16 scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+            if (scale == 0u) {
+                scale = 1u;
+            }
+            width = (u16)(width * scale);
+            height = (u16)(height * scale);
         }
         gfx_set_output_resolution(width, height);
         return 1u;
@@ -1277,6 +1284,7 @@ void gui_setup(void) {
     Event event;
     u64 next_frame;
     u8 finished = 0u;
+    u8 redraw = 1u;
 
     setup_mode = 0u;
     setup_resolution[0] = '\0';
@@ -1292,6 +1300,7 @@ void gui_setup(void) {
         input_poll();
         input_advance(ticks);
         while (input_next_event(&event) != 0u) {
+            redraw = 1u;
             if (event.type == EVENT_KEY) {
                 finished = setup_key(event.key);
             } else if (event.type == EVENT_CLICK) {
@@ -1301,8 +1310,11 @@ void gui_setup(void) {
         if (finished != 0u) {
             break;
         }
-        setup_draw();
-        gfx_show();
+        if (redraw != 0u) {
+            setup_draw();
+            gfx_show();
+            redraw = 0u;
+        }
         wait_for_next_frame(&next_frame);
     }
 }

@@ -56,7 +56,7 @@ jobs:
             -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
           grep -F "DIMOS64:LONGMODE" qemu-debug.log
-          grep -E "DIMOS64:READY:(VBE|VGA)" qemu-debug.log
+          grep -F "DIMOS64:READY:VBE" qemu-debug.log
 
       - name: Create checksums
         run: |

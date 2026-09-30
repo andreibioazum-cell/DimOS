@@ -306,7 +306,7 @@ static void snake_event(const Event *event) {
 }
 
 const Application application_snake = {
-    "SNK",
+    "Snake",
     "Snake",
     icon,
     COLOR_LIGHT_GREEN,

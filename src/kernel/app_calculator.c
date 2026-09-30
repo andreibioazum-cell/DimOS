@@ -232,7 +232,7 @@ static void calculator_event(const Event *event) {
 }
 
 const Application application_calculator = {
-    "CLC",
+    "Calc",
     "Calc",
     icon,
     COLOR_LIGHT_CYAN,

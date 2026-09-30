@@ -53,20 +53,24 @@ static void about_open(void) {
 
 static void about_draw(void) {
     char value[32];
-    s16 y = (s16)(WINDOW_TOP + 4);
+    s16 y = (s16)(WINDOW_TOP + 3);
 
     gfx_text((s16)(WINDOW_LEFT + 6), y, "DimOS 2.0", COLOR_BLACK);
     gfx_text((s16)(WINDOW_LEFT + 120), y, "32 bit kernel in C", COLOR_BLUE);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
+
+    /* xfce4-about would say the same, give or take a mouse. */
+    info_line(y, "Shell", "DimXfce am-nyam shell");
+    y = (s16)(y + 10);
 
     info_line(y, "Video", "320x200, 256 colours");
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     text_append(value, "Theme: ", (u16)sizeof(value));
     text_append(value, theme_names[gfx_current_theme()], (u16)sizeof(value));
     info_line(y, "Palette", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     /* The BIOS writes how much memory sits below one megabyte, in KiB,
      * into its data area at 0x413. */
@@ -74,23 +78,23 @@ static void about_draw(void) {
     text_append_number(value, (u32)bios_read_word(0x00000413u), (u16)sizeof(value));
     text_append(value, " KiB", (u16)sizeof(value));
     info_line(y, "Memory", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     text_append_number(value, ram_disk_sectors() / 2u, (u16)sizeof(value));
     text_append(value, " KiB RAM disk", (u16)sizeof(value));
     info_line(y, "Storage", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     text_append_number(value, file_system_visible_count(), (u16)sizeof(value));
     text_append(value, " files on disk", (u16)sizeof(value));
     info_line(y, "Files", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     info_line(y, "Mouse", (input_mouse_available() != 0u) ? "PS/2 mouse found"
                                                           : "not found - keys work");
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     two_digits(value, (u16)sizeof(value), clock_hours());
@@ -99,7 +103,7 @@ static void about_draw(void) {
     text_append_character(value, ':', (u16)sizeof(value));
     two_digits(value, (u16)sizeof(value), clock_seconds());
     info_line(y, "Clock", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     text_append_number(value, clock_year(), (u16)sizeof(value));
@@ -108,20 +112,20 @@ static void about_draw(void) {
     text_append_character(value, '-', (u16)sizeof(value));
     two_digits(value, (u16)sizeof(value), clock_day());
     info_line(y, "Date", value);
-    y = (s16)(y + 11);
+    y = (s16)(y + 10);
 
     value[0] = '\0';
     text_append(value, "Up ", (u16)sizeof(value));
     text_append_number(value, time_milliseconds() / 1000u, (u16)sizeof(value));
-    text_append(value, " seconds", (u16)sizeof(value));
+    text_append(value, " s - see Cheesy!", (u16)sizeof(value));
     info_line(y, "Session", value);
-    y = (s16)(y + 14);
+    y = (s16)(y + 12);
 
-    gui_button((s16)(WINDOW_LEFT + 6), y, 90, 16, "Theme", ID_THEME);
-    gui_button((s16)(WINDOW_LEFT + 102), y, 90, 16, "Beep", ID_TEST_SOUND);
-    gui_button((s16)(WINDOW_LEFT + 198), y, 90, 16, "Restart", ID_RESTART);
+    gui_button((s16)(WINDOW_LEFT + 6), y, 90, 15, "Theme", ID_THEME);
+    gui_button((s16)(WINDOW_LEFT + 102), y, 90, 15, "Beep", ID_TEST_SOUND);
+    gui_button((s16)(WINDOW_LEFT + 198), y, 90, 15, "Restart", ID_RESTART);
 
-    gui_message_bar("Click Theme to look like an old monitor");
+    gui_message_bar("The mouse menu waits at the top left");
 }
 
 static void about_event(const Event *event) {
@@ -142,7 +146,7 @@ static void about_event(const Event *event) {
 }
 
 const Application application_about = {
-    "INF",
+    "About",
     "About",
     icon,
     COLOR_LIGHT_BLUE,

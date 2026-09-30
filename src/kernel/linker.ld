@@ -3,7 +3,12 @@ OUTPUT_ARCH(i386)
 ENTRY(kernel_entry)
 
 KERNEL_LOAD_ADDRESS = 0x00020000;
-KERNEL_LOADER_LIMIT = 43008;
+
+/* The boot sector follows KERNEL.BIN's FAT chain and places it at
+ * 2000:0000; the preloaded FAT12 data window begins at 0x30000, so an
+ * image may span at most 0x10000 bytes. 126 sectors (64512) leaves a
+ * clean 1 KiB gap, and the second ASSERT guards BSS growth even then. */
+KERNEL_LOADER_LIMIT = 64512;
 
 PHDRS
 {

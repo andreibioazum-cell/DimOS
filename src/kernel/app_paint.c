@@ -229,7 +229,7 @@ static void paint_event(const Event *event) {
 }
 
 const Application application_paint = {
-    "PNT",
+    "Paint",
     "Paint",
     icon,
     COLOR_LIGHT_MAGENTA,

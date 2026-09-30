@@ -1,5 +1,8 @@
 DimOS 2.0 + DimXfce
 
+The x86-64 kernel uses a VBE RGB565 framebuffer at up to 60 FPS,
+with VGA mode 13h as its compatibility fallback.
+
 The mouse logo at the top left opens the Whisker menu with every app.
 Right click on the wallpaper does the same, xfdesktop style.
 The ^ button in a window title rolls it up into a slat, the little

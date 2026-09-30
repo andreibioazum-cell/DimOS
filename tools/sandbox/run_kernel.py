@@ -18,9 +18,14 @@ import struct
 import subprocess
 import sys
 
-from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_EIP, UC_X86_REG_ESP
-from PIL import Image
+try:
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
+    from unicorn.x86_const import UC_X86_REG_RIP, UC_X86_REG_RSP
+    from PIL import Image
+except ModuleNotFoundError:
+    # --build only needs the host compiler and linker. Keep that useful in
+    # minimal CI/sandboxes where the optional visual-tour packages are absent.
+    Uc = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -32,16 +37,17 @@ from font8x8 import font_bytes  # noqa: E402
 KERNEL_BASE = 0x00020000
 FONT_ADDRESS = 0x0000E000
 FRAME_BUFFER = 0x000A0000
-SIMULATOR = 0x00100000
+VBE_FRAME_BUFFER = 0x00900000
+SIMULATOR = 0x00200000
 FONT_TTF_AREA = 0x00400000   # the kernel copies FONT.TTF here (font_ttf.c)
 RAM_DISK = 0x00500000
 
 CFLAGS = [
-    "gcc", "-m32", "-march=i386", "-std=c11", "-Os",
+    "gcc", "-m64", "-march=x86-64", "-std=c11", "-O2",
     "-Wall", "-Wextra", "-Wpedantic", "-Werror",
     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie",
     "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
-    "-fno-unwind-tables", "-mno-mmx", "-mno-sse", "-mno-sse2",
+    "-fno-unwind-tables", "-mno-red-zone", "-mgeneral-regs-only",
     "-I", os.path.join(REPO, "src", "kernel"),
 ]
 
@@ -78,7 +84,7 @@ def build():
         objects.append(obj)
 
     elf = os.path.join(BUILD, "kernel.elf")
-    run(["ld", "-m", "elf_i386", "--build-id=none", "-nostdlib",
+    run(["ld", "-m", "elf_x86_64", "--build-id=none", "-nostdlib",
          "-e", "kernel_main",
          "-T", os.path.join(REPO, "src", "kernel", "linker.ld"),
          "-Map=" + os.path.join(BUILD, "kernel.map")] + objects + ["-o", elf],
@@ -109,11 +115,10 @@ def symbols(elf):
 class Machine:
     def __init__(self, flat, table):
         self.symbols = table
-        self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
-        self.mu.mem_map(0x00000000, 0x00100000)      # the first megabyte
-        self.mu.mem_map(SIMULATOR, 0x00010000)       # shared with this script
-        self.mu.mem_map(FONT_TTF_AREA, 0x00100000)   # FONT.TTF + rasterizer
-        self.mu.mem_map(RAM_DISK, 0x00400000)        # the 4 MiB RAM disk
+        self.mu = Uc(UC_ARCH_X86, UC_MODE_64)
+        # Long mode identity-maps this low physical range. It includes the
+        # 1 MiB BSS window, simulator block, font workspace and RAM disk.
+        self.mu.mem_map(0x00000000, 0x00A00000)
 
         with open(flat, "rb") as handle:
             image = handle.read()
@@ -130,9 +135,9 @@ class Machine:
         self.mu.hook_add(UC_HOOK_CODE, self._on_frame,
                          begin=table["gfx_show"], end=table["gfx_show"])
 
-        self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
-        # kernel.asm would have jumped here after switching to protected mode.
-        self.mu.reg_write(UC_X86_REG_EIP, table["kernel_main"])
+        self.mu.reg_write(UC_X86_REG_RSP, 0x00090000)
+        # kernel.asm would have jumped here after entering x86-64 long mode.
+        self.mu.reg_write(UC_X86_REG_RIP, table["kernel_main"])
         self.pointer_x = 160
         self.pointer_y = 100
 
@@ -239,7 +244,7 @@ class Machine:
 
     def frames_run(self, count):
         self.wanted_frames = self.frames + count
-        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_EIP), 0,
+        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_RIP), 0,
                           count=200_000_000)
 
     def screenshot(self, name, scale=2):
@@ -247,11 +252,24 @@ class Machine:
         # guest finish the redraw triggered by the last click before the
         # picture is taken.
         self.frames_run(2)
-        raw = bytes(self.mu.mem_read(FRAME_BUFFER, 320 * 200))
-        colors = self.palette()
-        image = Image.new("RGB", (320, 200))
-        image.putdata([colors[pixel] for pixel in raw])
-        image = image.resize((320 * scale, 200 * scale), Image.NEAREST)
+        backend = self.mu.mem_read(self.symbols["video_backend"], 1)[0]
+        if backend == 1:
+            raw = bytes(self.mu.mem_read(VBE_FRAME_BUFFER, 640 * 480 * 2))
+            values = struct.iter_unpack("<H", raw)
+            pixels = []
+            for packed, in values:
+                red = ((packed >> 11) & 31) * 255 // 31
+                green = ((packed >> 5) & 63) * 255 // 63
+                blue = (packed & 31) * 255 // 31
+                pixels.append((red, green, blue))
+            image = Image.new("RGB", (640, 480))
+            image.putdata(pixels)
+        else:
+            raw = bytes(self.mu.mem_read(FRAME_BUFFER, 320 * 200))
+            colors = self.palette()
+            image = Image.new("RGB", (320, 200))
+            image.putdata([colors[pixel] for pixel in raw])
+            image = image.resize((320 * scale, 200 * scale), Image.NEAREST)
         path = os.path.join(BUILD, name + ".png")
         image.save(path)
         print(f"  saved {path}")
@@ -553,6 +571,8 @@ def main():
     if "--build" in sys.argv:
         build()
         return
+    if Uc is None:
+        raise SystemExit("visual tour needs: pip install unicorn pillow")
     tour()
 
 

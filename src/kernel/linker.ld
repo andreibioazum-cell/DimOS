@@ -1,13 +1,12 @@
-OUTPUT_FORMAT(elf32-i386)
-OUTPUT_ARCH(i386)
+OUTPUT_FORMAT(elf64-x86-64)
+OUTPUT_ARCH(i386:x86-64)
 ENTRY(kernel_entry)
 
 KERNEL_LOAD_ADDRESS = 0x00020000;
 
-/* The boot sector follows KERNEL.BIN's FAT chain and places it at
- * 2000:0000; the preloaded FAT12 data window begins at 0x30000, so an
- * image may span at most 0x10000 bytes. 126 sectors (64512) leaves a
- * clean 1 KiB gap, and the second ASSERT guards BSS growth even then. */
+/* The BIOS loader follows KERNEL.BIN's FAT chain into 2000:0000. Its loaded
+ * sections must stay below the FAT12 data window at 0x30000. BSS is NOLOAD
+ * and lives at 1 MiB, away from the disk cache and graphics buffers. */
 KERNEL_LOADER_LIMIT = 64512;
 
 PHDRS
@@ -39,6 +38,10 @@ SECTIONS
 
     __kernel_load_end = .;
 
+    /* Long mode identity-maps this region before C starts. Keeping BSS out of
+     * the 64 KiB loader window lets x86-64 use natural eight-byte pointers
+     * without stealing space from KERNEL.BIN. */
+    . = 0x00100000;
     .bss ALIGN(16) (NOLOAD) :
     {
         __bss_start = .;
@@ -59,5 +62,5 @@ SECTIONS
 
 ASSERT(__kernel_load_end - __kernel_start <= KERNEL_LOADER_LIMIT,
        "KERNEL.BIN exceeds the bootloader's load window")
-ASSERT(__kernel_memory_end < 0x00030000,
-       "kernel and BSS no longer fit in the 2000h segment window")
+ASSERT(__bss_start >= 0x00100000 && __kernel_memory_end < 0x00200000,
+       "kernel BSS no longer fits in its 1 MiB runtime window")

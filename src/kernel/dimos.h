@@ -1,8 +1,9 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a 32-bit freestanding kernel with a graphical desktop in VGA mode
- * 13h (320x200, 256 colours). The desktop is "DimXfce": a full Xfce style
+ * DimOS is a 64-bit freestanding x86-64 kernel with a graphical desktop. It
+ * prefers a VBE 2.0 linear framebuffer (640x480 RGB565) and keeps VGA mode 13h
+ * as a compatibility fallback. The desktop is "DimXfce": a full Xfce style
  * shell in miniature -- a dark top panel with the Whisker menu behind the
  * little mouse logo, a gradient xfdesktop wallpaper, xfwm4 looking window
  * decorations and an icon dock at the bottom. The whole desktop is usable
@@ -12,10 +13,11 @@
  *
  * Coding rules for this directory:
  *   - everything is plain C11, freestanding (no libc, no interrupts, no
- *     paging, no inline assembly);
+ *     inline assembly);
  *   - the only assembly in the project is src/bootloader/boot.asm (the 512
- *     byte BIOS boot sector) and src/kernel/kernel.asm (the switch into
- *     protected mode), because those two things cannot be written in C;
+ *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery, page
+ *     tables and the switch into x86-64 long mode), because those jobs need
+ *     CPU instructions and BIOS calls C cannot express;
  *   - hardware is reached through port_read_byte()/port_write_byte() and
  *     plain pointers, both defined below.
  */
@@ -26,9 +28,11 @@
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
+typedef unsigned long long u64;
 typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
+typedef signed long long s64;
 
 /* ------------------------------------------------------------------ */
 /* Hardware ports                                                      */
@@ -66,9 +70,26 @@ u16 bios_read_word(u32 address);   /* a word the BIOS left in low memory */
 #define SCREEN_HEIGHT 200u
 #define SCREEN_BYTES (SCREEN_WIDTH * SCREEN_HEIGHT)
 
-/* The visible VGA frame buffer, and our own copy that we compose into. */
+/* The visible VGA frame buffer, our logical 320x200 canvas, and the shadow of
+ * the last frame sent to the display. The shadow makes presentation dirty:
+ * unchanged four-pixel groups never touch slow video memory. */
 #define VGA_FRAME_BUFFER ((volatile u8 *)0x000A0000u)
 #define BACK_BUFFER_ADDRESS 0x00060000u
+#define PRESENT_BUFFER_ADDRESS 0x00070000u
+
+/* Video backend selected by kernel.asm while BIOS calls are still possible.
+ * VBE is an actual linear framebuffer exposed by the display adapter; mode
+ * 13h remains available for old VGA-only machines and minimal emulators. */
+enum {
+    VIDEO_BACKEND_VGA = 0u,
+    VIDEO_BACKEND_VBE = 1u
+};
+extern u8 video_backend;
+extern u32 video_framebuffer_address;
+extern u16 video_pitch;
+extern u16 video_width;
+extern u16 video_height;
+extern u8 video_bits_per_pixel;
 
 /* Free RAM below one megabyte that applications may use as a bitmap. */
 #define SCRATCH_ADDRESS 0x00050000u
@@ -253,6 +274,7 @@ u8 input_mouse_available(void);
 void timer_init(void);
 void timer_update(void);          /* fold elapsed time into the clock   */
 u32 time_milliseconds(void);
+u64 timer_counter(void);          /* raw PIT input clocks since boot    */
 u16 timer_take_ticks(void);       /* 10 ms ticks since the last call    */
 void time_wait(u32 milliseconds);
 

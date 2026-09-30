@@ -283,7 +283,7 @@ static void run_command(char *command) {
         text_append_number(buffer, clock_day(), (u16)sizeof(buffer));
         terminal_print(buffer);
     } else if (text_equal_ignore_case(command, "VER") != 0u) {
-        terminal_print("DimOS 2.0 + DimXfce, 32 bit");
+        terminal_print("DimOS 2.0 + DimXfce, x86-64");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
         terminal_print("Palette switched");

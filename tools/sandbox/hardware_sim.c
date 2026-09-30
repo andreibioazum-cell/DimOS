@@ -13,8 +13,8 @@
  *   - the clock chip and the speaker.
  *
  * The runner and the simulated hardware share a block of memory at
- * 0x100000: the runner writes input and the time there, the kernel writes the
- * palette there.
+ * 0x200000 (the x86-64 kernel uses 0x100000..0x1FFFFF for BSS): the runner
+ * writes input and time there, and the kernel writes the palette there.
  */
 
 #include <stddef.h>
@@ -32,7 +32,7 @@ typedef struct {
     volatile u32 restarts;          /* set when the kernel asked for a reset  */
 } Simulator;
 
-#define SIMULATOR ((volatile Simulator *)0x00100000u)
+#define SIMULATOR ((volatile Simulator *)0x00200000ull)
 
 /* The test runner reads and writes this block straight out of memory, so the
  * two sides have to agree on where every field sits. These checks fail the
@@ -47,8 +47,18 @@ typedef char check_restarts_offset[(offsetof(Simulator, restarts) == 0x510u) ? 1
  * hardware kernel.asm writes it again right after that. */
 __attribute__((section(".data"))) u32 bios_font_address;
 
+/* The real-mode entry normally fills these after probing VBE. Exercise the
+ * preferred RGB565 presenter in every visual-tour frame; 0x900000 sits just
+ * above the kernel's 4 MiB RAM disk in the simulated physical map. */
+__attribute__((section(".data"))) u8 video_backend = VIDEO_BACKEND_VBE;
+__attribute__((section(".data"))) u32 video_framebuffer_address = 0x00900000u;
+__attribute__((section(".data"))) u16 video_pitch = 640u * 2u;
+__attribute__((section(".data"))) u16 video_width = 640u;
+__attribute__((section(".data"))) u16 video_height = 480u;
+__attribute__((section(".data"))) u8 video_bits_per_pixel = 16u;
+
 /* Timer chip. */
-#define SIMULATOR_TIMER_DIVISOR 11932u
+#define SIMULATOR_TIMER_DIVISOR 65535u
 #define COUNTS_PER_MILLISECOND 1193u
 
 static u8 timer_low_latched;
@@ -73,8 +83,8 @@ static u8 speaker_state;
 
 /* The kernel latches the counter before reading it, so remember which half
  * of the latched value comes next. Latching is also what makes the simulated
- * clock move: one millisecond per latch, so a frame that waits 40 ms spins
- * forty times and then carries on, exactly as it would on real hardware. */
+ * clock move: one millisecond per latch, so the 60 Hz limiter spins about
+ * seventeen times and then carries on, exactly as it would on real hardware. */
 static u16 current_timer_counter(void) {
     const u32 counts = (SIMULATOR->milliseconds % 1000u) * COUNTS_PER_MILLISECOND;
 

@@ -21,9 +21,10 @@
 
 #include "dimos.h"
 
-/* One frame every 40 ms is 25 pictures per second: smooth enough for the
- * games, light enough for a slow emulator. */
-#define FRAME_MILLISECONDS 40u
+/* 1,193,182 PIT clocks per second / 60, rounded up. Waiting against the raw
+ * hardware counter gives a strict maximum of 60 FPS without the old 10 ms
+ * clock rounding the compositor down to 50 or 25 FPS. */
+#define FRAME_TIMER_COUNTS 19887ull
 
 /* Ids the window manager keeps for its own buttons. Applications use ids
  * below this range. */
@@ -1034,19 +1035,33 @@ static void handle_event(const Event *event) {
 /* The loop                                                            */
 /* ------------------------------------------------------------------ */
 
-static void wait_for_next_frame(u32 started_at) {
-    while ((time_milliseconds() - started_at) < FRAME_MILLISECONDS) {
+static void wait_for_next_frame(u64 *deadline) {
+    u64 now;
+
+    timer_update();
+    now = timer_counter();
+    if (now >= *deadline) {
+        /* Rendering missed its slot. Start a fresh interval instead of trying
+         * to catch up with a burst that could exceed the 60 FPS ceiling. */
+        *deadline = now + FRAME_TIMER_COUNTS;
+        return;
+    }
+    while (timer_counter() < *deadline) {
         timer_update();
         input_poll();
     }
+    *deadline += FRAME_TIMER_COUNTS;
 }
 
 void gui_run(void) {
     Event event;
+    u64 next_frame;
 
     selected_icon = 0u;
     active_application = 0xFFFFu;
     sound_play_startup();
+    timer_update();
+    next_frame = timer_counter() + FRAME_TIMER_COUNTS;
 
     for (;;) {
         u16 ticks;
@@ -1073,6 +1088,6 @@ void gui_run(void) {
         draw_frame();
         gfx_show();
 
-        wait_for_next_frame(time_milliseconds());
+        wait_for_next_frame(&next_frame);
     }
 }

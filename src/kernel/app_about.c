@@ -56,14 +56,16 @@ static void about_draw(void) {
     s16 y = (s16)(WINDOW_TOP + 3);
 
     gfx_text((s16)(WINDOW_LEFT + 6), y, "DimOS 2.0", COLOR_BLACK);
-    gfx_text((s16)(WINDOW_LEFT + 120), y, "32 bit kernel in C", COLOR_BLUE);
+    gfx_text((s16)(WINDOW_LEFT + 120), y, "x86-64 kernel in C", COLOR_BLUE);
     y = (s16)(y + 10);
 
     /* xfce4-about would say the same, give or take a mouse. */
     info_line(y, "Shell", "DimXfce am-nyam shell");
     y = (s16)(y + 10);
 
-    info_line(y, "Video", "320x200, 256 colours");
+    info_line(y, "Video", (video_backend == VIDEO_BACKEND_VBE)
+                              ? "VBE GPU 640x480 RGB565"
+                              : "VGA 320x200 fallback");
     y = (s16)(y + 10);
 
     value[0] = '\0';

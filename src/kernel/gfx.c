@@ -330,7 +330,7 @@ static void font_init(void) {
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
-    font_glyphs = (const u8 *)(u64)bios_font_address;
+    font_glyphs = (const u8 *)(u32)bios_font_address;
     font_ready = font_looks_valid(font_glyphs);
 }
 
@@ -412,7 +412,7 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
 
 static void present_vbe(void) {
     volatile u8 *framebuffer =
-        (volatile u8 *)(u64)video_framebuffer_address;
+        (volatile u8 *)(u32)video_framebuffer_address;
     const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
     u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
     u16 y;
@@ -462,7 +462,7 @@ void gfx_show(void) {
 static void fill_bytes(u8 *target, u32 length, u8 color) {
     const u32 packed = (u32)color * 0x01010101u;
 
-    while (length != 0u && ((u64)target & 3u) != 0u) {
+    while (length != 0u && ((u32)target & 3u) != 0u) {
         *target++ = color;
         --length;
     }

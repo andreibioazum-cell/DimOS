@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 try:
-    from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
-    from unicorn.x86_const import UC_X86_REG_RIP, UC_X86_REG_RSP
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
+    from unicorn.x86_const import UC_X86_REG_EIP, UC_X86_REG_ESP
     from PIL import Image
 except ModuleNotFoundError:
     # --build only needs the host compiler and linker. Keep that useful in
@@ -43,7 +43,7 @@ FONT_TTF_AREA = 0x00400000   # the kernel copies FONT.TTF here (font_ttf.c)
 RAM_DISK = 0x00500000
 
 CFLAGS = [
-    "gcc", "-m64", "-march=x86-64", "-std=c11", "-O2",
+    "gcc", "-m32", "-march=i686", "-std=c11", "-Os",
     "-Wall", "-Wextra", "-Wpedantic", "-Werror",
     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie",
     "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
@@ -84,7 +84,7 @@ def build():
         objects.append(obj)
 
     elf = os.path.join(BUILD, "kernel.elf")
-    run(["ld", "-m", "elf_x86_64", "--build-id=none", "-nostdlib",
+    run(["ld", "-m", "elf_i386", "--build-id=none", "-nostdlib",
          "-e", "kernel_main",
          "-T", os.path.join(REPO, "src", "kernel", "linker.ld"),
          "-Map=" + os.path.join(BUILD, "kernel.map")] + objects + ["-o", elf],
@@ -115,9 +115,10 @@ def symbols(elf):
 class Machine:
     def __init__(self, flat, table):
         self.symbols = table
-        self.mu = Uc(UC_ARCH_X86, UC_MODE_64)
-        # Long mode identity-maps this low physical range. It includes the
-        # 1 MiB BSS window, simulator block, font workspace and RAM disk.
+        self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
+        # Protected mode addresses this low physical range directly. It
+        # includes the 1 MiB BSS window, simulator block, font workspace and
+        # RAM disk.
         self.mu.mem_map(0x00000000, 0x01200000)
 
         with open(flat, "rb") as handle:
@@ -135,9 +136,9 @@ class Machine:
         self.mu.hook_add(UC_HOOK_CODE, self._on_frame,
                          begin=table["gfx_show"], end=table["gfx_show"])
 
-        self.mu.reg_write(UC_X86_REG_RSP, 0x00090000)
-        # kernel.asm would have jumped here after entering x86-64 long mode.
-        self.mu.reg_write(UC_X86_REG_RIP, table["kernel_main"])
+        self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
+        # kernel.asm would have jumped here after entering protected mode.
+        self.mu.reg_write(UC_X86_REG_EIP, table["kernel_main"])
         self.pointer_x = 160
         self.pointer_y = 100
 
@@ -244,7 +245,7 @@ class Machine:
 
     def frames_run(self, count):
         self.wanted_frames = self.frames + count
-        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_RIP), 0,
+        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_EIP), 0,
                           count=200_000_000)
 
     def screenshot(self, name, scale=2):

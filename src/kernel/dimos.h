@@ -1,9 +1,9 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a 64-bit freestanding x86-64 kernel with a graphical desktop. It
- * prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and keeps
- * 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
+ * DimOS is a freestanding i686 protected-mode kernel with a graphical
+ * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
+ * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
  * "DimXfce": a full Xfce style
  * shell in miniature -- a dark top panel with the Whisker menu behind the
  * little mouse logo, a gradient xfdesktop wallpaper, xfwm4 looking window
@@ -16,9 +16,9 @@
  *   - everything is plain C11, freestanding (no libc, no interrupts, no
  *     inline assembly);
  *   - the only assembly in the project is src/bootloader/boot.asm (the 512
- *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery, page
- *     tables and the switch into x86-64 long mode), because those jobs need
- *     CPU instructions and BIOS calls C cannot express;
+ *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery and the
+ *     switch into flat 32-bit protected mode), because those jobs need CPU
+ *     instructions and BIOS calls C cannot express;
  *   - hardware is reached through port_read_byte()/port_write_byte() and
  *     plain pointers, both defined below.
  */

@@ -40,7 +40,7 @@ jobs:
       - name: Validate bootable images
         run: make verify
 
-      - name: Boot x86-64 kernel and VBE in QEMU
+      - name: Boot protected-mode kernel and VBE in QEMU
         run: |
           status=0
           timeout 10s qemu-system-x86_64 \
@@ -55,8 +55,8 @@ jobs:
             -no-shutdown \
             -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
-          grep -F "DIMOS64:LONGMODE" qemu-debug.log
-          grep -F "DIMOS64:READY:VBE:1920x1080x32" qemu-debug.log
+          grep -F "DIMOS:PROTECTED" qemu-debug.log
+          grep -F "DIMOS:READY:VBE:1920x1080x32" qemu-debug.log
 
       - name: Create checksums
         run: |

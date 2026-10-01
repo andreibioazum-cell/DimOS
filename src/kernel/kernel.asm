@@ -25,8 +25,11 @@ VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
 VBE_MODE_LINEAR_BIT equ 0x4000
 VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
 %ifdef DIMOS_EMULATOR
-; Keep the emulator framebuffer small: copying a 800x600 surface is much
-; cheaper than updating a full-HD VBE surface on every frame.
+; This is the *physical* VBE mode for the browser package.  It must match
+; the complete display, rather than merely be a small viewport inside a
+; 1920x1080 mode: v86 exposes the unused area as the blue host background.
+; 800x600 is widely available in VBE 2.0 and needs less than a quarter of
+; the pixels of the PC profile on every redraw.
 VBE_TARGET_WIDTH equ 800
 VBE_TARGET_HEIGHT equ 600
 %else

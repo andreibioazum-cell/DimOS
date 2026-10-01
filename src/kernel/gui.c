@@ -1324,10 +1324,12 @@ void gui_run(void) {
     u64 next_frame;
 
     /* The profile is selected at build time, so boot never stops at a
-     * device-selection wizard.  Emulator builds render a smaller logical
-     * surface and therefore copy far fewer pixels to the emulated VBE device. */
+     * device-selection wizard.  The emulator image also selects an 800x600
+     * VBE mode in kernel.asm.  Present into that complete physical mode: a
+     * smaller 800x480 viewport would leave blue letterbox bars around DimOS
+     * in v86 and make the OS look like a tiny window inside the emulator. */
 #ifdef DIMOS_EMULATOR
-    gfx_set_output_resolution(800u, 480u);
+    gfx_set_output_resolution(video_width, video_height);
 #endif
     selected_icon = 0u;
     active_application = 0xFFFFu;

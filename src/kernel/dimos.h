@@ -334,16 +334,18 @@ u16 file_system_sector_bytes(void);
 /* font_ttf.c -- a real TrueType font (FONT.TTF on the boot volume)    */
 /* ------------------------------------------------------------------ */
 
-/* Parses FONT.TTF and rasterizes ASCII twice: into an 8x8 one-bit table
- * laid out exactly like the BIOS font, and into an anti-aliased table
- * that keeps one coverage level per pixel. gfx.c draws with the second
- * one, which is what makes the text smooth instead of blocky. */
+/* Parses FONT.TTF into a compatibility 8x8 table and two coverage rasters:
+ * 8x8 for the logical canvas and a native 16x16 raster for sharp VBE text.
+ * The native table is rasterized straight from the outlines, never enlarged
+ * from the tiny glyph bitmap. */
 #define FONT_ALPHA_MAX 16u /* a pixel the outline covers completely */
+#define FONT_NATIVE_GLYPH_PIXELS 16u
 
 u8 font_ttf_load(void);                     /* 1 = the table is ready  */
 u8 font_ttf_build(const u8 *file, u32 size); /* parse an in-memory TTF */
 const u8 *font_ttf_table(void);             /* 128 glyphs * 8 bytes    */
 const u8 *font_ttf_alpha_table(void);       /* 128 glyphs * 64 levels  */
+const u8 *font_ttf_native_alpha_table(void); /* 128 glyphs * 16 * 16 */
 
 
 /* ------------------------------------------------------------------ */

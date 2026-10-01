@@ -314,6 +314,7 @@ u8 gfx_current_theme(void) {
 
 static const u8 *font_glyphs;       /* one bit per pixel (BIOS layout)  */
 static const u8 *font_levels;       /* 64 coverage levels per glyph     */
+static const u8 *font_native_levels; /* 16x16 coverage levels for VBE   */
 static u8 font_ready;
 
 /* The BIOS font is only usable if it really looks like a font: the space is
@@ -366,21 +367,38 @@ static void font_init(void) {
     if (font_ttf_load() != 0u) {
         font_glyphs = font_ttf_table();
         font_levels = font_ttf_alpha_table();
+        font_native_levels = font_ttf_native_alpha_table();
         font_ready = 1u;
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
     font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_levels = (const u8 *)0;
+    font_native_levels = (const u8 *)0;
     font_ready = font_looks_valid(font_glyphs);
 }
 
 static u8 high_text_active(void) {
     return (u8)(video_backend == VIDEO_BACKEND_VBE &&
-                video_bits_per_pixel == 32u && render_width >= 480u &&
-                render_height >= 300u);
+                (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u) &&
+                render_width >= 480u && render_height >= 300u);
+}
+
+static u8 high_text_native(void) {
+    return (u8)(font_native_levels != (const u8 *)0);
+}
+
+static u8 high_text_glyph_pixels(void) {
+    return (high_text_native() != 0u) ? FONT_NATIVE_GLYPH_PIXELS : 8u;
 }
 
 static u8 high_text_scale(void) {
+    /* The 16px TTF raster is already the final size in v86. On a Full-HD
+     * PC display it may be doubled once, retaining its antialiased contour
+     * without the coarse 8px source pixels the old 3x path showed. */
+    if (high_text_native() != 0u) {
+        return (render_width >= 1280u) ? 2u : 1u;
+    }
     if (render_width >= 1280u) {
         return 3u;
     }
@@ -391,19 +409,22 @@ static u8 high_text_scale(void) {
 }
 
 static u8 high_text_alpha(char character, u8 row, u8 column) {
+    if (character < 32 || character > 126) {
+        character = '?';
+    }
+    if (font_native_levels != (const u8 *)0) {
+        return font_native_levels[(u32)(u8)character *
+                                  FONT_NATIVE_GLYPH_PIXELS * FONT_NATIVE_GLYPH_PIXELS +
+                                  (u16)row * FONT_NATIVE_GLYPH_PIXELS + column];
+    }
     if (font_ready == 0u) {
         return (u8)((row == 0u || row == 7u || column == 0u || column == 7u)
                         ? FONT_ALPHA_MAX : 0u);
-    }
-    if (character < 32 || character > 126) {
-        character = '?';
     }
     if (font_levels != (const u8 *)0) {
         const u8 alpha = font_levels[(u16)((u8)character * 64u +
                                           row * 8u + column)];
 
-        /* The source glyph is only 8x8. Lift hairline coverage a little
-         * when it is enlarged so it remains readable in a scaled preview. */
         return (u8)(alpha != 0u && alpha < 6u ? 6u : alpha);
     }
     return (u8)((font_glyphs[(u16)(u8)character * 8u + row] &
@@ -428,27 +449,51 @@ static u32 high_text_blend(u32 background, u8 color, u8 alpha) {
     return ((u32)red << 16u) | ((u32)green << 8u) | (u32)blue;
 }
 
-static void high_text_restore_pixel(volatile u32 *framebuffer, u16 x, u16 y) {
+static u16 high_text_blend_rgb565(u16 background, u8 color, u8 alpha) {
+    const Color ink = color_of(color);
+    const u8 back_red = (u8)(((background >> 11u) & 0x1Fu) * 255u / 31u);
+    const u8 back_green = (u8)(((background >> 5u) & 0x3Fu) * 255u / 63u);
+    const u8 back_blue = (u8)((background & 0x1Fu) * 255u / 31u);
+    const u16 red = (u16)(((u32)ink.red * alpha +
+                           (u32)back_red * (FONT_ALPHA_MAX - alpha)) /
+                          FONT_ALPHA_MAX);
+    const u16 green = (u16)(((u32)ink.green * alpha +
+                             (u32)back_green * (FONT_ALPHA_MAX - alpha)) /
+                            FONT_ALPHA_MAX);
+    const u16 blue = (u16)(((u32)ink.blue * alpha +
+                            (u32)back_blue * (FONT_ALPHA_MAX - alpha)) /
+                           FONT_ALPHA_MAX);
+
+    return (u16)((red >> 3u) << 11u | (green >> 2u) << 5u | (blue >> 3u));
+}
+
+static void high_text_restore_pixel(volatile u8 *framebuffer, u16 x, u16 y) {
     const u16 logical_x = (u16)(((u32)(x - render_left) * SCREEN_WIDTH) /
                                render_width);
     const u16 logical_y = (u16)(((u32)(y - render_top) * SCREEN_HEIGHT) /
                                 render_height);
     const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
+    volatile u8 *row = framebuffer + (u32)y * video_pitch;
 
-    framebuffer[(u32)y * (video_pitch / 4u) + x] = xrgb8888_color[color];
+    if (video_bits_per_pixel == 32u) {
+        ((volatile u32 *)row)[x] = xrgb8888_color[color];
+    } else {
+        ((volatile u16 *)row)[x] = rgb565_color[color];
+    }
 }
 
 static void high_text_restore(const HighText *commands, u16 count) {
-    volatile u32 *framebuffer;
+    volatile u8 *framebuffer;
     u16 command;
 
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
         const u8 scale = high_text_scale();
+        const u8 glyph_pixels = high_text_glyph_pixels();
         s32 base_x = (s32)render_left +
                      (s32)item->x * render_width / SCREEN_WIDTH;
         s32 base_y = (s32)render_top +
@@ -462,13 +507,14 @@ static void high_text_restore(const HighText *commands, u16 count) {
             u16 row;
             u16 column;
 
-            for (row = 0u; row < 8u * scale; ++row) {
+            for (row = 0u; row < (u16)glyph_pixels * scale; ++row) {
                 const u16 y = (u16)(base_y + row);
                 if (y >= video_height) {
                     continue;
                 }
-                for (column = 0u; column < 8u * scale; ++column) {
-                    const u16 x = (u16)(base_x + character * 8u * scale + column);
+                for (column = 0u; column < (u16)glyph_pixels * scale; ++column) {
+                    const u16 x = (u16)(base_x +
+                        character * glyph_pixels * scale + column);
                     if (x < video_width) {
                         high_text_restore_pixel(framebuffer, x, y);
                     }
@@ -539,16 +585,17 @@ static u8 high_text_background_changed(void) {
 }
 
 static void high_text_draw(void) {
-    volatile u32 *framebuffer;
+    volatile u8 *framebuffer;
     u16 command;
 
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
         const u8 scale = high_text_scale();
+        const u8 glyph_pixels = high_text_glyph_pixels();
         const s32 base_x = (s32)render_left +
                            (s32)item->x * render_width / SCREEN_WIDTH;
         const s32 base_y = (s32)render_top +
@@ -562,8 +609,8 @@ static void high_text_draw(void) {
             u8 row;
             u8 column;
 
-            for (row = 0u; row < 8u; ++row) {
-                for (column = 0u; column < 8u; ++column) {
+            for (row = 0u; row < glyph_pixels; ++row) {
+                for (column = 0u; column < glyph_pixels; ++column) {
                     const u8 alpha = high_text_alpha(item->text[character], row, column);
                     u8 dy;
 
@@ -579,15 +626,21 @@ static void high_text_draw(void) {
                         }
                         for (dx = 0u; dx < scale; ++dx) {
                             const u16 x = (u16)(base_x +
-                                character * 8u * scale +
+                                character * glyph_pixels * scale +
                                 column * scale + dx);
-                            volatile u32 *pixel;
+                            volatile u8 *pixel_row;
 
                             if (x >= video_width) {
                                 continue;
                             }
-                            pixel = framebuffer + (u32)y * (video_pitch / 4u) + x;
-                            *pixel = high_text_blend(*pixel, item->color, alpha);
+                            pixel_row = framebuffer + (u32)y * video_pitch;
+                            if (video_bits_per_pixel == 32u) {
+                                volatile u32 *pixel = (volatile u32 *)pixel_row + x;
+                                *pixel = high_text_blend(*pixel, item->color, alpha);
+                            } else {
+                                volatile u16 *pixel = (volatile u16 *)pixel_row + x;
+                                *pixel = high_text_blend_rgb565(*pixel, item->color, alpha);
+                            }
                         }
                     }
                 }

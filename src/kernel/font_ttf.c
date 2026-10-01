@@ -11,8 +11,8 @@
  *      composite glyphs by recursing into their parts;
  *   4. the quadratic bezier outlines are flattened into line segments
  *      and filled with the non-zero winding rule on a 4x4 supersampled
- *      grid, giving each of the 95 printable ASCII characters an 8x8
- *      bitmap in the exact format gfx.c draws with.
+ *      grid, giving each printable ASCII character both an 8x8 compatibility
+ *      bitmap and a native 16x16 VBE coverage raster.
  *
  * Everything is 32 bit integer math (26.6 fixed point on the pixel
  * grid): no floats, no libc, no allocations. The file and the scratch
@@ -45,19 +45,26 @@ u8 *font_ttf_work_area;
 /* Rasterizer geometry                                                 */
 /* ------------------------------------------------------------------ */
 
-/* Every glyph cell is 8x8 pixels, each pixel is judged from a 4x4 block
- * of samples, and sample coordinates carry 6 fraction bits (26.6). */
-#define SAMPLES_PER_PIXEL 8
-#define GRID (8 * SAMPLES_PER_PIXEL)
+/* The desktop's logical canvas still needs an 8x8 compatibility font, but
+ * the VBE compositor has a second native 16x16 raster. It is generated from
+ * the same TrueType outlines, not enlarged from the 8x8 bitmap. Therefore
+ * text at 640x480 has smooth, crisp curves instead of square pixels or a
+ * blurred interpolation.
+ *
+ * Both rasters use a 64x64 sampling grid. The compatibility cell has 8x8
+ * output pixels with 8x8 samples each; the native cell has 16x16 output
+ * pixels with 4x4 samples each. Equal work at boot, much better output. */
+#define FONT_COMPAT_PIXELS 8u
+#define FONT_NATIVE_PIXELS 16u
+#define FONT_MAX_PIXELS FONT_NATIVE_PIXELS
+#define GRID 64
 #define FP_SHIFT 6
 #define FP_HALF (1 << (FP_SHIFT - 1))
 #define GRID_FP (GRID << FP_SHIFT)
 
-/* A pixel lights up when at least this many of its 16 samples fall
- * inside the outline. If a whole glyph would vanish that way (a tiny
- * dot, a thin quote), the threshold drops until ink appears. */
-#define SAMPLES_PER_CELL (SAMPLES_PER_PIXEL * SAMPLES_PER_PIXEL)
-#define INK_THRESHOLD (SAMPLES_PER_CELL * 5u / 16u)
+static u8 raster_pixels;
+static u8 raster_samples;
+static u16 raster_cell_samples;
 
 /* Grid coordinates are clamped into this range so that every product
  * in the scanline math stays far away from 32 bit overflow. */
@@ -119,13 +126,13 @@ static u32 cmap_subtable; /* offset of the chosen encoding subtable   */
  *    layout matches the BIOS font table exactly, so the old one-bit
  *    drawing path and the sanity checks below still work.
  *  - glyph_alpha: 128 glyphs, 64 bytes each (one byte per pixel, row by
- *    row), holding how much of that pixel the outline covers, from 0
- *    (nothing) to FONT_ALPHA_MAX (solid ink). This is what gfx.c draws
- *    with: blending those levels between the text colour and whatever is
- *    already on screen is what turns 8x8 blocks into smooth letters
- *    instead of the hard, jagged staircase a one-bit font gives. */
-static u8 glyph_table[128u * 8u];
-static u8 glyph_alpha[128u * 64u];
+ *    row), holding compatibility coverage for the 320x200 canvas.
+ *  - glyph_native_alpha: a separate 16x16 coverage raster for the VBE text
+ *    overlay. It comes directly from the outline, so it is neither pixel
+ *    doubled nor blurred from the small bitmap. */
+static u8 glyph_table[128u * FONT_COMPAT_PIXELS];
+static u8 glyph_alpha[128u * FONT_COMPAT_PIXELS * FONT_COMPAT_PIXELS];
+static u8 glyph_native_alpha[128u * FONT_NATIVE_PIXELS * FONT_NATIVE_PIXELS];
 
 /* Straight area coverage looks washed out at eight pixels, because a
  * stem barely one pixel wide never reaches full ink. This curve lifts
@@ -804,15 +811,21 @@ static void flatten_outline(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Filling: edges -> an 8x8 bitmap                                     */
+/* Filling: outlines -> compatibility and native coverage rasters      */
 /* ------------------------------------------------------------------ */
 
-/* Count how many samples of each pixel are inside the outline, using
- * the non-zero winding rule on GRID x GRID sample points. */
-static void count_coverage(u8 coverage[64]) {
+static void raster_set_cell(u8 pixels) {
+    raster_pixels = pixels;
+    raster_samples = (u8)(GRID / pixels);
+    raster_cell_samples = (u16)raster_samples * raster_samples;
+}
+
+/* Count how many samples of each output pixel are inside the outline,
+ * using the non-zero winding rule on a fixed 64x64 sample grid. */
+static void count_coverage(u8 *coverage) {
     s32 row;
 
-    for (row = 0; row < GRID; ++row) {
+    for (row = 0; row < (s32)GRID; ++row) {
         const s32 sample_y = (row << FP_SHIFT) + FP_HALF;
         s32 crossing_x[MAX_CROSSINGS];
         s8 crossing_dir[MAX_CROSSINGS];
@@ -854,7 +867,7 @@ static void count_coverage(u8 coverage[64]) {
         if (crossings == 0u) {
             continue;
         }
-        for (column = 0; column < GRID; ++column) {
+        for (column = 0; column < (s32)GRID; ++column) {
             const s32 sample_x = (column << FP_SHIFT) + FP_HALF;
             s32 winding = 0;
 
@@ -864,21 +877,22 @@ static void count_coverage(u8 coverage[64]) {
                 }
             }
             if (winding != 0) {
-                ++coverage[(row / SAMPLES_PER_PIXEL) * 8 +
-                           (column / SAMPLES_PER_PIXEL)];
+                ++coverage[(u16)(row / raster_samples) * raster_pixels +
+                           (u16)(column / raster_samples)];
             }
         }
     }
 }
 
 /* Coverage counts -> 8 row bytes, using the highest threshold that
- * still leaves the glyph visible. */
-static void coverage_to_rows(const u8 coverage[64], u8 *rows) {
-    u8 threshold = (u8)INK_THRESHOLD;
+ * still leaves a thin compatibility glyph visible. */
+static void coverage_to_rows(const u8 *coverage, u8 *rows) {
+    const u8 threshold_default = (u8)(raster_cell_samples * 5u / 16u);
+    u8 threshold = threshold_default;
     u8 best = 0u;
     u8 cell;
 
-    for (cell = 0u; cell < 64u; ++cell) {
+    for (cell = 0u; cell < FONT_COMPAT_PIXELS * FONT_COMPAT_PIXELS; ++cell) {
         if (coverage[cell] > best) {
             best = coverage[cell];
         }
@@ -890,9 +904,10 @@ static void coverage_to_rows(const u8 coverage[64], u8 *rows) {
         threshold = best; /* thin marks stay visible */
     }
 
-    for (cell = 0u; cell < 64u; ++cell) {
+    for (cell = 0u; cell < FONT_COMPAT_PIXELS * FONT_COMPAT_PIXELS; ++cell) {
         if (coverage[cell] >= threshold) {
-            rows[cell / 8u] |= (u8)(0x80u >> (cell % 8u));
+            rows[cell / FONT_COMPAT_PIXELS] |=
+                (u8)(0x80u >> (cell % FONT_COMPAT_PIXELS));
         }
     }
 }
@@ -956,9 +971,9 @@ static u8 measure_bottom(u16 code, s32 *bottom) {
     return 1u;
 }
 
-/* Choose the font-units -> pixel-grid scale from real glyphs, the way
- * classic 8x8 fonts are drawn: capitals fill rows 0..6, the baseline
- * sits on the row 6/7 boundary and descenders dip into row 7. */
+/* Choose the font-units -> pixel-grid scale from real glyphs. The native
+ * 16x16 raster keeps a one-pixel breathing room around the cap height, while
+ * the compatibility raster preserves the old 8x8 metrics. */
 static void choose_scale(void) {
     static const char cap_samples[] = "HEZAMX0";
     static const char descender_samples[] = "gpqyj";
@@ -988,9 +1003,10 @@ static void choose_scale(void) {
         descender = -(s32)units_per_em;
     }
 
-    /* Capitals should span 7 pixels -- unless the descender would then
-     * fall off the cell, in which case everything shrinks a little. */
-    scale_y_num = 7 * SAMPLES_PER_PIXEL << FP_SHIFT;
+    /* Capitals should fill the cell without touching its bottom edge --
+     * unless the descender would fall off, in which case everything shrinks
+     * to the fixed 64x64 sample grid. */
+    scale_y_num = (s32)(raster_pixels - 1u) * raster_samples << FP_SHIFT;
     scale_y_den = cap_top;
     span = cap_top - descender;
     if (span * scale_y_num > GRID_FP * scale_y_den) {
@@ -1000,25 +1016,30 @@ static void choose_scale(void) {
     glyph_baseline = (cap_top * scale_y_num) / scale_y_den;
 }
 
-/* Rasterize one character into rows[8] (one bit per pixel) and into
- * alpha[64] (one coverage level per pixel). Failures leave both blank. */
+/* Rasterize one character into the active cell size. rows is only supplied
+ * for the 8x8 compatibility path; alpha always receives one value per output
+ * pixel. Failures leave both destinations blank. */
 static void rasterize_character(u16 code, u8 *rows, u8 *alpha) {
     s32 min_x, max_x, width_fp;
     u16 index;
-    u8 coverage[64];
+    const u16 cells = (u16)raster_pixels * raster_pixels;
+    u8 coverage[FONT_MAX_PIXELS * FONT_MAX_PIXELS];
 
-    for (index = 0u; index < 8u; ++index) {
-        rows[index] = 0u;
+    if (rows != (u8 *)0) {
+        for (index = 0u; index < FONT_COMPAT_PIXELS; ++index) {
+            rows[index] = 0u;
+        }
     }
-    for (index = 0u; index < 64u; ++index) {
+    for (index = 0u; index < cells; ++index) {
         alpha[index] = 0u;
+        coverage[index] = 0u;
     }
     if (decode_character(code) == 0u || WORK->point_count == 0u) {
         return; /* unmapped or empty: stays blank */
     }
 
-    /* Center the glyph horizontally, and squeeze letters wider than
-     * seven pixels so neighbouring characters never touch. */
+    /* Center the glyph horizontally, and squeeze letters wider than the
+     * active cell's inner width so neighbouring characters never touch. */
     min_x = WORK->point_x[0];
     max_x = WORK->point_x[0];
     for (index = 1u; index < WORK->point_count; ++index) {
@@ -1032,27 +1053,25 @@ static void rasterize_character(u16 code, u8 *rows, u8 *alpha) {
     scale_x_num = scale_y_num;
     scale_x_den = scale_y_den;
     width_fp = ((max_x - min_x) * scale_x_num) / scale_x_den;
-    if (width_fp > (7 * SAMPLES_PER_PIXEL << FP_SHIFT)) {
-        scale_x_num = 7 * SAMPLES_PER_PIXEL << FP_SHIFT;
+    if (width_fp > ((s32)(raster_pixels - 1u) * raster_samples << FP_SHIFT)) {
+        scale_x_num = (s32)(raster_pixels - 1u) * raster_samples << FP_SHIFT;
         scale_x_den = max_x - min_x;
-        width_fp = 7 * SAMPLES_PER_PIXEL << FP_SHIFT;
+        width_fp = (s32)(raster_pixels - 1u) * raster_samples << FP_SHIFT;
     }
     glyph_min_x = min_x;
     glyph_x_shift = (GRID_FP - width_fp) / 2;
 
     flatten_outline();
-
-    for (index = 0u; index < 64u; ++index) {
-        coverage[index] = 0u;
-    }
     count_coverage(coverage);
-    coverage_to_rows(coverage, rows);
+    if (rows != (u8 *)0) {
+        coverage_to_rows(coverage, rows);
+    }
 
-    /* The same coverage counts, kept as levels instead of being forced
-     * to black or nothing: this is the anti-aliased glyph. */
-    for (index = 0u; index < 64u; ++index) {
+    /* Keep exact coverage instead of resampling the small bitmap. A short
+     * contrast curve gives a clean antialiased contour without a grey halo. */
+    for (index = 0u; index < cells; ++index) {
         u16 level = (u16)(((u16)coverage[index] * FONT_ALPHA_MAX +
-                           (SAMPLES_PER_CELL / 2u)) / SAMPLES_PER_CELL);
+                           (raster_cell_samples / 2u)) / raster_cell_samples);
 
         if (level > FONT_ALPHA_MAX) {
             level = FONT_ALPHA_MAX;
@@ -1076,13 +1095,16 @@ u8 font_ttf_build(const u8 *file, u32 size) {
     ttf_size = size;
     parse_error = 0u;
 
-    for (code = 0u; code < 128u * 8u; ++code) {
+    for (code = 0u; code < 128u * FONT_COMPAT_PIXELS; ++code) {
         glyph_table[code] = 0u;
     }
     {
         u32 cell;
-        for (cell = 0u; cell < 128u * 64u; ++cell) {
+        for (cell = 0u; cell < 128u * FONT_COMPAT_PIXELS * FONT_COMPAT_PIXELS; ++cell) {
             glyph_alpha[cell] = 0u;
+        }
+        for (cell = 0u; cell < 128u * FONT_NATIVE_PIXELS * FONT_NATIVE_PIXELS; ++cell) {
+            glyph_native_alpha[cell] = 0u;
         }
     }
     if (file == (const u8 *)0 || size < 12u) {
@@ -1098,31 +1120,42 @@ u8 font_ttf_build(const u8 *file, u32 size) {
         return 0u;
     }
 
+    raster_set_cell(FONT_COMPAT_PIXELS);
     choose_scale();
-
     for (code = 0x20u; code <= 0x7Eu; ++code) {
-        rasterize_character(code, &glyph_table[(u32)code * 8u],
-                            &glyph_alpha[(u32)code * 64u]);
+        rasterize_character(code, &glyph_table[(u32)code * FONT_COMPAT_PIXELS],
+                            &glyph_alpha[(u32)code * FONT_COMPAT_PIXELS *
+                                         FONT_COMPAT_PIXELS]);
+    }
+
+    /* This is a second rasterization from the outline, not a scaled copy of
+     * glyph_alpha. Native VBE text is consequently sharp at its final size. */
+    raster_set_cell(FONT_NATIVE_PIXELS);
+    choose_scale();
+    for (code = 0x20u; code <= 0x7Eu; ++code) {
+        rasterize_character(code, (u8 *)0,
+                            &glyph_native_alpha[(u32)code * FONT_NATIVE_PIXELS *
+                                                FONT_NATIVE_PIXELS]);
     }
 
     /* The same sanity rules gfx.c applies to the BIOS font: the space
      * stays empty and every capital letter carries some ink. */
-    for (code = 0u; code < 8u; ++code) {
-        if (glyph_table[(u32)' ' * 8u + code] != 0u) {
+    for (code = 0u; code < FONT_COMPAT_PIXELS; ++code) {
+        if (glyph_table[(u32)' ' * FONT_COMPAT_PIXELS + code] != 0u) {
             return 0u;
         }
     }
     for (code = (u16)'A'; code <= (u16)'Z'; ++code) {
         u8 any = 0u;
         u16 row;
-        for (row = 0u; row < 8u; ++row) {
-            any = (u8)(any | glyph_table[(u32)code * 8u + row]);
+        for (row = 0u; row < FONT_COMPAT_PIXELS; ++row) {
+            any = (u8)(any | glyph_table[(u32)code * FONT_COMPAT_PIXELS + row]);
         }
         if (any == 0u) {
             return 0u;
         }
     }
-    for (code = 0u; code < 128u * 8u; ++code) {
+    for (code = 0u; code < 128u * FONT_COMPAT_PIXELS; ++code) {
         u8 bits = glyph_table[code];
         while (bits != 0u) {
             ink += (u32)(bits & 1u);
@@ -1138,6 +1171,10 @@ const u8 *font_ttf_table(void) {
 
 const u8 *font_ttf_alpha_table(void) {
     return glyph_alpha;
+}
+
+const u8 *font_ttf_native_alpha_table(void) {
+    return glyph_native_alpha;
 }
 
 #ifndef DIMOS_HOST_TEST

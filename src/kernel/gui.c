@@ -1322,12 +1322,14 @@ void gui_setup(void) {
 void gui_run(void) {
     Event event;
     u64 next_frame;
+    u8 redraw = 1u;
+    u8 pointer_only = 0u;
+    u8 shown_minute;
 
     /* The profile is selected at build time, so boot never stops at a
-     * device-selection wizard.  The emulator image also selects an 800x600
-     * VBE mode in kernel.asm.  Present into that complete physical mode: a
-     * smaller 800x480 viewport would leave blue letterbox bars around DimOS
-     * in v86 and make the OS look like a tiny window inside the emulator. */
+     * device-selection wizard. The emulator image also selects a 640x480
+     * VBE mode in kernel.asm. Present into that complete physical mode so
+     * there are no blue letterbox bars around DimOS in v86. */
 #ifdef DIMOS_EMULATOR
     gfx_set_output_resolution(video_width, video_height);
 #endif
@@ -1336,6 +1338,7 @@ void gui_run(void) {
     sound_play_startup();
     timer_update();
     next_frame = timer_counter() + FRAME_TIMER_COUNTS;
+    shown_minute = clock_minutes();
 
     for (;;) {
         u16 ticks;
@@ -1346,8 +1349,21 @@ void gui_run(void) {
         input_poll();
         input_advance(ticks);
 
+        /* A hover has no visual state in DimXfce. Coalesce all unpressed
+         * mouse packets into one tiny cursor update, rather than rebuilding
+         * the wallpaper, dock, every icon and all text for each packet. */
+        pointer_only = 0u;
         while (input_next_event(&event) != 0u) {
+            const u8 is_plain_move = (u8)(event.type == EVENT_MOVE &&
+                                          event.buttons == 0u);
+
             handle_event(&event);
+            if (is_plain_move != 0u) {
+                pointer_only = 1u;
+            } else {
+                redraw = 1u;
+                pointer_only = 0u;
+            }
         }
 
         if (active_application != 0xFFFFu && window_rolled == 0u) {
@@ -1355,12 +1371,25 @@ void gui_run(void) {
 
             if (app->update != 0) {
                 app->update((u16)(ticks * TICK_MILLISECONDS));
+                redraw = 1u;
             }
         }
         sound_update(ticks);
 
-        draw_frame();
-        gfx_show();
+        /* The only changing desktop element while idle is the clock. */
+        if (clock_minutes() != shown_minute) {
+            shown_minute = clock_minutes();
+            redraw = 1u;
+        }
+
+        if (redraw != 0u) {
+            draw_frame();
+            gfx_show();
+            redraw = 0u;
+        } else if (pointer_only != 0u) {
+            gfx_draw_pointer(input_pointer_x(), input_pointer_y());
+            gfx_show();
+        }
 
         wait_for_next_frame(&next_frame);
     }

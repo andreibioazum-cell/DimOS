@@ -55,6 +55,18 @@ static u16 render_height;
 static u16 render_left;
 static u16 render_top;
 
+/* The mouse is an overlay, not part of the desktop.  Remember the 7x7 area
+ * below it so a plain mouse move can repair only those pixels rather than
+ * make gui.c compose the entire desktop again.  This matters in browser v86:
+ * the compositor otherwise redraws 64,000 logical pixels for every PS/2
+ * mouse packet. */
+#define POINTER_RADIUS 3
+#define POINTER_DIAMETER (POINTER_RADIUS * 2 + 1)
+static u8 pointer_under[POINTER_DIAMETER * POINTER_DIAMETER];
+static s16 pointer_drawn_x;
+static s16 pointer_drawn_y;
+static u8 pointer_drawn;
+
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
 /* ------------------------------------------------------------------ */
@@ -804,6 +816,9 @@ void gfx_clear(u8 color) {
      * background ready. That ordering prevents labels from flashing while
      * the mouse moves over an otherwise static desktop. */
     high_text_current_count = 0u;
+    /* A complete composition replaces every logical pixel, including the
+     * former cursor area. Do not restore pixels saved from the old frame. */
+    pointer_drawn = 0u;
     fill_bytes(screen, SCREEN_BYTES, color);
 }
 
@@ -1470,13 +1485,65 @@ static void pointer_init(void) {
     }
 }
 
+static void pointer_restore(void) {
+    s16 row;
+    s16 column;
+
+    if (pointer_drawn == 0u) {
+        return;
+    }
+    for (row = -POINTER_RADIUS; row <= POINTER_RADIUS; ++row) {
+        for (column = -POINTER_RADIUS; column <= POINTER_RADIUS; ++column) {
+            const s16 x = (s16)(pointer_drawn_x + column);
+            const s16 y = (s16)(pointer_drawn_y + row);
+            const u16 saved = (u16)((row + POINTER_RADIUS) * POINTER_DIAMETER +
+                                    column + POINTER_RADIUS);
+
+            if (x >= 0 && y >= 0 && (u16)x < SCREEN_WIDTH &&
+                (u16)y < SCREEN_HEIGHT) {
+                screen[(u32)(u16)y * SCREEN_WIDTH + (u16)x] = pointer_under[saved];
+            }
+        }
+    }
+    pointer_drawn = 0u;
+}
+
 void gfx_draw_pointer(s16 x, s16 y) {
-    /* A small, opaque crosshair is cheaper and much clearer than the old
-     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
-     * VBE).  x/y are the pointer centre, so the mark stays under the cursor. */
+    s16 row;
+    s16 column;
     s16 offset;
 
-    for (offset = -3; offset <= 3; ++offset) {
+    /* A small, opaque crosshair is cheaper and much clearer than the old
+     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
+     * VBE). x/y are the pointer centre, so the mark stays under the cursor.
+     * Restore the old 7x7 patch first: this keeps a mouse-only update dirty
+     * by a few logical pixels instead of requiring a full GUI redraw. */
+    if (pointer_drawn != 0u && pointer_drawn_x == x && pointer_drawn_y == y) {
+        return;
+    }
+    pointer_restore();
+
+    for (row = -POINTER_RADIUS; row <= POINTER_RADIUS; ++row) {
+        for (column = -POINTER_RADIUS; column <= POINTER_RADIUS; ++column) {
+            const s16 sample_x = (s16)(x + column);
+            const s16 sample_y = (s16)(y + row);
+            const u16 saved = (u16)((row + POINTER_RADIUS) * POINTER_DIAMETER +
+                                    column + POINTER_RADIUS);
+
+            if (sample_x >= 0 && sample_y >= 0 &&
+                (u16)sample_x < SCREEN_WIDTH && (u16)sample_y < SCREEN_HEIGHT) {
+                pointer_under[saved] = screen[(u32)(u16)sample_y * SCREEN_WIDTH +
+                                              (u16)sample_x];
+            } else {
+                pointer_under[saved] = COLOR_BLACK;
+            }
+        }
+    }
+    pointer_drawn_x = x;
+    pointer_drawn_y = y;
+    pointer_drawn = 1u;
+
+    for (offset = -POINTER_RADIUS; offset <= POINTER_RADIUS; ++offset) {
         gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
         gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
     }

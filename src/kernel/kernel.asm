@@ -28,10 +28,10 @@ VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
 ; This is the *physical* VBE mode for the browser package.  It must match
 ; the complete display, rather than merely be a small viewport inside a
 ; 1920x1080 mode: v86 exposes the unused area as the blue host background.
-; 800x600 is widely available in VBE 2.0 and needs less than a quarter of
-; the pixels of the PC profile on every redraw.
-VBE_TARGET_WIDTH equ 800
-VBE_TARGET_HEIGHT equ 600
+; 640x480 is available on conservative VBE BIOSes and cuts the browser's
+; framebuffer traffic to less than fifteen percent of the PC profile.
+VBE_TARGET_WIDTH equ 640
+VBE_TARGET_HEIGHT equ 480
 %else
 VBE_TARGET_WIDTH equ 1920
 VBE_TARGET_HEIGHT equ 1080

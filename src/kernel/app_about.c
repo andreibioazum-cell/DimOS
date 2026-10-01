@@ -59,7 +59,7 @@ static void about_video_value(char *value, u16 capacity) {
     }
 
     /* Do not call every non-Full-HD VBE mode a fallback.  In particular, the
-     * v86 image intentionally boots a real 800x600 physical VBE mode. */
+     * v86 image intentionally boots a real 640x480 physical VBE mode. */
     text_append(value, "VBE GPU ", capacity);
     text_append_number(value, video_width, capacity);
     text_append_character(value, 'x', capacity);

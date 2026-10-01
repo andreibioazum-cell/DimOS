@@ -32,47 +32,50 @@ jobs:
             mtools \
             nasm \
             qemu-system-x86 \
-            xorriso
+            xorriso \
+            zip
 
-      - name: Build bootable images
-        run: make iso
+      - name: Build PC profile
+        run: |
+          make clean
+          make iso
+          mkdir -p release/PC
+          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/PC/
 
-      - name: Validate bootable images
+      - name: Validate PC profile
         run: make verify
 
-      - name: Boot protected-mode kernel and VBE in QEMU
+      - name: Build emulator profile
+        run: |
+          make clean
+          KERNEL_CFLAGS=-DDIMOS_EMULATOR make iso
+          mkdir -p release/Emulator
+          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/Emulator/
+
+      - name: Validate emulator profile
+        run: make verify
+
+      - name: Boot PC profile in QEMU
         run: |
           status=0
           timeout 10s qemu-system-x86_64 \
-            -machine pc,accel=tcg \
-            -m 32M \
-            -drive file=disk_img/dimos.hdd,format=raw,if=ide \
-            -boot c \
-            -display none \
-            -serial none \
-            -monitor none \
-            -no-reboot \
-            -no-shutdown \
-            -debugcon file:qemu-debug.log || status=$?
+            -machine pc,accel=tcg -m 32M \
+            -drive file=release/PC/dimos.hdd,format=raw,if=ide \
+            -boot c -display none -serial none -monitor none \
+            -no-reboot -no-shutdown -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
           grep -F "DIMOS:PROTECTED" qemu-debug.log
           grep -F "DIMOS:READY:VBE:1920x1080x32" qemu-debug.log
 
-      - name: Create checksums
+      - name: Create DimOS zip package
         run: |
-          cd disk_img
-          sha256sum dimos.iso dimos.img dimos.hdd > SHA256SUMS
+          (cd release && zip -qr "../DimOS-${{ github.sha }}.zip" PC Emulator)
 
       - name: Upload DimOS package
         uses: actions/upload-artifact@v6
         with:
           name: DimOS-${{ github.sha }}
-          path: |
-            disk_img/dimos.iso
-            disk_img/dimos.img
-            disk_img/dimos.hdd
-            disk_img/SHA256SUMS
-            README.md
+          path: DimOS-${{ github.sha }}.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

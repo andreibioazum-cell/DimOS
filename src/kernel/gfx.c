@@ -741,6 +741,46 @@ void gfx_set_output_resolution(u16 width, u16 height) {
     }
 }
 
+#ifdef DIMOS_EMULATOR
+/* Scale2x chooses a neighbouring colour only when the four surrounding
+ * logical pixels form an edge. Flat surfaces remain flat and there is no
+ * colour averaging, so the browser image loses staircase pixels without
+ * acquiring the soft, blurry halo of bilinear scaling. */
+static u8 scale2x_color(u16 x, u16 y, u8 side_x, u8 side_y) {
+    const u16 left_x = (x == 0u) ? 0u : (u16)(x - 1u);
+    const u16 right_x = (x + 1u < SCREEN_WIDTH) ? (u16)(x + 1u) : x;
+    const u16 top_y = (y == 0u) ? 0u : (u16)(y - 1u);
+    const u16 bottom_y = (y + 1u < SCREEN_HEIGHT) ? (u16)(y + 1u) : y;
+    const u8 above = screen[(u32)top_y * SCREEN_WIDTH + x];
+    const u8 left = screen[(u32)y * SCREEN_WIDTH + left_x];
+    const u8 center = screen[(u32)y * SCREEN_WIDTH + x];
+    const u8 right = screen[(u32)y * SCREEN_WIDTH + right_x];
+    const u8 below = screen[(u32)bottom_y * SCREEN_WIDTH + x];
+
+    /* The third physical row of a 2.4x vertical scale stays the source
+     * colour; the first and last rows use the crisp Scale2x edge choices. */
+    if (side_y == 1u) {
+        return center;
+    }
+    if (side_y == 0u) {
+        if (side_x == 0u && above == left && above != right && left != below) {
+            return left;
+        }
+        if (side_x != 0u && above == right && above != left && right != below) {
+            return right;
+        }
+    } else {
+        if (side_x == 0u && left == below && left != above && below != right) {
+            return left;
+        }
+        if (side_x != 0u && below == right && left != below && above != right) {
+            return right;
+        }
+    }
+    return center;
+}
+#endif
+
 static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
                                      u8 color) {
     const u16 left = vbe_x[x];
@@ -748,6 +788,35 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
     const u16 top = vbe_y[y];
     const u16 bottom = vbe_y[y + 1u];
     u16 output_y;
+
+#ifdef DIMOS_EMULATOR
+    const u16 physical_width = (u16)(right - left);
+    const u16 physical_height = (u16)(bottom - top);
+
+    /* The emulator always selects physical 640x480. This is exactly 2x in
+     * width and 2/3x in height, the shape Scale2x needs for sharp edges. */
+    if (physical_width == 2u && physical_height >= 2u && physical_height <= 3u) {
+        for (output_y = top; output_y < bottom; ++output_y) {
+            const u8 side_y = (output_y == top) ? 0u :
+                              ((output_y + 1u == bottom) ? 2u : 1u);
+            const u8 left_color = scale2x_color(x, y, 0u, side_y);
+            const u8 right_color = scale2x_color(x, y, 1u, side_y);
+
+            if (video_bits_per_pixel == 32u) {
+                volatile u32 *pixel = (volatile u32 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                pixel[0] = xrgb8888_color[left_color];
+                pixel[1] = xrgb8888_color[right_color];
+            } else {
+                volatile u16 *pixel = (volatile u16 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                pixel[0] = rgb565_color[left_color];
+                pixel[1] = rgb565_color[right_color];
+            }
+        }
+        return;
+    }
+#endif
 
     if (video_bits_per_pixel == 32u) {
         const u32 direct_color = xrgb8888_color[color];
@@ -775,6 +844,31 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
         }
     }
 }
+
+#ifdef DIMOS_EMULATOR
+/* A Scale2x pixel also depends on its eight neighbours. Repaint their output
+ * cells after a dirty change; the shadow remains a source-canvas shadow, so
+ * this does not turn the presenter into a full-screen copy. */
+static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y) {
+    s16 neighbor_y;
+
+    for (neighbor_y = (s16)y - 1; neighbor_y <= (s16)y + 1; ++neighbor_y) {
+        s16 neighbor_x;
+
+        if (neighbor_y < 0 || (u16)neighbor_y >= SCREEN_HEIGHT) {
+            continue;
+        }
+        for (neighbor_x = (s16)x - 1; neighbor_x <= (s16)x + 1; ++neighbor_x) {
+            if (neighbor_x < 0 || (u16)neighbor_x >= SCREEN_WIDTH) {
+                continue;
+            }
+            present_vbe_pixel(framebuffer, (u16)neighbor_x, (u16)neighbor_y,
+                              screen[(u32)(u16)neighbor_y * SCREEN_WIDTH +
+                                     (u16)neighbor_x]);
+        }
+    }
+}
+#endif
 
 static void present_vbe(void) {
     volatile u8 *framebuffer =
@@ -804,7 +898,15 @@ static void present_vbe(void) {
                 const u8 color = source[x];
 
                 if (first_present != 0u || shadow[x] != color) {
+#ifdef DIMOS_EMULATOR
+                    if (first_present == 0u) {
+                        present_vbe_edge_neighborhood(framebuffer, x, y);
+                    } else {
+                        present_vbe_pixel(framebuffer, x, y, color);
+                    }
+#else
                     present_vbe_pixel(framebuffer, x, y, color);
+#endif
                     shadow[x] = color;
                 }
             }

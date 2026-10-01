@@ -24,8 +24,15 @@ DATA_SELECTOR equ 0x10
 VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
 VBE_MODE_LINEAR_BIT equ 0x4000
 VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
-VBE_HD_WIDTH equ 1920
-VBE_HD_HEIGHT equ 1080
+%ifdef DIMOS_EMULATOR
+; Keep the emulator framebuffer small: copying a 800x600 surface is much
+; cheaper than updating a full-HD VBE surface on every frame.
+VBE_TARGET_WIDTH equ 800
+VBE_TARGET_HEIGHT equ 600
+%else
+VBE_TARGET_WIDTH equ 1920
+VBE_TARGET_HEIGHT equ 1080
+%endif
 
 [BITS 16]
 global kernel_entry
@@ -99,9 +106,9 @@ kernel_entry:
     and ax, VBE_REQUIRED_ATTRIBUTES
     cmp ax, VBE_REQUIRED_ATTRIBUTES
     jne .find_hd_mode
-    cmp word [es:di + 18], VBE_HD_WIDTH
+    cmp word [es:di + 18], VBE_TARGET_WIDTH
     jne .find_hd_mode
-    cmp word [es:di + 20], VBE_HD_HEIGHT
+    cmp word [es:di + 20], VBE_TARGET_HEIGHT
     jne .find_hd_mode
     cmp byte [es:di + 25], 32
     jne .find_hd_mode

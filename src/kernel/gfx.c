@@ -1471,24 +1471,14 @@ static void pointer_init(void) {
 }
 
 void gfx_draw_pointer(s16 x, s16 y) {
-    u16 row;
-    u16 column;
+    /* A small, opaque crosshair is cheaper and much clearer than the old
+     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
+     * VBE).  x/y are the pointer centre, so the mark stays under the cursor. */
+    s16 offset;
 
-    for (row = 0u; row < POINTER_HEIGHT; ++row) {
-        for (column = 0u; column < POINTER_WIDTH; ++column) {
-            const u16 cell = (u16)(row * POINTER_WIDTH + column);
-
-            gfx_pixel_blend((s16)(x + (s16)column), (s16)(y + (s16)row),
-                            COLOR_HILITE, pointer_border[cell]);
-        }
-    }
-    for (row = 0u; row < POINTER_HEIGHT; ++row) {
-        for (column = 0u; column < POINTER_WIDTH; ++column) {
-            const u16 cell = (u16)(row * POINTER_WIDTH + column);
-
-            gfx_pixel_blend((s16)(x + (s16)column), (s16)(y + (s16)row),
-                            COLOR_CURSOR, pointer_body[cell]);
-        }
+    for (offset = -3; offset <= 3; ++offset) {
+        gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
+        gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
     }
 }
 

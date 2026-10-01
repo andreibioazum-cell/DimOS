@@ -121,12 +121,12 @@ build_kernel() {
     local objects=()
 
     log_info "Assembling BIOS-to-32-bit protected-mode entry"
-    nasm -f elf32 src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
+    nasm -f elf32 ${KERNEL_ASMFLAGS:-} src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
 
     for source in src/kernel/*.c; do
         objects+=("bin/$(basename "${source%.c}").o")
         "$compiler" \
-            -m32 -march=i686 -std=c11 -Os \
+            -m32 -march=i686 -std=c11 -Os ${KERNEL_CFLAGS:-} \
             -Wall -Wextra -Wpedantic -Werror \
             -ffreestanding -fno-builtin -fno-pic -fno-pie \
             -fno-stack-protector -fno-asynchronous-unwind-tables \

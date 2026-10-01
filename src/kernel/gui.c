@@ -1323,7 +1323,12 @@ void gui_run(void) {
     Event event;
     u64 next_frame;
 
-    gui_setup();
+    /* The profile is selected at build time, so boot never stops at a
+     * device-selection wizard.  Emulator builds render a smaller logical
+     * surface and therefore copy far fewer pixels to the emulated VBE device. */
+#ifdef DIMOS_EMULATOR
+    gfx_set_output_resolution(800u, 480u);
+#endif
     selected_icon = 0u;
     active_application = 0xFFFFu;
     sound_play_startup();

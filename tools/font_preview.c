@@ -3,7 +3,7 @@
  *
  * Compiles the kernel's own TrueType reader (src/kernel/font_ttf.c) as a
  * normal program, feeds it a font file and prints every ASCII glyph as
- * 8x8 blocks of '#' characters -- exactly the pixels the kernel will draw.
+ * a native 16x16 coverage raster -- exactly what the VBE overlay draws.
  *
  * Build and run:
  *     gcc -std=c11 -O2 -Wall -Wextra -DDIMOS_HOST_TEST \
@@ -25,6 +25,7 @@ extern u8 *font_ttf_work_area;
 u8 font_ttf_build(const u8 *file, u32 size);
 const u8 *font_ttf_table(void);
 const u8 *font_ttf_alpha_table(void);
+const u8 *font_ttf_native_alpha_table(void);
 
 /* DimOS does not draw letters as bare on/off pixels: every pixel carries
  * a coverage level from 0 to 16 and is blended into the background, which
@@ -39,18 +40,20 @@ static char shade_character(u8 level) {
     return shades[level / 4u];
 }
 
-static void print_row_of_glyphs(const u8 *levels, const char *text) {
+static void print_row_of_glyphs(const u8 *levels, const char *text, int pixels) {
     size_t count = strlen(text);
     size_t item;
     int row;
 
-    for (row = 0; row < 8; ++row) {
+    for (row = 0; row < pixels; ++row) {
         for (item = 0; item < count; ++item) {
-            const u8 *glyph = levels + (size_t)(u8)text[item] * 64u;
+            const u8 *glyph = levels + (size_t)(u8)text[item] *
+                               (size_t)pixels * (size_t)pixels;
             int column;
 
-            for (column = 0; column < 8; ++column) {
-                putchar(shade_character(glyph[(size_t)row * 8u + (size_t)column]));
+            for (column = 0; column < pixels; ++column) {
+                putchar(shade_character(glyph[(size_t)row * (size_t)pixels +
+                                            (size_t)column]));
             }
             putchar(' ');
         }
@@ -100,7 +103,7 @@ int main(int argc, char **argv) {
     if (argc > 2) {
         int argument;
         for (argument = 2; argument < argc; ++argument) {
-            print_row_of_glyphs(font_ttf_alpha_table(), argv[argument]);
+            print_row_of_glyphs(font_ttf_native_alpha_table(), argv[argument], 16);
         }
     } else {
         static const char *lines[] = {
@@ -111,7 +114,7 @@ int main(int argc, char **argv) {
         };
         size_t line;
         for (line = 0; line < sizeof(lines) / sizeof(lines[0]); ++line) {
-            print_row_of_glyphs(font_ttf_alpha_table(), lines[line]);
+            print_row_of_glyphs(font_ttf_native_alpha_table(), lines[line], 16);
         }
     }
     printf("OK: DimOS will boot with this font.\n");

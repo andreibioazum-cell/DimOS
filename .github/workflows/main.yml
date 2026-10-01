@@ -48,7 +48,7 @@ jobs:
       - name: Build emulator profile
         run: |
           make clean
-          KERNEL_CFLAGS=-DDIMOS_EMULATOR make iso
+          make emulator
           mkdir -p release/Emulator
           cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/Emulator/
 

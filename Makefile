@@ -5,12 +5,21 @@ WARNINGS := -Wall -Wextra -Wpedantic -Werror
 IMAGE_CHECKER := bin/dimos-image-check
 FONT_PREVIEW := bin/dimos-font-preview
 
-.PHONY: all iso tools verify font clean
+.PHONY: all iso emulator tools verify font clean
 
 all: iso
 
 iso: tools
 	./build-linux.sh
+
+# The v86 package needs both halves of the kernel to agree on its profile:
+# C selects the full output area and the real-mode VBE code selects the
+# smaller physical 640x480 mode. Passing the define only to C leaves a tiny
+# viewport inside a 1920x1080 VBE screen.
+emulator: tools
+	KERNEL_CFLAGS="$(strip $(KERNEL_CFLAGS) -DDIMOS_EMULATOR)" \
+	KERNEL_ASMFLAGS="$(strip $(KERNEL_ASMFLAGS) -DDIMOS_EMULATOR)" \
+		./build-linux.sh
 
 tools: $(IMAGE_CHECKER) $(FONT_PREVIEW)
 

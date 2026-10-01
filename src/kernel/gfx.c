@@ -55,6 +55,18 @@ static u16 render_height;
 static u16 render_left;
 static u16 render_top;
 
+/* The mouse is an overlay, not part of the desktop.  Remember the 7x7 area
+ * below it so a plain mouse move can repair only those pixels rather than
+ * make gui.c compose the entire desktop again.  This matters in browser v86:
+ * the compositor otherwise redraws 64,000 logical pixels for every PS/2
+ * mouse packet. */
+#define POINTER_RADIUS 3
+#define POINTER_DIAMETER (POINTER_RADIUS * 2 + 1)
+static u8 pointer_under[POINTER_DIAMETER * POINTER_DIAMETER];
+static s16 pointer_drawn_x;
+static s16 pointer_drawn_y;
+static u8 pointer_drawn;
+
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
 /* ------------------------------------------------------------------ */
@@ -302,6 +314,7 @@ u8 gfx_current_theme(void) {
 
 static const u8 *font_glyphs;       /* one bit per pixel (BIOS layout)  */
 static const u8 *font_levels;       /* 64 coverage levels per glyph     */
+static const u8 *font_native_levels; /* 16x16 coverage levels for VBE   */
 static u8 font_ready;
 
 /* The BIOS font is only usable if it really looks like a font: the space is
@@ -354,21 +367,38 @@ static void font_init(void) {
     if (font_ttf_load() != 0u) {
         font_glyphs = font_ttf_table();
         font_levels = font_ttf_alpha_table();
+        font_native_levels = font_ttf_native_alpha_table();
         font_ready = 1u;
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
     font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_levels = (const u8 *)0;
+    font_native_levels = (const u8 *)0;
     font_ready = font_looks_valid(font_glyphs);
 }
 
 static u8 high_text_active(void) {
     return (u8)(video_backend == VIDEO_BACKEND_VBE &&
-                video_bits_per_pixel == 32u && render_width >= 480u &&
-                render_height >= 300u);
+                (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u) &&
+                render_width >= 480u && render_height >= 300u);
+}
+
+static u8 high_text_native(void) {
+    return (u8)(font_native_levels != (const u8 *)0);
+}
+
+static u8 high_text_glyph_pixels(void) {
+    return (high_text_native() != 0u) ? FONT_NATIVE_GLYPH_PIXELS : 8u;
 }
 
 static u8 high_text_scale(void) {
+    /* The 16px TTF raster is already the final size in v86. On a Full-HD
+     * PC display it may be doubled once, retaining its antialiased contour
+     * without the coarse 8px source pixels the old 3x path showed. */
+    if (high_text_native() != 0u) {
+        return (render_width >= 1280u) ? 2u : 1u;
+    }
     if (render_width >= 1280u) {
         return 3u;
     }
@@ -379,19 +409,22 @@ static u8 high_text_scale(void) {
 }
 
 static u8 high_text_alpha(char character, u8 row, u8 column) {
+    if (character < 32 || character > 126) {
+        character = '?';
+    }
+    if (font_native_levels != (const u8 *)0) {
+        return font_native_levels[(u32)(u8)character *
+                                  FONT_NATIVE_GLYPH_PIXELS * FONT_NATIVE_GLYPH_PIXELS +
+                                  (u16)row * FONT_NATIVE_GLYPH_PIXELS + column];
+    }
     if (font_ready == 0u) {
         return (u8)((row == 0u || row == 7u || column == 0u || column == 7u)
                         ? FONT_ALPHA_MAX : 0u);
-    }
-    if (character < 32 || character > 126) {
-        character = '?';
     }
     if (font_levels != (const u8 *)0) {
         const u8 alpha = font_levels[(u16)((u8)character * 64u +
                                           row * 8u + column)];
 
-        /* The source glyph is only 8x8. Lift hairline coverage a little
-         * when it is enlarged so it remains readable in a scaled preview. */
         return (u8)(alpha != 0u && alpha < 6u ? 6u : alpha);
     }
     return (u8)((font_glyphs[(u16)(u8)character * 8u + row] &
@@ -416,27 +449,51 @@ static u32 high_text_blend(u32 background, u8 color, u8 alpha) {
     return ((u32)red << 16u) | ((u32)green << 8u) | (u32)blue;
 }
 
-static void high_text_restore_pixel(volatile u32 *framebuffer, u16 x, u16 y) {
+static u16 high_text_blend_rgb565(u16 background, u8 color, u8 alpha) {
+    const Color ink = color_of(color);
+    const u8 back_red = (u8)(((background >> 11u) & 0x1Fu) * 255u / 31u);
+    const u8 back_green = (u8)(((background >> 5u) & 0x3Fu) * 255u / 63u);
+    const u8 back_blue = (u8)((background & 0x1Fu) * 255u / 31u);
+    const u16 red = (u16)(((u32)ink.red * alpha +
+                           (u32)back_red * (FONT_ALPHA_MAX - alpha)) /
+                          FONT_ALPHA_MAX);
+    const u16 green = (u16)(((u32)ink.green * alpha +
+                             (u32)back_green * (FONT_ALPHA_MAX - alpha)) /
+                            FONT_ALPHA_MAX);
+    const u16 blue = (u16)(((u32)ink.blue * alpha +
+                            (u32)back_blue * (FONT_ALPHA_MAX - alpha)) /
+                           FONT_ALPHA_MAX);
+
+    return (u16)((red >> 3u) << 11u | (green >> 2u) << 5u | (blue >> 3u));
+}
+
+static void high_text_restore_pixel(volatile u8 *framebuffer, u16 x, u16 y) {
     const u16 logical_x = (u16)(((u32)(x - render_left) * SCREEN_WIDTH) /
                                render_width);
     const u16 logical_y = (u16)(((u32)(y - render_top) * SCREEN_HEIGHT) /
                                 render_height);
     const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
+    volatile u8 *row = framebuffer + (u32)y * video_pitch;
 
-    framebuffer[(u32)y * (video_pitch / 4u) + x] = xrgb8888_color[color];
+    if (video_bits_per_pixel == 32u) {
+        ((volatile u32 *)row)[x] = xrgb8888_color[color];
+    } else {
+        ((volatile u16 *)row)[x] = rgb565_color[color];
+    }
 }
 
 static void high_text_restore(const HighText *commands, u16 count) {
-    volatile u32 *framebuffer;
+    volatile u8 *framebuffer;
     u16 command;
 
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
         const u8 scale = high_text_scale();
+        const u8 glyph_pixels = high_text_glyph_pixels();
         s32 base_x = (s32)render_left +
                      (s32)item->x * render_width / SCREEN_WIDTH;
         s32 base_y = (s32)render_top +
@@ -450,13 +507,14 @@ static void high_text_restore(const HighText *commands, u16 count) {
             u16 row;
             u16 column;
 
-            for (row = 0u; row < 8u * scale; ++row) {
+            for (row = 0u; row < (u16)glyph_pixels * scale; ++row) {
                 const u16 y = (u16)(base_y + row);
                 if (y >= video_height) {
                     continue;
                 }
-                for (column = 0u; column < 8u * scale; ++column) {
-                    const u16 x = (u16)(base_x + character * 8u * scale + column);
+                for (column = 0u; column < (u16)glyph_pixels * scale; ++column) {
+                    const u16 x = (u16)(base_x +
+                        character * glyph_pixels * scale + column);
                     if (x < video_width) {
                         high_text_restore_pixel(framebuffer, x, y);
                     }
@@ -527,16 +585,17 @@ static u8 high_text_background_changed(void) {
 }
 
 static void high_text_draw(void) {
-    volatile u32 *framebuffer;
+    volatile u8 *framebuffer;
     u16 command;
 
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
         const u8 scale = high_text_scale();
+        const u8 glyph_pixels = high_text_glyph_pixels();
         const s32 base_x = (s32)render_left +
                            (s32)item->x * render_width / SCREEN_WIDTH;
         const s32 base_y = (s32)render_top +
@@ -550,8 +609,8 @@ static void high_text_draw(void) {
             u8 row;
             u8 column;
 
-            for (row = 0u; row < 8u; ++row) {
-                for (column = 0u; column < 8u; ++column) {
+            for (row = 0u; row < glyph_pixels; ++row) {
+                for (column = 0u; column < glyph_pixels; ++column) {
                     const u8 alpha = high_text_alpha(item->text[character], row, column);
                     u8 dy;
 
@@ -567,15 +626,21 @@ static void high_text_draw(void) {
                         }
                         for (dx = 0u; dx < scale; ++dx) {
                             const u16 x = (u16)(base_x +
-                                character * 8u * scale +
+                                character * glyph_pixels * scale +
                                 column * scale + dx);
-                            volatile u32 *pixel;
+                            volatile u8 *pixel_row;
 
                             if (x >= video_width) {
                                 continue;
                             }
-                            pixel = framebuffer + (u32)y * (video_pitch / 4u) + x;
-                            *pixel = high_text_blend(*pixel, item->color, alpha);
+                            pixel_row = framebuffer + (u32)y * video_pitch;
+                            if (video_bits_per_pixel == 32u) {
+                                volatile u32 *pixel = (volatile u32 *)pixel_row + x;
+                                *pixel = high_text_blend(*pixel, item->color, alpha);
+                            } else {
+                                volatile u16 *pixel = (volatile u16 *)pixel_row + x;
+                                *pixel = high_text_blend_rgb565(*pixel, item->color, alpha);
+                            }
                         }
                     }
                 }
@@ -676,6 +741,46 @@ void gfx_set_output_resolution(u16 width, u16 height) {
     }
 }
 
+#ifdef DIMOS_EMULATOR
+/* Scale2x chooses a neighbouring colour only when the four surrounding
+ * logical pixels form an edge. Flat surfaces remain flat and there is no
+ * colour averaging, so the browser image loses staircase pixels without
+ * acquiring the soft, blurry halo of bilinear scaling. */
+static u8 scale2x_color(u16 x, u16 y, u8 side_x, u8 side_y) {
+    const u16 left_x = (x == 0u) ? 0u : (u16)(x - 1u);
+    const u16 right_x = (x + 1u < SCREEN_WIDTH) ? (u16)(x + 1u) : x;
+    const u16 top_y = (y == 0u) ? 0u : (u16)(y - 1u);
+    const u16 bottom_y = (y + 1u < SCREEN_HEIGHT) ? (u16)(y + 1u) : y;
+    const u8 above = screen[(u32)top_y * SCREEN_WIDTH + x];
+    const u8 left = screen[(u32)y * SCREEN_WIDTH + left_x];
+    const u8 center = screen[(u32)y * SCREEN_WIDTH + x];
+    const u8 right = screen[(u32)y * SCREEN_WIDTH + right_x];
+    const u8 below = screen[(u32)bottom_y * SCREEN_WIDTH + x];
+
+    /* The third physical row of a 2.4x vertical scale stays the source
+     * colour; the first and last rows use the crisp Scale2x edge choices. */
+    if (side_y == 1u) {
+        return center;
+    }
+    if (side_y == 0u) {
+        if (side_x == 0u && above == left && above != right && left != below) {
+            return left;
+        }
+        if (side_x != 0u && above == right && above != left && right != below) {
+            return right;
+        }
+    } else {
+        if (side_x == 0u && left == below && left != above && below != right) {
+            return left;
+        }
+        if (side_x != 0u && below == right && left != below && above != right) {
+            return right;
+        }
+    }
+    return center;
+}
+#endif
+
 static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
                                      u8 color) {
     const u16 left = vbe_x[x];
@@ -683,6 +788,35 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
     const u16 top = vbe_y[y];
     const u16 bottom = vbe_y[y + 1u];
     u16 output_y;
+
+#ifdef DIMOS_EMULATOR
+    const u16 physical_width = (u16)(right - left);
+    const u16 physical_height = (u16)(bottom - top);
+
+    /* The emulator always selects physical 640x480. This is exactly 2x in
+     * width and 2/3x in height, the shape Scale2x needs for sharp edges. */
+    if (physical_width == 2u && physical_height >= 2u && physical_height <= 3u) {
+        for (output_y = top; output_y < bottom; ++output_y) {
+            const u8 side_y = (output_y == top) ? 0u :
+                              ((output_y + 1u == bottom) ? 2u : 1u);
+            const u8 left_color = scale2x_color(x, y, 0u, side_y);
+            const u8 right_color = scale2x_color(x, y, 1u, side_y);
+
+            if (video_bits_per_pixel == 32u) {
+                volatile u32 *pixel = (volatile u32 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                pixel[0] = xrgb8888_color[left_color];
+                pixel[1] = xrgb8888_color[right_color];
+            } else {
+                volatile u16 *pixel = (volatile u16 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                pixel[0] = rgb565_color[left_color];
+                pixel[1] = rgb565_color[right_color];
+            }
+        }
+        return;
+    }
+#endif
 
     if (video_bits_per_pixel == 32u) {
         const u32 direct_color = xrgb8888_color[color];
@@ -710,6 +844,31 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
         }
     }
 }
+
+#ifdef DIMOS_EMULATOR
+/* A Scale2x pixel also depends on its eight neighbours. Repaint their output
+ * cells after a dirty change; the shadow remains a source-canvas shadow, so
+ * this does not turn the presenter into a full-screen copy. */
+static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y) {
+    s16 neighbor_y;
+
+    for (neighbor_y = (s16)y - 1; neighbor_y <= (s16)y + 1; ++neighbor_y) {
+        s16 neighbor_x;
+
+        if (neighbor_y < 0 || (u16)neighbor_y >= SCREEN_HEIGHT) {
+            continue;
+        }
+        for (neighbor_x = (s16)x - 1; neighbor_x <= (s16)x + 1; ++neighbor_x) {
+            if (neighbor_x < 0 || (u16)neighbor_x >= SCREEN_WIDTH) {
+                continue;
+            }
+            present_vbe_pixel(framebuffer, (u16)neighbor_x, (u16)neighbor_y,
+                              screen[(u32)(u16)neighbor_y * SCREEN_WIDTH +
+                                     (u16)neighbor_x]);
+        }
+    }
+}
+#endif
 
 static void present_vbe(void) {
     volatile u8 *framebuffer =
@@ -739,7 +898,15 @@ static void present_vbe(void) {
                 const u8 color = source[x];
 
                 if (first_present != 0u || shadow[x] != color) {
+#ifdef DIMOS_EMULATOR
+                    if (first_present == 0u) {
+                        present_vbe_edge_neighborhood(framebuffer, x, y);
+                    } else {
+                        present_vbe_pixel(framebuffer, x, y, color);
+                    }
+#else
                     present_vbe_pixel(framebuffer, x, y, color);
+#endif
                     shadow[x] = color;
                 }
             }
@@ -804,6 +971,9 @@ void gfx_clear(u8 color) {
      * background ready. That ordering prevents labels from flashing while
      * the mouse moves over an otherwise static desktop. */
     high_text_current_count = 0u;
+    /* A complete composition replaces every logical pixel, including the
+     * former cursor area. Do not restore pixels saved from the old frame. */
+    pointer_drawn = 0u;
     fill_bytes(screen, SCREEN_BYTES, color);
 }
 
@@ -1470,13 +1640,65 @@ static void pointer_init(void) {
     }
 }
 
+static void pointer_restore(void) {
+    s16 row;
+    s16 column;
+
+    if (pointer_drawn == 0u) {
+        return;
+    }
+    for (row = -POINTER_RADIUS; row <= POINTER_RADIUS; ++row) {
+        for (column = -POINTER_RADIUS; column <= POINTER_RADIUS; ++column) {
+            const s16 x = (s16)(pointer_drawn_x + column);
+            const s16 y = (s16)(pointer_drawn_y + row);
+            const u16 saved = (u16)((row + POINTER_RADIUS) * POINTER_DIAMETER +
+                                    column + POINTER_RADIUS);
+
+            if (x >= 0 && y >= 0 && (u16)x < SCREEN_WIDTH &&
+                (u16)y < SCREEN_HEIGHT) {
+                screen[(u32)(u16)y * SCREEN_WIDTH + (u16)x] = pointer_under[saved];
+            }
+        }
+    }
+    pointer_drawn = 0u;
+}
+
 void gfx_draw_pointer(s16 x, s16 y) {
-    /* A small, opaque crosshair is cheaper and much clearer than the old
-     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
-     * VBE).  x/y are the pointer centre, so the mark stays under the cursor. */
+    s16 row;
+    s16 column;
     s16 offset;
 
-    for (offset = -3; offset <= 3; ++offset) {
+    /* A small, opaque crosshair is cheaper and much clearer than the old
+     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
+     * VBE). x/y are the pointer centre, so the mark stays under the cursor.
+     * Restore the old 7x7 patch first: this keeps a mouse-only update dirty
+     * by a few logical pixels instead of requiring a full GUI redraw. */
+    if (pointer_drawn != 0u && pointer_drawn_x == x && pointer_drawn_y == y) {
+        return;
+    }
+    pointer_restore();
+
+    for (row = -POINTER_RADIUS; row <= POINTER_RADIUS; ++row) {
+        for (column = -POINTER_RADIUS; column <= POINTER_RADIUS; ++column) {
+            const s16 sample_x = (s16)(x + column);
+            const s16 sample_y = (s16)(y + row);
+            const u16 saved = (u16)((row + POINTER_RADIUS) * POINTER_DIAMETER +
+                                    column + POINTER_RADIUS);
+
+            if (sample_x >= 0 && sample_y >= 0 &&
+                (u16)sample_x < SCREEN_WIDTH && (u16)sample_y < SCREEN_HEIGHT) {
+                pointer_under[saved] = screen[(u32)(u16)sample_y * SCREEN_WIDTH +
+                                              (u16)sample_x];
+            } else {
+                pointer_under[saved] = COLOR_BLACK;
+            }
+        }
+    }
+    pointer_drawn_x = x;
+    pointer_drawn_y = y;
+    pointer_drawn = 1u;
+
+    for (offset = -POINTER_RADIUS; offset <= POINTER_RADIUS; ++offset) {
         gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
         gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
     }

@@ -51,6 +51,22 @@ static void about_open(void) {
     /* Nothing to prepare; every number is read while drawing. */
 }
 
+static void about_video_value(char *value, u16 capacity) {
+    value[0] = '\0';
+    if (video_backend != VIDEO_BACKEND_VBE) {
+        text_append(value, "VGA 320x200 fallback", capacity);
+        return;
+    }
+
+    /* Do not call every non-Full-HD VBE mode a fallback.  In particular, the
+     * v86 image intentionally boots a real 640x480 physical VBE mode. */
+    text_append(value, "VBE GPU ", capacity);
+    text_append_number(value, video_width, capacity);
+    text_append_character(value, 'x', capacity);
+    text_append_number(value, video_height, capacity);
+    text_append(value, (video_bits_per_pixel == 32u) ? " XRGB" : " RGB565", capacity);
+}
+
 static void about_draw(void) {
     char value[32];
     s16 y = (s16)(WINDOW_TOP + 3);
@@ -63,12 +79,8 @@ static void about_draw(void) {
     info_line(y, "Shell", "DimXfce am-nyam shell");
     y = (s16)(y + 10);
 
-    info_line(y, "Video",
-              (video_backend == VIDEO_BACKEND_VBE && video_width == 1920u)
-                  ? "VBE GPU 1920x1080 XRGB"
-                  : ((video_backend == VIDEO_BACKEND_VBE)
-                         ? "VBE 640x480 fallback"
-                         : "VGA 320x200 fallback"));
+    about_video_value(value, (u16)sizeof(value));
+    info_line(y, "Video", value);
     y = (s16)(y + 10);
 
     value[0] = '\0';

@@ -148,7 +148,7 @@ static void command_directory(void) {
         if (index == FILE_NOT_FOUND) {
             break;
         }
-        file_system_name(index, line);
+        file_system_name(index, line, (u16)sizeof(line));
         text_pad_right(line, 13u, (u16)sizeof(line));
         text_append_number(line, file_system_size(index), (u16)sizeof(line));
         text_append(line, " bytes", (u16)sizeof(line));

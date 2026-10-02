@@ -251,7 +251,7 @@ else
     wallpaper_profile="1920x1080 PC"
 fi
 require_file "$wallpaper_source"
-mcopy -i "$BOOT_IMAGE" "$wallpaper_source" ::/WALLPAPR.PNG
+mcopy -i "$BOOT_IMAGE" "$wallpaper_source" ::/WALLPAPER.PNG
 wallpaper_size=$(file_size "$wallpaper_source")
 font_size_on_disk=0
 [[ ! -f fonts/font.ttf ]] || font_size_on_disk=$(file_size fonts/font.ttf)

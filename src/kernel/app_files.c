@@ -170,7 +170,7 @@ static void files_draw(void) {
             if (index == FILE_NOT_FOUND) {
                 continue;
             }
-            file_system_name(index, label);
+            file_system_name(index, label, (u16)sizeof(label));
             text_pad_right(label, 13u, (u16)sizeof(label));
             text_append_number(label, file_system_size(index), (u16)sizeof(label));
             text_append(label, " bytes", (u16)sizeof(label));
@@ -279,7 +279,7 @@ static void files_event(const Event *event) {
         return;
     }
     if (event->key == ID_DELETE) {
-        char name[13];
+        char name[32];
 
         if (selected_index == FILE_NOT_FOUND) {
             text_copy(message, "Pick a file first", (u16)sizeof(message));
@@ -290,7 +290,7 @@ static void files_event(const Event *event) {
             sound_alert();
             return;
         }
-        file_system_name(selected_index, name);
+        file_system_name(selected_index, name, (u16)sizeof(name));
         if (file_system_delete(selected_index) != 0u) {
             message[0] = '\0';
             text_append(message, name, (u16)sizeof(message));

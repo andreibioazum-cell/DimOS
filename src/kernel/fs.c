@@ -166,19 +166,82 @@ u16 file_system_visible(u16 slot) {
     return FILE_NOT_FOUND;
 }
 
-/* "KERNEL  BIN" becomes "KERNEL.BIN" in out. */
-void file_system_name(u16 index, char *out) {
+/* Decode the VFAT entries immediately before a short directory entry. FAT
+ * stores each 13-character piece in UTF-16 and writes the pieces backwards;
+ * DimOS' UI is ASCII, so unsupported non-ASCII codepoints become '?'. */
+static u8 long_name(u16 index, char *out, u16 capacity) {
+    static const u8 offsets[13] = {
+        1u, 3u, 5u, 7u, 9u, 14u, 16u, 18u, 20u, 22u, 24u, 28u, 30u
+    };
+    u16 ordinal = 1u;
+    u16 length = 0u;
+
+    if (index == 0u || capacity == 0u) {
+        return 0u;
+    }
+    while (index != 0u) {
+        const u8 *part;
+        u8 part_ordinal;
+        u8 character;
+
+        --index;
+        part = directory_entry(index);
+        if (part[ENTRY_ATTRIBUTES] != ATTRIBUTE_LONG_NAME) {
+            return 0u;
+        }
+        part_ordinal = (u8)(part[ENTRY_NAME] & 0x1Fu);
+        if (part_ordinal != ordinal) {
+            return 0u;
+        }
+        for (character = 0u; character < 13u; ++character) {
+            const u8 low = part[offsets[character]];
+            const u8 high = part[(u8)(offsets[character] + 1u)];
+            const u16 position = (u16)((ordinal - 1u) * 13u + character);
+
+            if ((low == 0u && high == 0u) || (low == 0xFFu && high == 0xFFu)) {
+                if (position < capacity) {
+                    out[position] = '\0';
+                }
+                return 1u;
+            }
+            if (position + 1u >= capacity) {
+                return 0u;
+            }
+            out[position] = (high == 0u && low < 0x80u) ? (char)low : '?';
+            if (position >= length) {
+                length = (u16)(position + 1u);
+            }
+        }
+        if ((part[ENTRY_NAME] & 0x40u) != 0u) {
+            out[length] = '\0';
+            return 1u;
+        }
+        ++ordinal;
+    }
+    return 0u;
+}
+
+/* Prefer a VFAT long name; otherwise "KERNEL  BIN" becomes "KERNEL.BIN". */
+void file_system_name(u16 index, char *out, u16 capacity) {
     const u8 *entry = directory_entry(index);
     u16 position = 0u;
     u8 column;
 
+    if (capacity == 0u) {
+        return;
+    }
     out[0] = '\0';
-    for (column = 0u; column < 8u && entry[column] != ' '; ++column) {
+    if (long_name(index, out, capacity) != 0u) {
+        return;
+    }
+    for (column = 0u; column < 8u && entry[column] != ' ' &&
+         position + 1u < capacity; ++column) {
         out[position++] = (char)entry[column];
     }
-    if (entry[8] != ' ') {
+    if (entry[8] != ' ' && position + 1u < capacity) {
         out[position++] = '.';
-        for (column = 8u; column < 11u && entry[column] != ' '; ++column) {
+        for (column = 8u; column < 11u && entry[column] != ' ' &&
+             position + 1u < capacity; ++column) {
             out[position++] = (char)entry[column];
         }
     }
@@ -210,12 +273,12 @@ u16 file_system_find(const char *name) {
     u16 slot;
 
     for (slot = 0u; slot < visible_count; ++slot) {
-        char candidate[13];
+        char candidate[32];
 
         if (hidden_entry[visible_slot[slot]] != 0u) {
             continue;
         }
-        file_system_name(visible_slot[slot], candidate);
+        file_system_name(visible_slot[slot], candidate, (u16)sizeof(candidate));
         if (text_equal_ignore_case(candidate, name) != 0u) {
             return visible_slot[slot];
         }
@@ -268,9 +331,9 @@ u32 file_system_read(u16 index, u32 offset, void *buffer, u32 length) {
 }
 
 u8 file_system_is_protected(u16 index) {
-    char name[13];
+    char name[32];
 
-    file_system_name(index, name);
+    file_system_name(index, name, (u16)sizeof(name));
     return text_equal_ignore_case(name, "KERNEL.BIN");
 }
 

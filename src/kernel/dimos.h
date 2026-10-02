@@ -331,7 +331,7 @@ u32 ram_disk_sectors(void);
 void file_system_init(void);
 u16 file_system_visible_count(void);
 u16 file_system_visible(u16 slot);      /* directory index of a visible slot */
-void file_system_name(u16 index, char *out);
+void file_system_name(u16 index, char *out, u16 capacity);
 u32 file_system_size(u16 index);
 u16 file_system_find(const char *name);
 u32 file_system_read(u16 index, u32 offset, void *buffer, u32 length);

@@ -6,14 +6,14 @@
  * PNG profile: RGB8, non-interlaced, filter 0 and fixed-Huffman DEFLATE.  The
  * build-time generator emits exactly that profile.  Decoding is streaming:
  * only a 512-byte file cache and DEFLATE's required 32 KiB history exist in
- * kernel memory, while RGB565 pixels are written directly to the native-size
- * cache at 16 MiB.  No source or decoded scanline buffer is allocated.
+ * kernel memory, while native XRGB pixels are written directly to a cache at
+ * 16 MiB. No source or decoded scanline buffer is allocated.
  */
 
 #include "dimos.h"
 
 #define WALLPAPER_FILE "WALLPAPER.PNG"
-#define WALLPAPER_MEMORY ((u16 *)0x01000000u)
+#define WALLPAPER_MEMORY ((u32 *)0x01000000u)
 #define INPUT_CACHE_BYTES 512u
 #define DEFLATE_WINDOW_BYTES 32768u
 
@@ -45,6 +45,7 @@ typedef struct {
     u32 row_position;
     u16 x;
     u16 y;
+    u8 component;
     u8 red;
     u8 green;
 } PixelOutput;
@@ -158,27 +159,28 @@ static u8 fixed_symbol(BitInput *bits, u16 *symbol) {
 }
 
 static u8 output_byte(PixelOutput *output, u8 value) {
-    const u32 component = output->row_position;
-
     if (output->produced >= output->expected) {
         return 0u;
     }
     deflate_window[output->produced & (DEFLATE_WINDOW_BYTES - 1u)] = value;
     ++output->produced;
 
-    if (component == 0u) {
+    if (output->row_position == 0u) {
         if (value != 0u) { /* only PNG filter None is needed */
             return 0u;
         }
-    } else if ((component - 1u) % 3u == 0u) {
+        output->component = 0u;
+    } else if (output->component == 0u) {
         output->red = value;
-    } else if ((component - 1u) % 3u == 1u) {
+        output->component = 1u;
+    } else if (output->component == 1u) {
         output->green = value;
+        output->component = 2u;
     } else {
         WALLPAPER_MEMORY[(u32)output->y * wallpaper_width + output->x] =
-            (u16)(((u16)(output->red >> 3u) << 11u) |
-                  ((u16)(output->green >> 2u) << 5u) | (u16)(value >> 3u));
+            ((u32)output->red << 16u) | ((u32)output->green << 8u) | value;
         ++output->x;
+        output->component = 0u;
     }
 
     ++output->row_position;
@@ -350,6 +352,7 @@ u8 wallpaper_load(void) {
         output.row_position = 0u;
         output.x = 0u;
         output.y = 0u;
+        output.component = 0u;
         output.red = 0u;
         output.green = 0u;
         if (inflate_fixed(&bits, &output) == 0u) {
@@ -364,9 +367,16 @@ u8 wallpaper_ready(void) {
     return wallpaper_loaded;
 }
 
-u16 wallpaper_pixel(u16 x, u16 y) {
+u32 wallpaper_pixel(u16 x, u16 y) {
     if (wallpaper_loaded == 0u || x >= wallpaper_width || y >= wallpaper_height) {
         return 0u;
     }
     return WALLPAPER_MEMORY[(u32)y * wallpaper_width + x];
+}
+
+const u32 *wallpaper_row(u16 y) {
+    if (wallpaper_loaded == 0u || y >= wallpaper_height) {
+        return (const u32 *)0;
+    }
+    return WALLPAPER_MEMORY + (u32)y * wallpaper_width;
 }

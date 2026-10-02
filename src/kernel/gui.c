@@ -327,10 +327,13 @@ static void draw_window_chrome(const char *title, u8 interior) {
     gfx_fill(frame_x, frame_y, frame_width, frame_height,
              (interior != 0u) ? COLOR_FACE : COLOR_SELECTION);
     gfx_outline(frame_x, frame_y, frame_width, frame_height, COLOR_DEEP);
-    gfx_gradient_vertical((s16)(frame_x + 1), (s16)(frame_y + 1),
-                          (s16)(frame_width - 2), 10,
-                          title_top_color, COLOR_TITLE_BAR);
-    gfx_text((s16)(frame_x + 5), (s16)(frame_y + 2), title, COLOR_WHITE);
+    /* A flat title is cheaper to repaint and avoids the old striped gradient.
+     * Full-screen windows use the neutral face, not a blue bar. */
+    gfx_fill((s16)(frame_x + 1), (s16)(frame_y + 1),
+             (s16)(frame_width - 2), 10,
+             (window_maximized != 0u) ? COLOR_FACE : title_top_color);
+    gfx_text((s16)(frame_x + 5), (s16)(frame_y + 2), title,
+             (window_maximized != 0u) ? COLOR_DEEP : COLOR_WHITE);
 
     if (interior != 0u) {
         /* Neutral 9x9 squares: no red close button and no ambiguous '^'. */

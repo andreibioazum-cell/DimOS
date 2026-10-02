@@ -230,7 +230,8 @@ u8 gfx_wallpaper_ready(void);
 
 u8 wallpaper_load(void);
 u8 wallpaper_ready(void);
-u16 wallpaper_pixel(u16 x, u16 y);
+u32 wallpaper_pixel(u16 x, u16 y);
+const u32 *wallpaper_row(u16 y);
 
 /* ------------------------------------------------------------------ */
 /* input.c -- PS/2 keyboard and mouse                                  */

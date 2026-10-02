@@ -467,25 +467,19 @@ static u16 high_text_blend_rgb565(u16 background, u8 color, u8 alpha) {
     return (u16)((red >> 3u) << 11u | (green >> 2u) << 5u | (blue >> 3u));
 }
 
-static u32 rgb565_to_xrgb(u16 color) {
-    const u32 red = (u32)((color >> 11u) & 0x1Fu);
-    const u32 green = (u32)((color >> 5u) & 0x3Fu);
-    const u32 blue = (u32)(color & 0x1Fu);
-    return ((red * 255u / 31u) << 16u) |
-           ((green * 255u / 63u) << 8u) |
-           (blue * 255u / 31u);
-}
-
 /* A wallpaper marker means "take this exact physical pixel from the native
  * PNG". UI colours still go through the tiny logical canvas as before. */
 static void physical_write(volatile u8 *framebuffer, u16 x, u16 y, u8 color) {
     volatile u8 *row = framebuffer + (u32)y * video_pitch;
     if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
-        const u16 native = wallpaper_pixel(x, y);
+        const u32 native = wallpaper_pixel(x, y);
         if (video_bits_per_pixel == 32u) {
-            ((volatile u32 *)row)[x] = rgb565_to_xrgb(native);
+            ((volatile u32 *)row)[x] = native;
         } else {
-            ((volatile u16 *)row)[x] = native;
+            ((volatile u16 *)row)[x] =
+                (u16)(((native >> 8u) & 0xF800u) |
+                      ((native >> 5u) & 0x07E0u) |
+                      ((native >> 3u) & 0x001Fu));
         }
     } else if (video_bits_per_pixel == 32u) {
         ((volatile u32 *)row)[x] = xrgb8888_color[color];
@@ -814,9 +808,24 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
      * the exact native rectangle hidden by this logical canvas cell. */
     if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
         for (output_y = top; output_y < bottom; ++output_y) {
+            const u32 *source = wallpaper_row(output_y) + left;
             u16 output_x;
-            for (output_x = left; output_x < right; ++output_x) {
-                physical_write(framebuffer, output_x, output_y, color);
+
+            if (video_bits_per_pixel == 32u) {
+                volatile u32 *target = (volatile u32 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                for (output_x = left; output_x < right; ++output_x) {
+                    *target++ = *source++;
+                }
+            } else {
+                volatile u16 *target = (volatile u16 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                for (output_x = left; output_x < right; ++output_x) {
+                    const u32 native = *source++;
+                    *target++ = (u16)(((native >> 8u) & 0xF800u) |
+                                      ((native >> 5u) & 0x07E0u) |
+                                      ((native >> 3u) & 0x001Fu));
+                }
             }
         }
         return;

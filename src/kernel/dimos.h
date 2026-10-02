@@ -43,6 +43,7 @@ typedef u64 uptr; /* native x86-64 pointer-sized integer */
 
 u8 port_read_byte(u16 port);
 void port_write_byte(u16 port, u8 value);
+void cpu_idle(void); /* STI+HLT until the next 120 Hz timer interrupt */
 
 #define PORT_PIT_CHANNEL_0 0x40u
 #define PORT_PIT_CHANNEL_2 0x42u
@@ -319,7 +320,7 @@ void text_trim(char *text);
 void text_pad_right(char *destination, u16 width, u16 capacity);
 
 /* ------------------------------------------------------------------ */
-/* fs.c -- the 4 MiB RAM disk and the FAT12 boot volume                */
+/* fs.c -- the 512 KiB RAM disk and the FAT12 boot volume              */
 /* ------------------------------------------------------------------ */
 
 void ram_disk_init(void);

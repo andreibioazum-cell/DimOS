@@ -22,7 +22,7 @@
 /* 1,193,182 PIT clocks per second / 60, rounded up. Waiting against the raw
  * hardware counter gives a strict maximum of 60 FPS without the old 10 ms
  * clock rounding the compositor down to 50 or 25 FPS. */
-#define FRAME_TIMER_COUNTS 19887ull
+#define FRAME_TIMER_COUNTS 19886ull
 
 /* Ids the window manager keeps for its own buttons. Applications use ids
  * below this range. */
@@ -989,6 +989,7 @@ static void wait_for_next_frame(u64 *deadline) {
         return;
     }
     while (timer_counter() < *deadline) {
+        cpu_idle();
         timer_update();
         input_poll();
     }

@@ -809,22 +809,33 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
     if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
         for (output_y = top; output_y < bottom; ++output_y) {
             const u32 *source = wallpaper_row(output_y) + left;
-            u16 output_x;
+            u16 count = (u16)(right - left);
 
             if (video_bits_per_pixel == 32u) {
                 volatile u32 *target = (volatile u32 *)(framebuffer +
                     (u32)output_y * video_pitch) + left;
-                for (output_x = left; output_x < right; ++output_x) {
+                if (((uptr)target & 7u) != 0u && count != 0u) {
                     *target++ = *source++;
+                    --count;
+                }
+                while (count >= 2u) {
+                    *(volatile u64 *)target = *(const u64 *)source;
+                    target += 2;
+                    source += 2;
+                    count = (u16)(count - 2u);
+                }
+                if (count != 0u) {
+                    *target = *source;
                 }
             } else {
                 volatile u16 *target = (volatile u16 *)(framebuffer +
                     (u32)output_y * video_pitch) + left;
-                for (output_x = left; output_x < right; ++output_x) {
+                while (count != 0u) {
                     const u32 native = *source++;
                     *target++ = (u16)(((native >> 8u) & 0xF800u) |
                                       ((native >> 5u) & 0x07E0u) |
                                       ((native >> 3u) & 0x001Fu));
+                    --count;
                 }
             }
         }
@@ -862,26 +873,46 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
 
     if (video_bits_per_pixel == 32u) {
         const u32 direct_color = xrgb8888_color[color];
+        const u64 pair = (u64)direct_color | ((u64)direct_color << 32u);
 
         for (output_y = top; output_y < bottom; ++output_y) {
             volatile u32 *pixel = (volatile u32 *)(framebuffer +
                 (u32)output_y * video_pitch) + left;
-            u16 output_x;
+            u16 count = (u16)(right - left);
 
-            for (output_x = left; output_x < right; ++output_x) {
+            if (((uptr)pixel & 7u) != 0u && count != 0u) {
                 *pixel++ = direct_color;
+                --count;
+            }
+            while (count >= 2u) {
+                *(volatile u64 *)pixel = pair;
+                pixel += 2;
+                count = (u16)(count - 2u);
+            }
+            if (count != 0u) {
+                *pixel = direct_color;
             }
         }
     } else {
         const u16 direct_color = rgb565_color[color];
+        const u32 pair = (u32)direct_color | ((u32)direct_color << 16u);
 
         for (output_y = top; output_y < bottom; ++output_y) {
             volatile u16 *pixel = (volatile u16 *)(framebuffer +
                 (u32)output_y * video_pitch) + left;
-            u16 output_x;
+            u16 count = (u16)(right - left);
 
-            for (output_x = left; output_x < right; ++output_x) {
+            if (((uptr)pixel & 3u) != 0u && count != 0u) {
                 *pixel++ = direct_color;
+                --count;
+            }
+            while (count >= 2u) {
+                *(volatile u32 *)pixel = pair;
+                pixel += 2;
+                count = (u16)(count - 2u);
+            }
+            if (count != 0u) {
+                *pixel = direct_color;
             }
         }
     }
@@ -1708,13 +1739,10 @@ static void pointer_restore(void) {
 void gfx_draw_pointer(s16 x, s16 y) {
     s16 row;
     s16 column;
-    s16 offset;
 
-    /* A small, opaque crosshair is cheaper and much clearer than the old
-     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
-     * VBE). x/y are the pointer centre, so the mark stays under the cursor.
-     * Restore the old 7x7 patch first: this keeps a mouse-only update dirty
-     * by a few logical pixels instead of requiring a full GUI redraw. */
+    /* The pointer hotspot is its top-left tip, like the host cursor used by
+     * VNC/Termux. Every visible pixel extends right/down from (x,y), avoiding
+     * the old crosshair appearing left and above the Android pointer. */
     if (pointer_drawn != 0u && pointer_drawn_x == x && pointer_drawn_y == y) {
         return;
     }
@@ -1740,9 +1768,11 @@ void gfx_draw_pointer(s16 x, s16 y) {
     pointer_drawn_y = y;
     pointer_drawn = 1u;
 
-    for (offset = -POINTER_RADIUS; offset <= POINTER_RADIUS; ++offset) {
-        gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
-        gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
+    for (row = 0; row <= POINTER_RADIUS; ++row) {
+        for (column = 0; column <= row; ++column) {
+            gfx_pixel((s16)(x + column), (s16)(y + row),
+                      (column == row) ? COLOR_WHITE : COLOR_CURSOR);
+        }
     }
 }
 

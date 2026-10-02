@@ -293,12 +293,65 @@ long_mode_entry:
     mov ss, ax
     mov rsp, kernel_stack_top
     xor ebp, ebp
+
+    ; Install one 64-bit interrupt gate for the PIT and remap the legacy PIC.
+    ; All other IRQs stay masked because keyboard and mouse input is polled.
+    mov rdi, idt_table
+    xor eax, eax
+    mov ecx, (256 * 16) / 8
+    rep stosq
+    mov rax, timer_interrupt_entry
+    mov word [idt_table + 32 * 16 + 0], ax
+    mov word [idt_table + 32 * 16 + 2], CODE64_SELECTOR
+    mov byte [idt_table + 32 * 16 + 4], 0
+    mov byte [idt_table + 32 * 16 + 5], 0x8E
+    shr rax, 16
+    mov word [idt_table + 32 * 16 + 6], ax
+    shr rax, 16
+    mov dword [idt_table + 32 * 16 + 8], eax
+    mov dword [idt_table + 32 * 16 + 12], 0
+    lidt [idt_descriptor]
+
+    mov al, 0x11
+    out 0x20, al
+    out 0xA0, al
+    mov al, 0x20
+    out 0x21, al
+    mov al, 0x28
+    out 0xA1, al
+    mov al, 0x04
+    out 0x21, al
+    mov al, 0x02
+    out 0xA1, al
+    mov al, 0x01
+    out 0x21, al
+    out 0xA1, al
+    mov al, 0xFE                         ; master: timer only
+    out 0x21, al
+    mov al, 0xFF                         ; slave: everything masked
+    out 0xA1, al
+
     call kernel_main
 
 .hang64:
     cli
     hlt
     jmp .hang64
+
+timer_interrupt_entry:
+    push rax
+    mov al, 0x20
+    out 0x20, al                         ; end of interrupt
+    pop rax
+    iretq
+
+; Atomically enable interrupts and sleep. STI delays recognition until after
+; the following HLT, avoiding the classic interrupt-before-sleep race.
+global cpu_idle
+cpu_idle:
+    sti
+    hlt
+    ret
 
 ; ------------------------------------------------------------------
 ; Hardware port access, using the x86-64 System V ABI.
@@ -356,6 +409,10 @@ gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
 
+idt_descriptor:
+    dw 256 * 16 - 1
+    dq idt_table
+
 section .data
 align 16
 
@@ -391,6 +448,9 @@ vbe_mode_info:
     times 256 db 0
 
 section .stack nobits alloc write align=16
+idt_table:
+    resb 256 * 16
+align 16
 kernel_stack_bottom:
     resb 16384
 kernel_stack_top:

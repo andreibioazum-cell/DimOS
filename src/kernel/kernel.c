@@ -185,11 +185,10 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 /* The programmable interval timer                                     */
 /* ------------------------------------------------------------------ */
 
-/* Channel 0 ticks 1,193,182 times per second. A long hardware period makes
- * polling resilient to expensive frames; software still emits one public
- * 10 ms tick for application timers every 11,932 input clocks. */
+/* Channel 0 interrupts at 120 Hz. The compositor sleeps on HLT between these
+ * interrupts and presents at 60 FPS, while software keeps 10 ms app ticks. */
 #define TIMER_INPUT_FREQUENCY 1193182u
-#define TIMER_DIVISOR 65535u
+#define TIMER_DIVISOR 9943u
 #define TIMER_TICK_COUNTS 11932u
 
 #define TIMER_LATCH_CHANNEL_0 0x00u
@@ -266,6 +265,7 @@ void time_wait(u32 milliseconds) {
     const u32 start = elapsed_milliseconds;
 
     while ((elapsed_milliseconds - start) < milliseconds) {
+        cpu_idle();
         timer_update();
         input_poll();
     }

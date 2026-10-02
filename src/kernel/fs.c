@@ -3,7 +3,7 @@
  *
  * Two things live here:
  *
- * 1. A RAM disk. Four megabytes of memory at 0x500000 that behave like a
+ * 1. A compact 512 KiB RAM disk at 0x500000 that behaves like a
  *    disk: reads and writes are plain memory copies with a bounds check, so
  *    there is no port I/O and no BIOS call anywhere near them.
  *
@@ -29,7 +29,7 @@
 
 #define RAM_DISK_ADDRESS 0x00500000ull
 #define RAM_DISK_SECTOR_BYTES 512u
-#define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
+#define RAM_DISK_SECTORS 1024u /* 512 KiB; paint needs fewer than 100 KiB */
 
 void ram_disk_init(void) {
     memory_zero((void *)(uptr)RAM_DISK_ADDRESS,

@@ -314,7 +314,7 @@ def plant_boot_disk(machine, flat):
     """Recreates the windows boot.asm fills on real hardware.
 
     The file manager reads the FAT copies at 0x7E00, the root directory at
-    0x10000 and the first 256 data sectors at 0x30000. On real hardware the
+    0x10000 and the first 384 data sectors at 0x30000. On real hardware the
     bootloader puts the disk there; the sandbox has no disk, so this helper
     synthesizes a tiny FAT12 volume with the same layout. When the repo has
     fonts/font.ttf, it ships on the volume as FONT.TTF exactly like the real
@@ -345,7 +345,7 @@ def plant_boot_disk(machine, flat):
         with open(font_path, "rb") as handle:
             font = handle.read()
     font_clusters = (len(font) + 511) // 512
-    if 50 + font_clusters > 256 + 2:
+    if 50 + font_clusters > 384 + 2:
         font = b""                     # too big for the preloaded window
         font_clusters = 0
     for index in range(font_clusters):
@@ -375,7 +375,7 @@ def plant_boot_disk(machine, flat):
         root[96:128] = entry("FONT    TTF", 50, len(font))
     machine.mu.mem_write(0x10000, bytes(root))
 
-    data = bytearray(256 * 512)               # cluster N sits at (N-2)*512
+    data = bytearray(384 * 512)               # cluster N sits at (N-2)*512
     data[0:512] = kernel[:512]
     data[(40 - 2) * 512:(40 - 2) * 512 + len(readme)] = readme
     data[(42 - 2) * 512:(42 - 2) * 512 + 512] = notes[:512]

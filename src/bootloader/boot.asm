@@ -43,10 +43,10 @@ ROOT_SECTS    equ 14
 FAT_LBA       equ 1
 FAT_SECTS     equ 18
 DATA_LBA      equ 33
-; 256 sectors = 128 KiB at 0x30000..0x50000: enough for KERNEL.BIN's
-; clusters plus FONT.TTF and the small user files. Must match
-; DATA_WINDOW_SECTORS in src/kernel/fs.c.
-DATA_PRELOAD  equ 256
+; 384 sectors = 192 KiB at 0x30000..0x60000: enough for KERNEL.BIN,
+; FONT.TTF and one native PNG wallpaper. Must match DATA_WINDOW_SECTORS
+; in src/kernel/fs.c. The graphics back buffer begins exactly at 0x60000.
+DATA_PRELOAD  equ 384
 ROOT_ENTRIES  equ 224
 
 main:
@@ -105,7 +105,7 @@ main:
         mov cx, FAT_SECTS
         call ReadSectors
 
-        ; First 256 data sectors -> 3000:0000 (file manager window)
+        ; First 384 data sectors -> 3000:0000 (file manager window)
         mov ax, 0x3000
         mov es, ax
         xor bx, bx

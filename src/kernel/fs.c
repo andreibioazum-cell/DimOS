@@ -14,7 +14,7 @@
  *       0x07C00  boot sector          (1 sector)
  *       0x07E00  both FAT copies     (18 sectors)
  *       0x10000  root directory      (14 sectors, 224 entries)
- *       0x30000  first 256 data sectors (128 KiB, ends at 0x50000)
+ *       0x30000  first 384 data sectors (192 KiB, ends at 0x60000)
  *
  *    The file manager reads those windows. Files are shown and read from the
  *    copy in memory, and deleting one only hides it until the next boot, so
@@ -84,9 +84,9 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
 #define ENTRY_LAST 0x00u
 
 /* How much of the data area the bootloader preloads at 0x30000. The
- * window ends exactly at SCRATCH_ADDRESS (0x50000): 256 sectors. It
+ * window ends exactly at BACK_BUFFER_ADDRESS (0x60000): 384 sectors. It
  * must match DATA_PRELOAD in src/bootloader/boot.asm. */
-#define DATA_WINDOW_SECTORS 256u
+#define DATA_WINDOW_SECTORS 384u
 #define CLUSTER_END 0xFF8u
 
 static u8 hidden_entry[FILE_ENTRY_COUNT];

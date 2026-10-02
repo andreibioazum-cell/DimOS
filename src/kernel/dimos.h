@@ -93,7 +93,7 @@ extern u16 video_height;
 extern u8 video_bits_per_pixel;
 
 /* Free RAM below one megabyte that applications may use as a bitmap. */
-#define SCRATCH_ADDRESS 0x00050000u
+#define SCRATCH_ADDRESS 0x00080000u
 #define SCRATCH_BYTES 32768u
 
 /* Where the boot code copies the 8x8 font that ships in the video BIOS. */
@@ -221,6 +221,16 @@ void gfx_draw_pointer(s16 x, s16 y);
 u16 gfx_text_width(const char *text);
 void gfx_select_theme(u8 theme);
 u8 gfx_current_theme(void);
+u8 gfx_wallpaper_ready(void);
+#define COLOR_WALLPAPER 255u /* native PNG pixel; never palette-scaled */
+
+/* ------------------------------------------------------------------ */
+/* wallpaper.c -- streaming native-resolution PNG decoder             */
+/* ------------------------------------------------------------------ */
+
+u8 wallpaper_load(void);
+u8 wallpaper_ready(void);
+u16 wallpaper_pixel(u16 x, u16 y);
 
 /* ------------------------------------------------------------------ */
 /* input.c -- PS/2 keyboard and mouse                                  */

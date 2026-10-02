@@ -467,19 +467,40 @@ static u16 high_text_blend_rgb565(u16 background, u8 color, u8 alpha) {
     return (u16)((red >> 3u) << 11u | (green >> 2u) << 5u | (blue >> 3u));
 }
 
+static u32 rgb565_to_xrgb(u16 color) {
+    const u32 red = (u32)((color >> 11u) & 0x1Fu);
+    const u32 green = (u32)((color >> 5u) & 0x3Fu);
+    const u32 blue = (u32)(color & 0x1Fu);
+    return ((red * 255u / 31u) << 16u) |
+           ((green * 255u / 63u) << 8u) |
+           (blue * 255u / 31u);
+}
+
+/* A wallpaper marker means "take this exact physical pixel from the native
+ * PNG". UI colours still go through the tiny logical canvas as before. */
+static void physical_write(volatile u8 *framebuffer, u16 x, u16 y, u8 color) {
+    volatile u8 *row = framebuffer + (u32)y * video_pitch;
+    if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
+        const u16 native = wallpaper_pixel(x, y);
+        if (video_bits_per_pixel == 32u) {
+            ((volatile u32 *)row)[x] = rgb565_to_xrgb(native);
+        } else {
+            ((volatile u16 *)row)[x] = native;
+        }
+    } else if (video_bits_per_pixel == 32u) {
+        ((volatile u32 *)row)[x] = xrgb8888_color[color];
+    } else {
+        ((volatile u16 *)row)[x] = rgb565_color[color];
+    }
+}
+
 static void high_text_restore_pixel(volatile u8 *framebuffer, u16 x, u16 y) {
     const u16 logical_x = (u16)(((u32)(x - render_left) * SCREEN_WIDTH) /
                                render_width);
     const u16 logical_y = (u16)(((u32)(y - render_top) * SCREEN_HEIGHT) /
                                 render_height);
     const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
-    volatile u8 *row = framebuffer + (u32)y * video_pitch;
-
-    if (video_bits_per_pixel == 32u) {
-        ((volatile u32 *)row)[x] = xrgb8888_color[color];
-    } else {
-        ((volatile u16 *)row)[x] = rgb565_color[color];
-    }
+    physical_write(framebuffer, x, y, color);
 }
 
 static void high_text_restore(const HighText *commands, u16 count) {
@@ -788,6 +809,18 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
     const u16 top = vbe_y[y];
     const u16 bottom = vbe_y[y + 1u];
     u16 output_y;
+
+    /* Unlike UI pixels, every PNG pixel maps 1:1 to the framebuffer. Copy
+     * the exact native rectangle hidden by this logical canvas cell. */
+    if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
+        for (output_y = top; output_y < bottom; ++output_y) {
+            u16 output_x;
+            for (output_x = left; output_x < right; ++output_x) {
+                physical_write(framebuffer, output_x, output_y, color);
+            }
+        }
+        return;
+    }
 
 #ifdef DIMOS_EMULATOR
     const u16 physical_width = (u16)(right - left);
@@ -1704,6 +1737,10 @@ void gfx_draw_pointer(s16 x, s16 y) {
     }
 }
 
+u8 gfx_wallpaper_ready(void) {
+    return wallpaper_ready();
+}
+
 void gfx_init(void) {
     font_init();
     pointer_init();
@@ -1712,5 +1749,6 @@ void gfx_init(void) {
     render_height = video_height;
     render_left = 0u;
     render_top = 0u;
+    (void)wallpaper_load();
     gfx_clear(COLOR_DESKTOP);
 }

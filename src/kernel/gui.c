@@ -409,6 +409,14 @@ static void fill_mountain(s16 left, s16 base, s16 peak_x, s16 peak_y,
 static void draw_wallpaper(void) {
     s16 line;
 
+    /* The marker is resolved against the native-size PNG by the VBE
+     * presenter, so not one wallpaper pixel is enlarged or resampled. */
+    if (gfx_wallpaper_ready() != 0u) {
+        gfx_fill(0, (s16)DESKTOP_TOP, (s16)SCREEN_WIDTH,
+                 (s16)(SCREEN_HEIGHT - DESKTOP_TOP), COLOR_WALLPAPER);
+        return;
+    }
+
     /* Open sky and a pale horizon. The dock floats over the lake instead of
      * sitting on a heavy opaque taskbar. */
     gfx_gradient_vertical(0, (s16)DESKTOP_TOP, (s16)SCREEN_WIDTH,
@@ -745,7 +753,8 @@ static void tooltip_for(u16 id) {
 }
 
 static void draw_frame(void) {
-    gfx_clear(COLOR_DESKTOP);
+    /* Native PNG remains behind window margins and translucent dock areas. */
+    gfx_clear(gfx_wallpaper_ready() != 0u ? COLOR_WALLPAPER : COLOR_DESKTOP);
     gui_hotspots_reset();
 
     if (active_application == 0xFFFFu) {

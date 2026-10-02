@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 try:
-    from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-    from unicorn.x86_const import UC_X86_REG_EIP, UC_X86_REG_ESP
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE
+    from unicorn.x86_const import UC_X86_REG_RIP, UC_X86_REG_RSP
     from PIL import Image
 except ModuleNotFoundError:
     # --build only needs the host compiler and linker. Keep that useful in
@@ -43,7 +43,7 @@ FONT_TTF_AREA = 0x00400000   # the kernel copies FONT.TTF here (font_ttf.c)
 RAM_DISK = 0x00500000
 
 CFLAGS = [
-    "gcc", "-m32", "-march=i686", "-std=c11", "-Os",
+    "gcc", "-m64", "-march=x86-64", "-mcmodel=small", "-std=c11", "-Os",
     "-Wall", "-Wextra", "-Wpedantic", "-Werror",
     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie",
     "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
@@ -84,7 +84,7 @@ def build():
         objects.append(obj)
 
     elf = os.path.join(BUILD, "kernel.elf")
-    run(["ld", "-m", "elf_i386", "--build-id=none", "-nostdlib",
+    run(["ld", "-m", "elf_x86_64", "--build-id=none", "-nostdlib",
          "-e", "kernel_main",
          "-T", os.path.join(REPO, "src", "kernel", "linker.ld"),
          "-Map=" + os.path.join(BUILD, "kernel.map")] + objects + ["-o", elf],
@@ -115,8 +115,8 @@ def symbols(elf):
 class Machine:
     def __init__(self, flat, table):
         self.symbols = table
-        self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
-        # Protected mode addresses this low physical range directly. It
+        self.mu = Uc(UC_ARCH_X86, UC_MODE_64)
+        # Long mode identity-maps this low physical range. It
         # includes the 1 MiB BSS window, simulator block, font workspace and
         # RAM disk.
         self.mu.mem_map(0x00000000, 0x01200000)
@@ -139,9 +139,9 @@ class Machine:
         self.mu.hook_add(UC_HOOK_CODE, self._on_setup,
                          begin=table["gui_setup"], end=table["gui_setup"])
 
-        self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
-        # kernel.asm would have jumped here after entering protected mode.
-        self.mu.reg_write(UC_X86_REG_EIP, table["kernel_main"])
+        self.mu.reg_write(UC_X86_REG_RSP, 0x0008F000)
+        # kernel.asm would have jumped here after entering 64-bit long mode.
+        self.mu.reg_write(UC_X86_REG_RIP, table["kernel_main"])
         self.pointer_x = 160
         self.pointer_y = 100
 
@@ -256,7 +256,7 @@ class Machine:
 
     def frames_run(self, count):
         self.wanted_frames = self.frames + count
-        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_EIP), 0,
+        self.mu.emu_start(self.mu.reg_read(UC_X86_REG_RIP), 0,
                           count=200_000_000)
 
     def screenshot(self, name, scale=2):
@@ -293,9 +293,9 @@ class Machine:
 # byte cluster on purpose, so opening it also exercises the FAT12 chain.
 README_TEXT = (
     "DIMOS 2.0 + DIMXFCE - THE TINY Xfce DESKTOP.\r\n"
-    "THE MOUSE AT TOP LEFT HIDES THE WHISKER MENU; A\r\n"
-    "RIGHT CLICK ON THE WALLPAPER WORKS TOO. THE ^ KEY\r\n"
-    "ROLLS A WINDOW UP, THE DOCK MONITOR HIDES IT ALL.\r\n"
+    "APPLICATIONS LAUNCH FROM THE TRANSPARENT BOTTOM DOCK.\r\n"
+    "RIGHT CLICK ON THE WALLPAPER OPENS THE WHISKER MENU.\r\n"
+    "SQUARE TITLE BUTTONS MINIMIZE, MAXIMIZE AND CLOSE WINDOWS.\r\n"
     "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\r\n"
 )
 NOTES_TEXT = (
@@ -306,7 +306,7 @@ NOTES_TEXT = (
     "THIS FILE IS LONGER THAN ONE 512 BYTE CLUSTER, SO READING IT\r\n"
     "FOLLOWS A TWO LINK FAT12 CHAIN: CLUSTER 42 THEN CLUSTER 43.\r\n"
     "DELETE HIDES A FILE UNTIL REBOOT; KERNEL.BIN IS PROTECTED.\r\n"
-    "THE RAM DISK AT 0X500000 HOLDS FOUR MEGABYTES OF SCRATCH SPACE.\r\n"
+    "THE RAM DISK AT 0X500000 HOLDS 512 KIB OF SCRATCH SPACE.\r\n"
 )
 
 
@@ -314,7 +314,7 @@ def plant_boot_disk(machine, flat):
     """Recreates the windows boot.asm fills on real hardware.
 
     The file manager reads the FAT copies at 0x7E00, the root directory at
-    0x10000 and the first 256 data sectors at 0x30000. On real hardware the
+    0x10000 and the first 384 data sectors at 0x30000. On real hardware the
     bootloader puts the disk there; the sandbox has no disk, so this helper
     synthesizes a tiny FAT12 volume with the same layout. When the repo has
     fonts/font.ttf, it ships on the volume as FONT.TTF exactly like the real
@@ -345,7 +345,7 @@ def plant_boot_disk(machine, flat):
         with open(font_path, "rb") as handle:
             font = handle.read()
     font_clusters = (len(font) + 511) // 512
-    if 50 + font_clusters > 256 + 2:
+    if 50 + font_clusters > 384 + 2:
         font = b""                     # too big for the preloaded window
         font_clusters = 0
     for index in range(font_clusters):
@@ -375,7 +375,7 @@ def plant_boot_disk(machine, flat):
         root[96:128] = entry("FONT    TTF", 50, len(font))
     machine.mu.mem_write(0x10000, bytes(root))
 
-    data = bytearray(256 * 512)               # cluster N sits at (N-2)*512
+    data = bytearray(384 * 512)               # cluster N sits at (N-2)*512
     data[0:512] = kernel[:512]
     data[(40 - 2) * 512:(40 - 2) * 512 + len(readme)] = readme
     data[(42 - 2) * 512:(42 - 2) * 512 + 512] = notes[:512]
@@ -389,10 +389,9 @@ def plant_boot_disk(machine, flat):
     machine.mu.mem_write(0x0413, (640).to_bytes(2, "little"))
 
 
-CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
-SHADE_BOX = (280, 23)     # the roll-up button left of minimize
-ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
-MENU_BUTTON = (24, 6)     # the little mouse at the panel's left
+CLOSE_BOX = (306, 22)          # neutral square X button
+MAXIMIZE_BOX = (296, 22)       # square maximize button in a normal window
+MAXIMIZED_RESTORE = (302, 5)   # same control after the frame fills the screen
 DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
 DOCK_Y = 190
 
@@ -401,15 +400,8 @@ WINDOW_LEFT = 9
 WINDOW_TOP = 30
 
 
-def icon_center(index):
-    # Desktop icons: two Xfce columns, cells 60x32 starting at (6, 19).
-    column = index % 2
-    row = index // 2
-    return (6 + column * 60 + 28, 19 + row * 32 + 15)
-
-
 def dock_center(index):
-    # The compact glass dock: nine 20 px cells, centred in the pill.
+    # The transparent dock: nine 20 px cells centred along the bottom.
     left = (320 - 9 * 20) // 2
     return (left + index * 20 + 10, DOCK_Y)
 
@@ -445,7 +437,7 @@ def tour():
     machine.screenshot("01-desktop")
 
     print("\nFiles: open the disk listing, then read a file")
-    machine.click(*icon_center(0))
+    machine.click(*dock_center(0))
     machine.screenshot("02-files")
     machine.click(WINDOW_LEFT + 2 + 108, WINDOW_TOP + 2 + 14 + 7)  # README.TXT
     machine.click(9 + 216 + 8 + 37, WINDOW_TOP + 2 + 7)            # Open
@@ -455,7 +447,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nSnake: steer with the on-screen pad")
-    machine.click(*icon_center(1))
+    machine.click(*dock_center(1))
     machine.screenshot("04-snake")
     machine.click(229, 71)                   # up
     machine.frames_run(14)
@@ -465,7 +457,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nMines: open a square")
-    machine.click(*icon_center(2))
+    machine.click(*dock_center(2))
     machine.click(76, 97)
     machine.screenshot("06-mines")
     machine.right_click(13 + 8 * 14 + 7, WINDOW_TOP + 4 + 8 * 14 + 7)
@@ -473,13 +465,13 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nPaint: drag a line")
-    machine.click(*icon_center(3))
+    machine.click(*dock_center(3))
     machine.drag(30, 52, 180, 122)
     machine.screenshot("08-paint")
     machine.click(*CLOSE_BOX)
 
     print("\nCalculator: 7 + 8 =")
-    machine.click(*icon_center(4))
+    machine.click(*dock_center(4))
     machine.click(*calc_key(0, 0))   # 7
     machine.click(*calc_key(3, 3))   # +
     machine.click(*calc_key(0, 1))   # 8
@@ -488,14 +480,14 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nMusic, with the black record title bar")
-    machine.click(*icon_center(5))
+    machine.click(*dock_center(5))
     machine.click(9 + 4 + 61, WINDOW_TOP + 9)  # the Chime button
     machine.frames_run(6)
     machine.screenshot("10-music")
     machine.click(*CLOSE_BOX)
 
     print("\nCheesy Balls: the mouse's own kitchen")
-    machine.click(*icon_center(6))
+    machine.click(*dock_center(6))
     machine.click(63, WINDOW_TOP + 110)    # NYAM!
     machine.click(63, WINDOW_TOP + 110)    # NYAM!
     machine.screenshot("11-cheesy")
@@ -503,7 +495,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nAbout, then the green phosphor theme")
-    machine.click(*icon_center(7))
+    machine.click(*dock_center(7))
     machine.screenshot("12-about")
     machine.click(13 + 6 + 45, 148 + 7)    # the Theme button
     machine.screenshot("13-about-green")
@@ -513,7 +505,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nTerminal: type DIR on the on-screen keyboard")
-    machine.click(*icon_center(8))
+    machine.click(*dock_center(8))
     machine.screenshot("14-terminal")
     machine.click(*term_key(2, 2))   # D
     machine.click(*term_key(1, 7))   # I
@@ -528,28 +520,26 @@ def tour():
     machine.screenshot("16-back-to-desktop")
 
     print("\nKeyboard only: arrows move the focus, Enter opens")
-    machine.send_keyboard(list(ARROW_CODES["left"]))
+    machine.send_keyboard(list(ARROW_CODES["down"]))
     machine.frames_run(1)
-    machine.send_keyboard(list(ARROW_CODES["up"]))
-    machine.frames_run(1)
-    machine.send_keyboard([0x1C, 0x9C])   # Enter opens the focused icon
+    machine.send_keyboard([0x1C, 0x9C])   # Enter opens the centred Calc dock item
     machine.frames_run(2)
     machine.screenshot("17-keyboard-open")
     machine.send_keyboard([0x01, 0x81])
     machine.frames_run(2)
 
-    print("\nWhisker menu: the mouse button, the Games filter")
-    machine.click(*MENU_BUTTON)
+    print("\nWhisker menu: right click, then the Games filter")
+    machine.right_click(200, 60)
     machine.screenshot("18-whisker-menu")
     machine.click(*menu_class_button(1))   # Games
     machine.screenshot("19-whisker-games")
     machine.click(*menu_cell(6))           # Cheesy Balls from the menu
     machine.screenshot("20-menu-launched")
 
-    print("\nxfwm4 tricks: roll the window up, then unroll it")
-    machine.click(*SHADE_BOX)
-    machine.screenshot("21-rolled-up")
-    machine.click(*ROLLED_SLAT)
+    print("\nWindow controls: maximize, then restore")
+    machine.click(*MAXIMIZE_BOX)
+    machine.screenshot("21-maximized")
+    machine.click(*MAXIMIZED_RESTORE)
 
     print("\nThe dock breastfeeding: Calc from plank, minimize to desktop")
     machine.click(*dock_center(4))

@@ -25,6 +25,7 @@
 
 /* Mouse commands (written to port 0x60 after COMMAND_WRITE_MOUSE). */
 #define MOUSE_SET_DEFAULTS 0xF6u
+#define MOUSE_SET_SCALING_1_1 0xE6u
 #define MOUSE_START_STREAMING 0xF4u
 #define MOUSE_ACKNOWLEDGE 0xFAu
 
@@ -381,8 +382,15 @@ void input_init(void) {
     controller_send(COMMAND_ENABLE_MOUSE);
     mouse_send(MOUSE_SET_DEFAULTS);
     if (mouse_reply() == MOUSE_ACKNOWLEDGE) {
-        mouse_send(MOUSE_START_STREAMING);
-        mouse_present = (u8)(mouse_reply() == MOUSE_ACKNOWLEDGE);
+        /* VNC and Android clients often apply host acceleration. Explicit
+         * PS/2 1:1 scaling keeps guest mickeys aligned with their cursor. */
+        mouse_send(MOUSE_SET_SCALING_1_1);
+        if (mouse_reply() == MOUSE_ACKNOWLEDGE) {
+            mouse_send(MOUSE_START_STREAMING);
+            mouse_present = (u8)(mouse_reply() == MOUSE_ACKNOWLEDGE);
+        } else {
+            mouse_present = 0u;
+        }
     } else {
         mouse_present = 0u;
     }

@@ -3,8 +3,8 @@
  * uses (memory, text, restart).
  *
  * The bootloader loads this code at 0x20000 and kernel.asm selects the video
- * hardware and enters a flat 32-bit protected-mode environment before calling
- * kernel_main. From here on everything is plain C.
+ * hardware, identity-maps physical memory and enters x86-64 long mode before
+ * calling kernel_main. From here on everything uses the 64-bit System V ABI.
  */
 
 #include "dimos.h"
@@ -41,7 +41,7 @@ void memory_zero(void *destination, u32 length) {
  * the memory size word at 0x413. The address is a parameter so the compiler
  * cannot fold the access away. */
 u16 bios_read_word(u32 address) {
-    const volatile u16 *place = (const volatile u16 *)(u32)address;
+    const volatile u16 *place = (const volatile u16 *)(uptr)address;
 
     return *place;
 }
@@ -185,11 +185,10 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 /* The programmable interval timer                                     */
 /* ------------------------------------------------------------------ */
 
-/* Channel 0 ticks 1,193,182 times per second. A long hardware period makes
- * polling resilient to expensive frames; software still emits one public
- * 10 ms tick for application timers every 11,932 input clocks. */
+/* Channel 0 interrupts at 120 Hz. The compositor sleeps on HLT between these
+ * interrupts and presents at 60 FPS, while software keeps 10 ms app ticks. */
 #define TIMER_INPUT_FREQUENCY 1193182u
-#define TIMER_DIVISOR 65535u
+#define TIMER_DIVISOR 9943u
 #define TIMER_TICK_COUNTS 11932u
 
 #define TIMER_LATCH_CHANNEL_0 0x00u
@@ -266,6 +265,7 @@ void time_wait(u32 milliseconds) {
     const u32 start = elapsed_milliseconds;
 
     while ((elapsed_milliseconds - start) < milliseconds) {
+        cpu_idle();
         timer_update();
         input_poll();
     }
@@ -416,7 +416,7 @@ static void debug_marker(const char *text) {
 
 void kernel_main(void) {
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
-    debug_marker("DIMOS:PROTECTED\n");
+    debug_marker("DIMOS:LONGMODE:X86_64\n");
 
     timer_init();
     ram_disk_init();

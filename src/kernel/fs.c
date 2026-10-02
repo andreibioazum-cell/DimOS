@@ -3,7 +3,7 @@
  *
  * Two things live here:
  *
- * 1. A RAM disk. Four megabytes of memory at 0x500000 that behave like a
+ * 1. A compact 512 KiB RAM disk at 0x500000 that behaves like a
  *    disk: reads and writes are plain memory copies with a bounds check, so
  *    there is no port I/O and no BIOS call anywhere near them.
  *
@@ -14,7 +14,7 @@
  *       0x07C00  boot sector          (1 sector)
  *       0x07E00  both FAT copies     (18 sectors)
  *       0x10000  root directory      (14 sectors, 224 entries)
- *       0x30000  first 256 data sectors (128 KiB, ends at 0x50000)
+ *       0x30000  first 384 data sectors (192 KiB, ends at 0x60000)
  *
  *    The file manager reads those windows. Files are shown and read from the
  *    copy in memory, and deleting one only hides it until the next boot, so
@@ -29,10 +29,10 @@
 
 #define RAM_DISK_ADDRESS 0x00500000ull
 #define RAM_DISK_SECTOR_BYTES 512u
-#define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
+#define RAM_DISK_SECTORS 1024u /* 512 KiB; paint needs fewer than 100 KiB */
 
 void ram_disk_init(void) {
-    memory_zero((void *)(u32)RAM_DISK_ADDRESS,
+    memory_zero((void *)(uptr)RAM_DISK_ADDRESS,
                 RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);
 }
 
@@ -46,7 +46,7 @@ u8 ram_disk_read(u32 sector, void *buffer, u32 sector_count) {
         return 0u;
     }
     memory_copy(buffer,
-                (const void *)(u32)(RAM_DISK_ADDRESS +
+                (const void *)(uptr)(RAM_DISK_ADDRESS +
                                     sector * RAM_DISK_SECTOR_BYTES),
                 sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
@@ -57,7 +57,7 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
         sector_count > (RAM_DISK_SECTORS - sector)) {
         return 0u;
     }
-    memory_copy((void *)(u32)(RAM_DISK_ADDRESS +
+    memory_copy((void *)(uptr)(RAM_DISK_ADDRESS +
                                sector * RAM_DISK_SECTOR_BYTES),
                 buffer, sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
@@ -84,9 +84,9 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
 #define ENTRY_LAST 0x00u
 
 /* How much of the data area the bootloader preloads at 0x30000. The
- * window ends exactly at SCRATCH_ADDRESS (0x50000): 256 sectors. It
+ * window ends exactly at BACK_BUFFER_ADDRESS (0x60000): 384 sectors. It
  * must match DATA_PRELOAD in src/bootloader/boot.asm. */
-#define DATA_WINDOW_SECTORS 256u
+#define DATA_WINDOW_SECTORS 384u
 #define CLUSTER_END 0xFF8u
 
 static u8 hidden_entry[FILE_ENTRY_COUNT];
@@ -166,19 +166,82 @@ u16 file_system_visible(u16 slot) {
     return FILE_NOT_FOUND;
 }
 
-/* "KERNEL  BIN" becomes "KERNEL.BIN" in out. */
-void file_system_name(u16 index, char *out) {
+/* Decode the VFAT entries immediately before a short directory entry. FAT
+ * stores each 13-character piece in UTF-16 and writes the pieces backwards;
+ * DimOS' UI is ASCII, so unsupported non-ASCII codepoints become '?'. */
+static u8 long_name(u16 index, char *out, u16 capacity) {
+    static const u8 offsets[13] = {
+        1u, 3u, 5u, 7u, 9u, 14u, 16u, 18u, 20u, 22u, 24u, 28u, 30u
+    };
+    u16 ordinal = 1u;
+    u16 length = 0u;
+
+    if (index == 0u || capacity == 0u) {
+        return 0u;
+    }
+    while (index != 0u) {
+        const u8 *part;
+        u8 part_ordinal;
+        u8 character;
+
+        --index;
+        part = directory_entry(index);
+        if (part[ENTRY_ATTRIBUTES] != ATTRIBUTE_LONG_NAME) {
+            return 0u;
+        }
+        part_ordinal = (u8)(part[ENTRY_NAME] & 0x1Fu);
+        if (part_ordinal != ordinal) {
+            return 0u;
+        }
+        for (character = 0u; character < 13u; ++character) {
+            const u8 low = part[offsets[character]];
+            const u8 high = part[(u8)(offsets[character] + 1u)];
+            const u16 position = (u16)((ordinal - 1u) * 13u + character);
+
+            if ((low == 0u && high == 0u) || (low == 0xFFu && high == 0xFFu)) {
+                if (position < capacity) {
+                    out[position] = '\0';
+                }
+                return 1u;
+            }
+            if (position + 1u >= capacity) {
+                return 0u;
+            }
+            out[position] = (high == 0u && low < 0x80u) ? (char)low : '?';
+            if (position >= length) {
+                length = (u16)(position + 1u);
+            }
+        }
+        if ((part[ENTRY_NAME] & 0x40u) != 0u) {
+            out[length] = '\0';
+            return 1u;
+        }
+        ++ordinal;
+    }
+    return 0u;
+}
+
+/* Prefer a VFAT long name; otherwise "KERNEL  BIN" becomes "KERNEL.BIN". */
+void file_system_name(u16 index, char *out, u16 capacity) {
     const u8 *entry = directory_entry(index);
     u16 position = 0u;
     u8 column;
 
+    if (capacity == 0u) {
+        return;
+    }
     out[0] = '\0';
-    for (column = 0u; column < 8u && entry[column] != ' '; ++column) {
+    if (long_name(index, out, capacity) != 0u) {
+        return;
+    }
+    for (column = 0u; column < 8u && entry[column] != ' ' &&
+         position + 1u < capacity; ++column) {
         out[position++] = (char)entry[column];
     }
-    if (entry[8] != ' ') {
+    if (entry[8] != ' ' && position + 1u < capacity) {
         out[position++] = '.';
-        for (column = 8u; column < 11u && entry[column] != ' '; ++column) {
+        for (column = 8u; column < 11u && entry[column] != ' ' &&
+             position + 1u < capacity; ++column) {
             out[position++] = (char)entry[column];
         }
     }
@@ -210,12 +273,12 @@ u16 file_system_find(const char *name) {
     u16 slot;
 
     for (slot = 0u; slot < visible_count; ++slot) {
-        char candidate[13];
+        char candidate[32];
 
         if (hidden_entry[visible_slot[slot]] != 0u) {
             continue;
         }
-        file_system_name(visible_slot[slot], candidate);
+        file_system_name(visible_slot[slot], candidate, (u16)sizeof(candidate));
         if (text_equal_ignore_case(candidate, name) != 0u) {
             return visible_slot[slot];
         }
@@ -268,9 +331,9 @@ u32 file_system_read(u16 index, u32 offset, void *buffer, u32 length) {
 }
 
 u8 file_system_is_protected(u16 index) {
-    char name[13];
+    char name[32];
 
-    file_system_name(index, name);
+    file_system_name(index, name, (u16)sizeof(name));
     return text_equal_ignore_case(name, "KERNEL.BIN");
 }
 

@@ -1,18 +1,18 @@
-OUTPUT_FORMAT(elf32-i386)
-OUTPUT_ARCH(i386)
+OUTPUT_FORMAT(elf64-x86-64)
+OUTPUT_ARCH(i386:x86-64)
 ENTRY(kernel_entry)
 
 KERNEL_LOAD_ADDRESS = 0x00020000;
 
-/* The BIOS loader follows KERNEL.BIN's FAT chain into 2000:0000. Its loaded
- * sections must stay below the FAT12 data window at 0x30000. BSS is NOLOAD
- * and lives at 1 MiB, away from the disk cache and graphics buffers. */
+/* The BIOS loader follows KERNEL.BIN's FAT chain into 0x20000. Long mode does
+ * not change this compact boot-time window; BSS and the 64-bit stack remain
+ * NOLOAD at 1 MiB. */
 KERNEL_LOADER_LIMIT = 64512;
 
 PHDRS
 {
-    code PT_LOAD FLAGS(5); /* read + execute */
-    data PT_LOAD FLAGS(6); /* read + write */
+    code PT_LOAD FLAGS(5);
+    data PT_LOAD FLAGS(6);
 }
 
 SECTIONS
@@ -38,9 +38,6 @@ SECTIONS
 
     __kernel_load_end = .;
 
-    /* Protected mode addresses this region directly. Keeping BSS out of the
-     * 64 KiB loader window keeps the protected-mode image compact without
-     * stealing space from KERNEL.BIN. */
     . = 0x00100000;
     .bss ALIGN(16) (NOLOAD) :
     {
@@ -48,6 +45,13 @@ SECTIONS
         *(.bss .bss.*)
         *(COMMON)
         __bss_end = .;
+    } :data
+
+    /* Kept outside __bss_start..__bss_end: kernel_main clears BSS while it is
+     * already executing on this stack. */
+    .stack ALIGN(16) (NOLOAD) :
+    {
+        *(.stack)
     } :data
 
     __kernel_memory_end = .;
@@ -61,6 +65,6 @@ SECTIONS
 }
 
 ASSERT(__kernel_load_end - __kernel_start <= KERNEL_LOADER_LIMIT,
-       "KERNEL.BIN exceeds the bootloader's load window")
+       "KERNEL.BIN exceeds the BIOS loader window")
 ASSERT(__bss_start >= 0x00100000 && __kernel_memory_end < 0x00200000,
-       "kernel BSS no longer fits in its 1 MiB runtime window")
+       "kernel BSS and 64-bit stack no longer fit below 2 MiB")

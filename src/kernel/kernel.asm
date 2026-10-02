@@ -1,17 +1,13 @@
 ; ==================================================================
-; DimOS real-mode entry and 32-bit protected-mode kernel
+; DimOS real-mode entry and 64-bit long-mode kernel
 ;
-; BIOS starts us in 16-bit real mode. This file obtains the BIOS font,
-; selects the best VBE linear framebuffer, enables A20, and switches to a
-; flat 32-bit protected-mode environment before calling kernel_main.
-;
-; v86 emulates the Bochs VBE device and 32-bit protected mode, but it does
-; not implement the x86-64 long-mode CPU instructions. Keeping the kernel in
-; protected mode also leaves the VBE framebuffer directly addressable without
-; a paging dependency. All physical addresses used by DimOS are below 4 GiB.
+; BIOS starts us in 16-bit real mode. This file obtains the BIOS font, selects
+; the VBE framebuffer, enters a temporary 32-bit protected mode, identity-maps
+; the complete first 4 GiB with 2 MiB pages, enables IA-32e long mode and calls
+; the x86-64 C kernel. Physical devices remain directly addressable.
 ; ==================================================================
 
-[CPU 386]
+[CPU x64]
 
 section .entry
 
@@ -20,6 +16,12 @@ KERNEL_BASE equ 0x00020000
 
 CODE32_SELECTOR equ 0x08
 DATA_SELECTOR equ 0x10
+CODE64_SELECTOR equ 0x18
+
+PML4_ADDRESS equ 0x00090000
+PDPT_ADDRESS equ 0x00091000
+PAGE_DIRECTORY_ADDRESS equ 0x00092000
+PAGE_TABLE_BYTES equ 0x00006000
 
 VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
 VBE_MODE_LINEAR_BIT equ 0x4000
@@ -235,36 +237,142 @@ protected_mode_entry:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x00090000
+    mov esp, 0x0008F000
     xor ebp, ebp
+    cld
+
+    ; Six pages describe an identity mapping of 0..4 GiB: one PML4, one PDPT
+    ; and four page directories containing 2048 two-megabyte mappings.
+    mov edi, PML4_ADDRESS
+    xor eax, eax
+    mov ecx, PAGE_TABLE_BYTES / 4
+    rep stosd
+    mov dword [PML4_ADDRESS], PDPT_ADDRESS | 0x03
+
+    mov edi, PDPT_ADDRESS
+    mov eax, PAGE_DIRECTORY_ADDRESS | 0x03
+    mov ecx, 4
+.make_pdpt:
+    mov [edi], eax
+    mov dword [edi + 4], 0
+    add eax, 0x1000
+    add edi, 8
+    loop .make_pdpt
+
+    mov edi, PAGE_DIRECTORY_ADDRESS
+    mov eax, 0x00000083                 ; present, writable, 2 MiB page
+    mov ecx, 2048
+.make_pages:
+    mov [edi], eax
+    mov dword [edi + 4], 0
+    add eax, 0x00200000
+    add edi, 8
+    loop .make_pages
+
+    mov eax, cr4
+    or eax, 1 << 5                      ; CR4.PAE
+    mov cr4, eax
+    mov eax, PML4_ADDRESS
+    mov cr3, eax
+    mov ecx, 0xC0000080                 ; IA32_EFER
+    rdmsr
+    or eax, 1 << 8                      ; EFER.LME
+    wrmsr
+    mov eax, cr0
+    or eax, 1 << 31                     ; CR0.PG (PE is already set)
+    mov cr0, eax
+    jmp CODE64_SELECTOR:long_mode_entry
+
+[BITS 64]
+long_mode_entry:
+    mov ax, DATA_SELECTOR
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov rsp, kernel_stack_top
+    xor ebp, ebp
+
+    ; Install one 64-bit interrupt gate for the PIT and remap the legacy PIC.
+    ; All other IRQs stay masked because keyboard and mouse input is polled.
+    mov rdi, idt_table
+    xor eax, eax
+    mov ecx, (256 * 16) / 8
+    rep stosq
+    mov rax, timer_interrupt_entry
+    mov word [idt_table + 32 * 16 + 0], ax
+    mov word [idt_table + 32 * 16 + 2], CODE64_SELECTOR
+    mov byte [idt_table + 32 * 16 + 4], 0
+    mov byte [idt_table + 32 * 16 + 5], 0x8E
+    shr rax, 16
+    mov word [idt_table + 32 * 16 + 6], ax
+    shr rax, 16
+    mov dword [idt_table + 32 * 16 + 8], eax
+    mov dword [idt_table + 32 * 16 + 12], 0
+    lidt [idt_descriptor]
+
+    mov al, 0x11
+    out 0x20, al
+    out 0xA0, al
+    mov al, 0x20
+    out 0x21, al
+    mov al, 0x28
+    out 0xA1, al
+    mov al, 0x04
+    out 0x21, al
+    mov al, 0x02
+    out 0xA1, al
+    mov al, 0x01
+    out 0x21, al
+    out 0xA1, al
+    mov al, 0xFE                         ; master: timer only
+    out 0x21, al
+    mov al, 0xFF                         ; slave: everything masked
+    out 0xA1, al
 
     call kernel_main
 
-.hang32:
+.hang64:
     cli
     hlt
-    jmp .hang32
+    jmp .hang64
+
+timer_interrupt_entry:
+    push rax
+    mov al, 0x20
+    out 0x20, al                         ; end of interrupt
+    pop rax
+    iretq
+
+; Atomically enable interrupts and sleep. STI delays recognition until after
+; the following HLT, avoiding the classic interrupt-before-sleep race.
+global cpu_idle
+cpu_idle:
+    sti
+    hlt
+    ret
 
 ; ------------------------------------------------------------------
-; Hardware port access, using the 32-bit System V cdecl calling convention.
+; Hardware port access, using the x86-64 System V ABI.
 ; ------------------------------------------------------------------
 
 global port_read_byte
 port_read_byte:
-    mov edx, [esp + 4]                 ; first argument: port
+    mov edx, edi                        ; first argument: port
     xor eax, eax
     in al, dx
     ret
 
 global port_write_byte
 port_write_byte:
-    mov edx, [esp + 4]                 ; first argument: port
-    mov eax, [esp + 8]                 ; second argument: value
+    mov edx, edi                        ; first argument: port
+    mov eax, esi                        ; second argument: value
     out dx, al
     ret
 
 ; ------------------------------------------------------------------
-; GDT: flat 32-bit code and data segments.
+; GDT: transition code, shared data and 64-bit kernel code.
 ; ------------------------------------------------------------------
 
 align 8
@@ -287,11 +395,23 @@ gdt_data:
     db 0xCF
     db 0x00
 
+gdt_code64:
+    dw 0x0000
+    dw 0x0000
+    db 0x00
+    db 0x9A
+    db 0x20                            ; L=1, D=0
+    db 0x00
+
 gdt_end:
 
 gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
+
+idt_descriptor:
+    dw 256 * 16 - 1
+    dq idt_table
 
 section .data
 align 16
@@ -326,5 +446,13 @@ vbe_controller_info:
 align 16
 vbe_mode_info:
     times 256 db 0
+
+section .stack nobits alloc write align=16
+idt_table:
+    resb 256 * 16
+align 16
+kernel_stack_bottom:
+    resb 16384
+kernel_stack_top:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

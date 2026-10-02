@@ -372,7 +372,7 @@ static void font_init(void) {
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
-    font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_glyphs = (const u8 *)(uptr)bios_font_address;
     font_levels = (const u8 *)0;
     font_native_levels = (const u8 *)0;
     font_ready = font_looks_valid(font_glyphs);
@@ -467,19 +467,34 @@ static u16 high_text_blend_rgb565(u16 background, u8 color, u8 alpha) {
     return (u16)((red >> 3u) << 11u | (green >> 2u) << 5u | (blue >> 3u));
 }
 
+/* A wallpaper marker means "take this exact physical pixel from the native
+ * PNG". UI colours still go through the tiny logical canvas as before. */
+static void physical_write(volatile u8 *framebuffer, u16 x, u16 y, u8 color) {
+    volatile u8 *row = framebuffer + (u32)y * video_pitch;
+    if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
+        const u32 native = wallpaper_pixel(x, y);
+        if (video_bits_per_pixel == 32u) {
+            ((volatile u32 *)row)[x] = native;
+        } else {
+            ((volatile u16 *)row)[x] =
+                (u16)(((native >> 8u) & 0xF800u) |
+                      ((native >> 5u) & 0x07E0u) |
+                      ((native >> 3u) & 0x001Fu));
+        }
+    } else if (video_bits_per_pixel == 32u) {
+        ((volatile u32 *)row)[x] = xrgb8888_color[color];
+    } else {
+        ((volatile u16 *)row)[x] = rgb565_color[color];
+    }
+}
+
 static void high_text_restore_pixel(volatile u8 *framebuffer, u16 x, u16 y) {
     const u16 logical_x = (u16)(((u32)(x - render_left) * SCREEN_WIDTH) /
                                render_width);
     const u16 logical_y = (u16)(((u32)(y - render_top) * SCREEN_HEIGHT) /
                                 render_height);
     const u8 color = screen[(u32)logical_y * SCREEN_WIDTH + logical_x];
-    volatile u8 *row = framebuffer + (u32)y * video_pitch;
-
-    if (video_bits_per_pixel == 32u) {
-        ((volatile u32 *)row)[x] = xrgb8888_color[color];
-    } else {
-        ((volatile u16 *)row)[x] = rgb565_color[color];
-    }
+    physical_write(framebuffer, x, y, color);
 }
 
 static void high_text_restore(const HighText *commands, u16 count) {
@@ -489,7 +504,7 @@ static void high_text_restore(const HighText *commands, u16 count) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(uptr)video_framebuffer_address;
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
         const u8 scale = high_text_scale();
@@ -591,7 +606,7 @@ static void high_text_draw(void) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(uptr)video_framebuffer_address;
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
         const u8 scale = high_text_scale();
@@ -727,7 +742,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
      * viewport, which is the useful optimization for v86's small profile. */
     color = xrgb8888_color[COLOR_DESKTOP];
     if (video_bits_per_pixel == 32u) {
-        volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+        volatile u32 *framebuffer = (volatile u32 *)(uptr)video_framebuffer_address;
         u16 y;
 
         for (y = 0u; y < video_height; ++y) {
@@ -789,6 +804,44 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
     const u16 bottom = vbe_y[y + 1u];
     u16 output_y;
 
+    /* Unlike UI pixels, every PNG pixel maps 1:1 to the framebuffer. Copy
+     * the exact native rectangle hidden by this logical canvas cell. */
+    if (color == COLOR_WALLPAPER && wallpaper_ready() != 0u) {
+        for (output_y = top; output_y < bottom; ++output_y) {
+            const u32 *source = wallpaper_row(output_y) + left;
+            u16 count = (u16)(right - left);
+
+            if (video_bits_per_pixel == 32u) {
+                volatile u32 *target = (volatile u32 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                if (((uptr)target & 7u) != 0u && count != 0u) {
+                    *target++ = *source++;
+                    --count;
+                }
+                while (count >= 2u) {
+                    *(volatile u64 *)target = *(const u64 *)source;
+                    target += 2;
+                    source += 2;
+                    count = (u16)(count - 2u);
+                }
+                if (count != 0u) {
+                    *target = *source;
+                }
+            } else {
+                volatile u16 *target = (volatile u16 *)(framebuffer +
+                    (u32)output_y * video_pitch) + left;
+                while (count != 0u) {
+                    const u32 native = *source++;
+                    *target++ = (u16)(((native >> 8u) & 0xF800u) |
+                                      ((native >> 5u) & 0x07E0u) |
+                                      ((native >> 3u) & 0x001Fu));
+                    --count;
+                }
+            }
+        }
+        return;
+    }
+
 #ifdef DIMOS_EMULATOR
     const u16 physical_width = (u16)(right - left);
     const u16 physical_height = (u16)(bottom - top);
@@ -820,26 +873,46 @@ static inline void present_vbe_pixel(volatile u8 *framebuffer, u16 x, u16 y,
 
     if (video_bits_per_pixel == 32u) {
         const u32 direct_color = xrgb8888_color[color];
+        const u64 pair = (u64)direct_color | ((u64)direct_color << 32u);
 
         for (output_y = top; output_y < bottom; ++output_y) {
             volatile u32 *pixel = (volatile u32 *)(framebuffer +
                 (u32)output_y * video_pitch) + left;
-            u16 output_x;
+            u16 count = (u16)(right - left);
 
-            for (output_x = left; output_x < right; ++output_x) {
+            if (((uptr)pixel & 7u) != 0u && count != 0u) {
                 *pixel++ = direct_color;
+                --count;
+            }
+            while (count >= 2u) {
+                *(volatile u64 *)pixel = pair;
+                pixel += 2;
+                count = (u16)(count - 2u);
+            }
+            if (count != 0u) {
+                *pixel = direct_color;
             }
         }
     } else {
         const u16 direct_color = rgb565_color[color];
+        const u32 pair = (u32)direct_color | ((u32)direct_color << 16u);
 
         for (output_y = top; output_y < bottom; ++output_y) {
             volatile u16 *pixel = (volatile u16 *)(framebuffer +
                 (u32)output_y * video_pitch) + left;
-            u16 output_x;
+            u16 count = (u16)(right - left);
 
-            for (output_x = left; output_x < right; ++output_x) {
+            if (((uptr)pixel & 3u) != 0u && count != 0u) {
                 *pixel++ = direct_color;
+                --count;
+            }
+            while (count >= 2u) {
+                *(volatile u32 *)pixel = pair;
+                pixel += 2;
+                count = (u16)(count - 2u);
+            }
+            if (count != 0u) {
+                *pixel = direct_color;
             }
         }
     }
@@ -872,7 +945,7 @@ static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y
 
 static void present_vbe(void) {
     volatile u8 *framebuffer =
-        (volatile u8 *)(u32)video_framebuffer_address;
+        (volatile u8 *)(uptr)video_framebuffer_address;
     const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
     u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
     u16 y;
@@ -951,7 +1024,7 @@ void gfx_show(void) {
 static void fill_bytes(u8 *target, u32 length, u8 color) {
     const u32 packed = (u32)color * 0x01010101u;
 
-    while (length != 0u && ((u32)target & 3u) != 0u) {
+    while (length != 0u && ((uptr)target & 3u) != 0u) {
         *target++ = color;
         --length;
     }
@@ -1666,13 +1739,10 @@ static void pointer_restore(void) {
 void gfx_draw_pointer(s16 x, s16 y) {
     s16 row;
     s16 column;
-    s16 offset;
 
-    /* A small, opaque crosshair is cheaper and much clearer than the old
-     * anti-aliased arrow (which became a blurry pixel cloud when scaled by
-     * VBE). x/y are the pointer centre, so the mark stays under the cursor.
-     * Restore the old 7x7 patch first: this keeps a mouse-only update dirty
-     * by a few logical pixels instead of requiring a full GUI redraw. */
+    /* The pointer hotspot is its top-left tip, like the host cursor used by
+     * VNC/Termux. Every visible pixel extends right/down from (x,y), avoiding
+     * the old crosshair appearing left and above the Android pointer. */
     if (pointer_drawn != 0u && pointer_drawn_x == x && pointer_drawn_y == y) {
         return;
     }
@@ -1698,10 +1768,16 @@ void gfx_draw_pointer(s16 x, s16 y) {
     pointer_drawn_y = y;
     pointer_drawn = 1u;
 
-    for (offset = -POINTER_RADIUS; offset <= POINTER_RADIUS; ++offset) {
-        gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
-        gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
+    for (row = 0; row <= POINTER_RADIUS; ++row) {
+        for (column = 0; column <= row; ++column) {
+            gfx_pixel((s16)(x + column), (s16)(y + row),
+                      (column == row) ? COLOR_WHITE : COLOR_CURSOR);
+        }
     }
+}
+
+u8 gfx_wallpaper_ready(void) {
+    return wallpaper_ready();
 }
 
 void gfx_init(void) {
@@ -1712,5 +1788,6 @@ void gfx_init(void) {
     render_height = video_height;
     render_left = 0u;
     render_top = 0u;
+    (void)wallpaper_load();
     gfx_clear(COLOR_DESKTOP);
 }

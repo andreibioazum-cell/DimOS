@@ -72,7 +72,7 @@ static void about_draw(void) {
     s16 y = (s16)(WINDOW_TOP + 3);
 
     gfx_text((s16)(WINDOW_LEFT + 6), y, "DimOS 2.0", COLOR_BLACK);
-    gfx_text((s16)(WINDOW_LEFT + 120), y, "i686 protected kernel in C", COLOR_BLUE);
+    gfx_text((s16)(WINDOW_LEFT + 120), y, "x86-64 long-mode kernel", COLOR_BLUE);
     y = (s16)(y + 10);
 
     /* xfce4-about would say the same, give or take a mouse. */

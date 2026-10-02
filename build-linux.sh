@@ -120,23 +120,23 @@ build_kernel() {
     local source
     local objects=()
 
-    log_info "Assembling BIOS-to-32-bit protected-mode entry"
-    nasm -f elf32 ${KERNEL_ASMFLAGS:-} src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
+    log_info "Assembling BIOS-to-x86-64 long-mode entry"
+    nasm -f elf64 ${KERNEL_ASMFLAGS:-} src/kernel/kernel.asm -o "$KERNEL_ENTRY_OBJECT"
 
     for source in src/kernel/*.c; do
         objects+=("bin/$(basename "${source%.c}").o")
         "$compiler" \
-            -m32 -march=i686 -std=c11 -Os ${KERNEL_CFLAGS:-} \
+            -m64 -march=x86-64 -mcmodel=small -std=c11 -Os ${KERNEL_CFLAGS:-} \
             -Wall -Wextra -Wpedantic -Werror \
             -ffreestanding -fno-builtin -fno-pic -fno-pie \
             -fno-stack-protector -fno-asynchronous-unwind-tables \
             -fno-unwind-tables -mno-red-zone -mgeneral-regs-only \
             -c "$source" -o "bin/$(basename "${source%.c}").o"
     done
-    log_ok "Compiled ${#objects[@]} i686 C files"
+    log_ok "Compiled ${#objects[@]} x86-64 C files"
 
-    log_info "Linking flat 32-bit protected-mode kernel"
-    "$linker" -m elf_i386 --build-id=none -nostdlib \
+    log_info "Linking flat 64-bit long-mode kernel"
+    "$linker" -m elf_x86_64 --build-id=none -nostdlib \
         -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
         "$KERNEL_ENTRY_OBJECT" "${objects[@]}" -o "$KERNEL_ELF"
     "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN
@@ -225,12 +225,12 @@ mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
 
 # The desktop font: any TrueType file dropped into fonts/font.ttf ships on
 # the disk as FONT.TTF and the kernel rasterizes it at boot (font_ttf.c).
-# It must fit inside the 256 data sectors the bootloader preloads,
-# together with the kernel that sits in front of it.
+# It must fit inside the 384 data sectors the bootloader preloads,
+# together with the kernel and native wallpaper that sit next to it.
 if [[ -f fonts/font.ttf ]]; then
     font_size=$(file_size fonts/font.ttf)
     kernel_sectors=$(( (kernel_size + 511) / 512 ))
-    font_limit=$(( (256 - kernel_sectors) * 512 ))
+    font_limit=$(( (384 - kernel_sectors) * 512 ))
     (( font_size <= font_limit )) || fail \
 "fonts/font.ttf is too big: $font_size bytes, but only $font_limit fit into
 the preloaded disk window next to the kernel. Subset the font to ASCII, e.g.:
@@ -240,6 +240,27 @@ the preloaded disk window next to the kernel. Subset the font to ASCII, e.g.:
 else
     log_info "fonts/font.ttf not found -- the kernel will use the BIOS font"
 fi
+
+# Ship exactly one native-resolution wallpaper. Both source PNGs stay in the
+# repository for editing, but each boot image pays for only its own profile.
+if [[ " ${KERNEL_CFLAGS:-} " == *" -DDIMOS_EMULATOR "* ]]; then
+    wallpaper_source="images/wallpaper-emulator.png"
+    wallpaper_profile="640x480 emulator"
+else
+    wallpaper_source="images/wallpaper-pc.png"
+    wallpaper_profile="1920x1080 PC"
+fi
+require_file "$wallpaper_source"
+mcopy -i "$BOOT_IMAGE" "$wallpaper_source" ::/WALLPAPER.PNG
+wallpaper_size=$(file_size "$wallpaper_source")
+font_size_on_disk=0
+[[ ! -f fonts/font.ttf ]] || font_size_on_disk=$(file_size fonts/font.ttf)
+preload_sectors=$(( (kernel_size + 511) / 512 +
+                    (font_size_on_disk + 511) / 512 +
+                    (wallpaper_size + 511) / 512 ))
+(( preload_sectors <= 384 )) || fail \
+    "Kernel, font and wallpaper need $preload_sectors sectors; boot preload holds 384"
+log_ok "Native wallpaper: $wallpaper_source ($wallpaper_profile, $wallpaper_size bytes)"
 
 # Ship a small ordinary file so the file manager has a real FAT12 file to inspect.
 if [[ -d files ]]; then

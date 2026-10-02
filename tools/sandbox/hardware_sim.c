@@ -13,7 +13,7 @@
  *   - the clock chip and the speaker.
  *
  * The runner and the simulated hardware share a block of memory at
- * 0x200000 (the protected-mode kernel uses 0x100000..0x1FFFFF for BSS): the
+ * 0x200000 (the long-mode kernel uses 0x100000..0x1FFFFF for BSS): the
  * runner writes input and time there, and the kernel writes the palette there.
  */
 
@@ -49,7 +49,7 @@ __attribute__((section(".data"))) u32 bios_font_address;
 
 /* The real-mode entry normally fills these after probing VBE. Exercise the
  * preferred full-HD XRGB8888 presenter in every visual-tour frame; 0x900000
- * sits just above the kernel's 4 MiB RAM disk in the simulated physical map. */
+ * sits above the kernel's compact RAM disk in the simulated physical map. */
 __attribute__((section(".data"))) u8 video_backend = VIDEO_BACKEND_VBE;
 __attribute__((section(".data"))) u32 video_framebuffer_address = 0x00900000u;
 __attribute__((section(".data"))) u16 video_pitch = 1920u * 4u;
@@ -58,7 +58,7 @@ __attribute__((section(".data"))) u16 video_height = 1080u;
 __attribute__((section(".data"))) u8 video_bits_per_pixel = 32u;
 
 /* Timer chip. */
-#define SIMULATOR_TIMER_DIVISOR 65535u
+#define SIMULATOR_TIMER_DIVISOR 9943u
 #define COUNTS_PER_MILLISECOND 1193u
 
 static u8 timer_low_latched;
@@ -98,6 +98,11 @@ static void latch_timer(void) {
     timer_low_latched = (u8)(value & 0xFFu);
     timer_high_latched = (u8)(value >> 8u);
     timer_bytes_left = 2u;
+}
+
+/* Unicorn has no external PIT thread; counter latches advance simulated time,
+ * so the HLT abstraction is simply a yield point in the host tour. */
+void cpu_idle(void) {
 }
 
 u8 port_read_byte(u16 port) {

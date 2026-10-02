@@ -1,7 +1,7 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a freestanding i686 protected-mode kernel with a graphical
+ * DimOS is a freestanding x86-64 long-mode kernel with a graphical
  * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
  * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
  * "DimXfce": a full Xfce style
@@ -13,11 +13,12 @@
  * text.
  *
  * Coding rules for this directory:
- *   - everything is plain C11, freestanding (no libc, no interrupts, no
+ *   - everything is plain C11 for the x86-64 System V ABI, freestanding
+ *     (no libc, no interrupts, no
  *     inline assembly);
  *   - the only assembly in the project is src/bootloader/boot.asm (the 512
  *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery and the
- *     switch into flat 32-bit protected mode), because those jobs need CPU
+ *     transition through protected mode into x86-64 long mode), because those jobs need CPU
  *     instructions and BIOS calls C cannot express;
  *   - hardware is reached through port_read_byte()/port_write_byte() and
  *     plain pointers, both defined below.
@@ -34,6 +35,7 @@ typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
 typedef signed long long s64;
+typedef u64 uptr; /* native x86-64 pointer-sized integer */
 
 /* ------------------------------------------------------------------ */
 /* Hardware ports                                                      */
@@ -41,6 +43,7 @@ typedef signed long long s64;
 
 u8 port_read_byte(u16 port);
 void port_write_byte(u16 port, u8 value);
+void cpu_idle(void); /* STI+HLT until the next 120 Hz timer interrupt */
 
 #define PORT_PIT_CHANNEL_0 0x40u
 #define PORT_PIT_CHANNEL_2 0x42u
@@ -93,7 +96,7 @@ extern u16 video_height;
 extern u8 video_bits_per_pixel;
 
 /* Free RAM below one megabyte that applications may use as a bitmap. */
-#define SCRATCH_ADDRESS 0x00050000u
+#define SCRATCH_ADDRESS 0x00080000u
 #define SCRATCH_BYTES 32768u
 
 /* Where the boot code copies the 8x8 font that ships in the video BIOS. */
@@ -221,6 +224,17 @@ void gfx_draw_pointer(s16 x, s16 y);
 u16 gfx_text_width(const char *text);
 void gfx_select_theme(u8 theme);
 u8 gfx_current_theme(void);
+u8 gfx_wallpaper_ready(void);
+#define COLOR_WALLPAPER 255u /* native PNG pixel; never palette-scaled */
+
+/* ------------------------------------------------------------------ */
+/* wallpaper.c -- streaming native-resolution PNG decoder             */
+/* ------------------------------------------------------------------ */
+
+u8 wallpaper_load(void);
+u8 wallpaper_ready(void);
+u32 wallpaper_pixel(u16 x, u16 y);
+const u32 *wallpaper_row(u16 y);
 
 /* ------------------------------------------------------------------ */
 /* input.c -- PS/2 keyboard and mouse                                  */
@@ -306,7 +320,7 @@ void text_trim(char *text);
 void text_pad_right(char *destination, u16 width, u16 capacity);
 
 /* ------------------------------------------------------------------ */
-/* fs.c -- the 4 MiB RAM disk and the FAT12 boot volume                */
+/* fs.c -- the 512 KiB RAM disk and the FAT12 boot volume              */
 /* ------------------------------------------------------------------ */
 
 void ram_disk_init(void);
@@ -321,7 +335,7 @@ u32 ram_disk_sectors(void);
 void file_system_init(void);
 u16 file_system_visible_count(void);
 u16 file_system_visible(u16 slot);      /* directory index of a visible slot */
-void file_system_name(u16 index, char *out);
+void file_system_name(u16 index, char *out, u16 capacity);
 u32 file_system_size(u16 index);
 u16 file_system_find(const char *name);
 u32 file_system_read(u16 index, u32 offset, void *buffer, u32 length);

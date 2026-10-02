@@ -126,6 +126,11 @@ static void command_help(void) {
     terminal_print("  DIR          list the files on the disk");
     terminal_print("  TYPE name    read a file");
     terminal_print("  DEL name     hide a file until reboot");
+    terminal_print("  MEM addr n   read up to 8 physical bytes");
+    terminal_print("  POKE addr v  write one physical byte (ring 0)");
+    terminal_print("  IN port      read an x86 I/O port");
+    terminal_print("  OUT port v   write an x86 I/O port");
+    terminal_print("  REBOOT       restart the machine");
     terminal_print("  CLS          clear this window");
     terminal_print("  TIME         show the clock");
     terminal_print("  DATE         show the date");
@@ -148,7 +153,7 @@ static void command_directory(void) {
         if (index == FILE_NOT_FOUND) {
             break;
         }
-        file_system_name(index, line);
+        file_system_name(index, line, (u16)sizeof(line));
         text_pad_right(line, 13u, (u16)sizeof(line));
         text_append_number(line, file_system_size(index), (u16)sizeof(line));
         text_append(line, " bytes", (u16)sizeof(line));
@@ -249,6 +254,127 @@ static char *split_argument(char *command) {
     return command;
 }
 
+static u8 number_digit(char character, u8 *value) {
+    if (character >= '0' && character <= '9') {
+        *value = (u8)(character - '0');
+        return 1u;
+    }
+    if (character >= 'A' && character <= 'F') {
+        *value = (u8)(character - 'A' + 10);
+        return 1u;
+    }
+    if (character >= 'a' && character <= 'f') {
+        *value = (u8)(character - 'a' + 10);
+        return 1u;
+    }
+    return 0u;
+}
+
+/* CMD-style numbers are decimal unless prefixed with 0x. */
+static u8 parse_number(char **text, u32 *value) {
+    char *at = *text;
+    u32 base = 10u;
+    u8 any = 0u;
+
+    while (*at == ' ') {
+        ++at;
+    }
+    if (at[0] == '0' && (at[1] == 'x' || at[1] == 'X')) {
+        base = 16u;
+        at += 2;
+    }
+    *value = 0u;
+    while (*at != '\0' && *at != ' ') {
+        u8 digit;
+        if (number_digit(*at, &digit) == 0u || digit >= base) {
+            return 0u;
+        }
+        *value = *value * base + digit;
+        any = 1u;
+        ++at;
+    }
+    while (*at == ' ') {
+        ++at;
+    }
+    *text = at;
+    return any;
+}
+
+static void append_hex(char *out, u16 capacity, u32 value, u8 digits) {
+    static const char hex[] = "0123456789ABCDEF";
+    while (digits != 0u) {
+        const u8 shift = (u8)((digits - 1u) * 4u);
+        text_append_character(out, hex[(value >> shift) & 0x0Fu], capacity);
+        --digits;
+    }
+}
+
+static void command_memory(char *arguments) {
+    u32 address;
+    u32 count = 8u;
+    u32 parsed;
+    char line[TERM_COLUMNS + 1u];
+    u32 index;
+
+    if (parse_number(&arguments, &address) == 0u) {
+        terminal_print("Usage: MEM 0xADDRESS [1..8]");
+        return;
+    }
+    if (*arguments != '\0') {
+        if (parse_number(&arguments, &parsed) == 0u) {
+            terminal_print("Bad byte count");
+            return;
+        }
+        count = parsed;
+    }
+    if (count == 0u || count > 8u || address > 0x01FFFFFFu - count) {
+        terminal_print("Range must be inside first 32 MiB");
+        return;
+    }
+    line[0] = '\0';
+    append_hex(line, (u16)sizeof(line), address, 8u);
+    text_append(line, ":", (u16)sizeof(line));
+    for (index = 0u; index < count; ++index) {
+        text_append_character(line, ' ', (u16)sizeof(line));
+        append_hex(line, (u16)sizeof(line),
+                   *(const volatile u8 *)(uptr)(address + index), 2u);
+    }
+    terminal_print(line);
+}
+
+static void command_poke(char *arguments) {
+    u32 address;
+    u32 value;
+    if (parse_number(&arguments, &address) == 0u ||
+        parse_number(&arguments, &value) == 0u || value > 255u ||
+        address < 0x1000u || address > 0x01FFFFFFu) {
+        terminal_print("Usage: POKE 0xADDRESS 0xBYTE");
+        return;
+    }
+    *(volatile u8 *)(uptr)address = (u8)value;
+    terminal_print("Physical memory changed");
+}
+
+static void command_port(char *arguments, u8 write) {
+    u32 port;
+    u32 value = 0u;
+    char line[16];
+    if (parse_number(&arguments, &port) == 0u || port > 0xFFFFu ||
+        (write != 0u && (parse_number(&arguments, &value) == 0u || value > 255u))) {
+        terminal_print((write != 0u) ? "Usage: OUT port byte" : "Usage: IN port");
+        return;
+    }
+    if (write != 0u) {
+        port_write_byte((u16)port, (u8)value);
+        terminal_print("I/O port written");
+        return;
+    }
+    line[0] = '\0';
+    text_append(line, "0x", (u16)sizeof(line));
+    append_hex(line, (u16)sizeof(line), port_read_byte((u16)port), 2u);
+    terminal_print(line);
+}
+
 static void run_command(char *command) {
     char *argument = split_argument(command);
 
@@ -266,6 +392,17 @@ static void run_command(char *command) {
         command_type(argument);
     } else if (text_equal_ignore_case(command, "DEL") != 0u) {
         command_delete(argument);
+    } else if (text_equal_ignore_case(command, "MEM") != 0u ||
+               text_equal_ignore_case(command, "PEEK") != 0u) {
+        command_memory(argument);
+    } else if (text_equal_ignore_case(command, "POKE") != 0u) {
+        command_poke(argument);
+    } else if (text_equal_ignore_case(command, "IN") != 0u) {
+        command_port(argument, 0u);
+    } else if (text_equal_ignore_case(command, "OUT") != 0u) {
+        command_port(argument, 1u);
+    } else if (text_equal_ignore_case(command, "REBOOT") != 0u) {
+        system_restart();
     } else if (text_equal_ignore_case(command, "CLS") != 0u ||
                text_equal_ignore_case(command, "CLEAR") != 0u) {
         history_count = 0u;
@@ -283,7 +420,7 @@ static void run_command(char *command) {
         text_append_number(buffer, clock_day(), (u16)sizeof(buffer));
         terminal_print(buffer);
     } else if (text_equal_ignore_case(command, "VER") != 0u) {
-        terminal_print("DimOS 2.0 + DimXfce, i686 protected mode");
+        terminal_print("DimOS 2.0 x86-64 long mode, ring 0");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
         terminal_print("Palette switched");
@@ -346,7 +483,8 @@ static void press_character(char character) {
 
 static void terminal_open(void) {
     if (history_count == 0u) {
-        terminal_print("DimXfce terminal");
+        terminal_print("DimOS Ring-0 Command Processor");
+        terminal_print("WARNING: POKE/OUT can crash hardware");
         terminal_print("Type HELP and press ENT");
         terminal_print("");
     }
@@ -361,7 +499,7 @@ static void terminal_draw(void) {
     u16 row;
     u16 column;
     const s16 text_top = (s16)(WINDOW_TOP + 2);
-    char prompt[INPUT_LIMIT + 3u];
+    char prompt[INPUT_LIMIT + 8u];
 
     gfx_fill((s16)(WINDOW_LEFT + 2), text_top, (s16)(TERM_COLUMNS * 8 + 4),
              (s16)(TERM_VISIBLE_ROWS * 9 + 4), COLOR_DEEP);
@@ -384,7 +522,7 @@ static void terminal_draw(void) {
                 (s16)(TERM_VISIBLE_ROWS * 9 + 4), COLOR_SHADOW);
 
     prompt[0] = '\0';
-    text_append(prompt, "> ", (u16)sizeof(prompt));
+    text_append(prompt, "C:\\> ", (u16)sizeof(prompt));
     text_append(prompt, input_line, (u16)sizeof(prompt));
     text_append(prompt, "_", (u16)sizeof(prompt));
     gfx_fill((s16)(WINDOW_LEFT + 2), (s16)(text_top + TERM_VISIBLE_ROWS * 9 + 6),

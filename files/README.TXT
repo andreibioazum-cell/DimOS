@@ -1,13 +1,12 @@
 DimOS 2.0 + DimXfce
 
-The i686 protected-mode kernel uses a VBE XRGB framebuffer at up to 60
-FPS. The PC image selects 1920x1080; the v86 emulator image selects a real
-640x480 physical VBE mode so DimOS fills the emulator without blue borders.
-RGB565 and VGA compatibility fallbacks remain available.
+The x86-64 kernel runs in IA-32e long mode with identity-mapped paging and
+uses a VBE XRGB framebuffer at up to 60 FPS. The PC image selects 1920x1080;
+the emulator image selects a real 640x480 physical VBE mode. RGB565 and VGA
+compatibility fallbacks remain available.
 
-The mouse logo at the top left opens the Whisker menu with every app.
-Right click on the wallpaper does the same, xfdesktop style.
-The ^ button in a window title rolls it up into a slat, the little
+Right click on the wallpaper opens the Whisker menu, xfdesktop style.
+The square title buttons minimize, maximize or close; the little
 monitor in the dock shows and hides the desktop, and the power button
 on the panel restarts DimXfce.
 

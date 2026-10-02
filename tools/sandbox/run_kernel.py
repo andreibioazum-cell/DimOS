@@ -293,8 +293,8 @@ class Machine:
 # byte cluster on purpose, so opening it also exercises the FAT12 chain.
 README_TEXT = (
     "DIMOS 2.0 + DIMXFCE - THE TINY Xfce DESKTOP.\r\n"
-    "THE MOUSE AT TOP LEFT HIDES THE WHISKER MENU; A\r\n"
-    "RIGHT CLICK ON THE WALLPAPER WORKS TOO. THE ^ KEY\r\n"
+    "APPLICATIONS LAUNCH FROM THE TRANSPARENT BOTTOM DOCK.\r\n"
+    "RIGHT CLICK ON THE WALLPAPER OPENS THE WHISKER MENU. THE ^ KEY\r\n"
     "ROLLS A WINDOW UP, THE DOCK MONITOR HIDES IT ALL.\r\n"
     "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\r\n"
 )
@@ -392,7 +392,6 @@ def plant_boot_disk(machine, flat):
 CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
 SHADE_BOX = (280, 23)     # the roll-up button left of minimize
 ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
-MENU_BUTTON = (24, 6)     # the little mouse at the panel's left
 DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
 DOCK_Y = 190
 
@@ -401,15 +400,8 @@ WINDOW_LEFT = 9
 WINDOW_TOP = 30
 
 
-def icon_center(index):
-    # Desktop icons: two Xfce columns, cells 60x32 starting at (6, 19).
-    column = index % 2
-    row = index // 2
-    return (6 + column * 60 + 28, 19 + row * 32 + 15)
-
-
 def dock_center(index):
-    # The compact glass dock: nine 20 px cells, centred in the pill.
+    # The transparent dock: nine 20 px cells centred along the bottom.
     left = (320 - 9 * 20) // 2
     return (left + index * 20 + 10, DOCK_Y)
 
@@ -445,7 +437,7 @@ def tour():
     machine.screenshot("01-desktop")
 
     print("\nFiles: open the disk listing, then read a file")
-    machine.click(*icon_center(0))
+    machine.click(*dock_center(0))
     machine.screenshot("02-files")
     machine.click(WINDOW_LEFT + 2 + 108, WINDOW_TOP + 2 + 14 + 7)  # README.TXT
     machine.click(9 + 216 + 8 + 37, WINDOW_TOP + 2 + 7)            # Open
@@ -455,7 +447,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nSnake: steer with the on-screen pad")
-    machine.click(*icon_center(1))
+    machine.click(*dock_center(1))
     machine.screenshot("04-snake")
     machine.click(229, 71)                   # up
     machine.frames_run(14)
@@ -465,7 +457,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nMines: open a square")
-    machine.click(*icon_center(2))
+    machine.click(*dock_center(2))
     machine.click(76, 97)
     machine.screenshot("06-mines")
     machine.right_click(13 + 8 * 14 + 7, WINDOW_TOP + 4 + 8 * 14 + 7)
@@ -473,13 +465,13 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nPaint: drag a line")
-    machine.click(*icon_center(3))
+    machine.click(*dock_center(3))
     machine.drag(30, 52, 180, 122)
     machine.screenshot("08-paint")
     machine.click(*CLOSE_BOX)
 
     print("\nCalculator: 7 + 8 =")
-    machine.click(*icon_center(4))
+    machine.click(*dock_center(4))
     machine.click(*calc_key(0, 0))   # 7
     machine.click(*calc_key(3, 3))   # +
     machine.click(*calc_key(0, 1))   # 8
@@ -488,14 +480,14 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nMusic, with the black record title bar")
-    machine.click(*icon_center(5))
+    machine.click(*dock_center(5))
     machine.click(9 + 4 + 61, WINDOW_TOP + 9)  # the Chime button
     machine.frames_run(6)
     machine.screenshot("10-music")
     machine.click(*CLOSE_BOX)
 
     print("\nCheesy Balls: the mouse's own kitchen")
-    machine.click(*icon_center(6))
+    machine.click(*dock_center(6))
     machine.click(63, WINDOW_TOP + 110)    # NYAM!
     machine.click(63, WINDOW_TOP + 110)    # NYAM!
     machine.screenshot("11-cheesy")
@@ -503,7 +495,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nAbout, then the green phosphor theme")
-    machine.click(*icon_center(7))
+    machine.click(*dock_center(7))
     machine.screenshot("12-about")
     machine.click(13 + 6 + 45, 148 + 7)    # the Theme button
     machine.screenshot("13-about-green")
@@ -513,7 +505,7 @@ def tour():
     machine.click(*CLOSE_BOX)
 
     print("\nTerminal: type DIR on the on-screen keyboard")
-    machine.click(*icon_center(8))
+    machine.click(*dock_center(8))
     machine.screenshot("14-terminal")
     machine.click(*term_key(2, 2))   # D
     machine.click(*term_key(1, 7))   # I
@@ -528,18 +520,16 @@ def tour():
     machine.screenshot("16-back-to-desktop")
 
     print("\nKeyboard only: arrows move the focus, Enter opens")
-    machine.send_keyboard(list(ARROW_CODES["left"]))
+    machine.send_keyboard(list(ARROW_CODES["down"]))
     machine.frames_run(1)
-    machine.send_keyboard(list(ARROW_CODES["up"]))
-    machine.frames_run(1)
-    machine.send_keyboard([0x1C, 0x9C])   # Enter opens the focused icon
+    machine.send_keyboard([0x1C, 0x9C])   # Enter opens the centred Calc dock item
     machine.frames_run(2)
     machine.screenshot("17-keyboard-open")
     machine.send_keyboard([0x01, 0x81])
     machine.frames_run(2)
 
-    print("\nWhisker menu: the mouse button, the Games filter")
-    machine.click(*MENU_BUTTON)
+    print("\nWhisker menu: right click, then the Games filter")
+    machine.right_click(200, 60)
     machine.screenshot("18-whisker-menu")
     machine.click(*menu_class_button(1))   # Games
     machine.screenshot("19-whisker-games")

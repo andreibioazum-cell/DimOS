@@ -294,8 +294,8 @@ class Machine:
 README_TEXT = (
     "DIMOS 2.0 + DIMXFCE - THE TINY Xfce DESKTOP.\r\n"
     "APPLICATIONS LAUNCH FROM THE TRANSPARENT BOTTOM DOCK.\r\n"
-    "RIGHT CLICK ON THE WALLPAPER OPENS THE WHISKER MENU. THE ^ KEY\r\n"
-    "ROLLS A WINDOW UP, THE DOCK MONITOR HIDES IT ALL.\r\n"
+    "RIGHT CLICK ON THE WALLPAPER OPENS THE WHISKER MENU.\r\n"
+    "SQUARE TITLE BUTTONS MINIMIZE, MAXIMIZE AND CLOSE WINDOWS.\r\n"
     "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\r\n"
 )
 NOTES_TEXT = (
@@ -389,9 +389,9 @@ def plant_boot_disk(machine, flat):
     machine.mu.mem_write(0x0413, (640).to_bytes(2, "little"))
 
 
-CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
-SHADE_BOX = (280, 23)     # the roll-up button left of minimize
-ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
+CLOSE_BOX = (306, 22)          # neutral square X button
+MAXIMIZE_BOX = (296, 22)       # square maximize button in a normal window
+MAXIMIZED_RESTORE = (302, 5)   # same control after the frame fills the screen
 DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
 DOCK_Y = 190
 
@@ -536,10 +536,10 @@ def tour():
     machine.click(*menu_cell(6))           # Cheesy Balls from the menu
     machine.screenshot("20-menu-launched")
 
-    print("\nxfwm4 tricks: roll the window up, then unroll it")
-    machine.click(*SHADE_BOX)
-    machine.screenshot("21-rolled-up")
-    machine.click(*ROLLED_SLAT)
+    print("\nWindow controls: maximize, then restore")
+    machine.click(*MAXIMIZE_BOX)
+    machine.screenshot("21-maximized")
+    machine.click(*MAXIMIZED_RESTORE)
 
     print("\nThe dock breastfeeding: Calc from plank, minimize to desktop")
     machine.click(*dock_center(4))

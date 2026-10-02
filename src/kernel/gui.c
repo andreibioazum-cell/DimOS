@@ -3,10 +3,9 @@
  *
  * This is a fresh Deepin-inspired shell squeezed into 320x200 pixels: a
  * pastel mountain wallpaper, a compact application launcher, soft window
- * decorations (shade / minimize / close), and a floating glass dock of
- * launchers at the bottom. Right click on the desktop
- * opens the menu, and long pressing the desktop button rolls the open
- * window up into its title bar -- two of Xfce's signature gestures.
+ * decorations (minimize / maximize / close), and a floating dock of
+ * launchers at the bottom. Right click on the desktop opens the menu, while
+ * the square title controls minimize, maximize/restore and close windows.
  *
  * Everything on screen is either a picture or a button, and every button
  * announces where it is while it is being drawn. A click is then simply
@@ -29,7 +28,7 @@
  * below this range. */
 #define HOTSPOT_DOCK_BASE 0x8100u  /* the dock's launchers            */
 #define HOTSPOT_CLOSE 0x8201u
-#define HOTSPOT_SHADE 0x8202u      /* roll the window up like a blind */
+#define HOTSPOT_MAXIMIZE 0x8202u   /* toggle full-screen window       */
 #define HOTSPOT_MINIMIZE 0x8203u
 #define HOTSPOT_MENU_BASE 0x8210u
 #define HOTSPOT_MENU_ABOUT 0x8230u
@@ -121,12 +120,11 @@ static u16 active_application = 0xFFFFu;
 static u8 arrows_reserved;
 static char status_line[40];
 
-/* DimXfce state: the Whisker menu, a window rolled up into its title bar,
- * the gradient of the current window's title bar, and a tooltip that pops
- * while the pointer is held on the panel or dock chrome. */
+/* DimXfce state: launcher visibility, maximized window state, title colour
+ * and the tooltip shown while a chrome control is held. */
 static u8 menu_open;
 static u8 menu_class;
-static u8 window_rolled;
+static u8 window_maximized;
 static u8 title_top_color = COLOR_SELECTION;
 static u16 last_application = 0xFFFFu;
 static u16 panel_tooltip = HOTSPOT_NONE;
@@ -310,41 +308,42 @@ void gui_message_bar(const char *text) {
     text_copy(status_line, shown, (u16)sizeof(status_line));
 }
 
-/* xfwm4 decorations: a dark gradient title bar, a deep frame, and the
- * signature three buttons on the right -- roll up (shade), minimize and
- * close. One Application may re-tint its title bar for style: the black
- * record window of the Music app does, like a real media player that
- * ships its own theme. */
+/* xfwm4 decorations: three plain square controls in the familiar order:
+ * minimize, maximize/restore, close. Applications may still re-tint the bar. */
 void gui_window_title_color(u8 top_color) {
     title_top_color = top_color;
 }
 
 static void draw_window_chrome(const char *title, u8 interior) {
-    const s16 buttons_right = (s16)(WINDOW_X + WINDOW_WIDTH - 4);
+    const s16 frame_x = (window_maximized != 0u) ? 0 : (s16)WINDOW_X;
+    const s16 frame_y = (window_maximized != 0u) ? 0 : (s16)WINDOW_Y;
+    const s16 frame_width = (window_maximized != 0u) ? (s16)SCREEN_WIDTH
+                                                     : (s16)WINDOW_WIDTH;
+    const s16 frame_height = (window_maximized != 0u) ? (s16)SCREEN_HEIGHT
+                                                      : (s16)WINDOW_HEIGHT;
+    const s16 buttons_right = (s16)(frame_x + frame_width - 3);
+    const s16 button_y = (s16)(frame_y + 1);
 
-    gfx_fill((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH, (s16)WINDOW_HEIGHT,
+    gfx_fill(frame_x, frame_y, frame_width, frame_height,
              (interior != 0u) ? COLOR_FACE : COLOR_SELECTION);
-    gfx_outline((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH,
-                (s16)WINDOW_HEIGHT, COLOR_DEEP);
-
-    /* Modern glassy title bar: blue at the top, deeper at the lower edge,
-     * with generous white space in the application body. */
-    gfx_gradient_vertical((s16)(WINDOW_X + 1), (s16)(WINDOW_Y + 1),
-                          (s16)(WINDOW_WIDTH - 2), 10,
+    gfx_outline(frame_x, frame_y, frame_width, frame_height, COLOR_DEEP);
+    gfx_gradient_vertical((s16)(frame_x + 1), (s16)(frame_y + 1),
+                          (s16)(frame_width - 2), 10,
                           title_top_color, COLOR_TITLE_BAR);
-    gfx_text((s16)(WINDOW_X + 5), (s16)(WINDOW_Y + 2), title, COLOR_WHITE);
+    gfx_text((s16)(frame_x + 5), (s16)(frame_y + 2), title, COLOR_WHITE);
 
-    /* Roll up, minimize, close -- flat xfwm4 style buttons. */
-    gui_button_colored((s16)(buttons_right - 35), (s16)(WINDOW_Y + 2), 11, 8,
-                       "^", HOTSPOT_SHADE, (interior != 0u) ? COLOR_FACE : COLOR_PANEL,
-                       (interior != 0u) ? COLOR_BLACK : COLOR_WHITE);
     if (interior != 0u) {
-        gui_button_colored((s16)(buttons_right - 23), (s16)(WINDOW_Y + 2), 11, 8,
-                           "_", HOTSPOT_MINIMIZE, COLOR_FACE, COLOR_BLACK);
-        gui_button_colored((s16)(buttons_right - 11), (s16)(WINDOW_Y + 2), 11, 8,
-                           "X", HOTSPOT_CLOSE, COLOR_ALERT, COLOR_WHITE);
-        gfx_horizontal_line((s16)(WINDOW_X + 1), (s16)(WINDOW_Y + 11),
-                            (s16)(WINDOW_WIDTH - 2), COLOR_SHADOW);
+        /* Neutral 9x9 squares: no red close button and no ambiguous '^'. */
+        gui_button_colored((s16)(buttons_right - 29), button_y, 9, 9, "_",
+                           HOTSPOT_MINIMIZE, COLOR_FACE, COLOR_BLACK);
+        gui_button_colored((s16)(buttons_right - 19), button_y, 9, 9, "",
+                           HOTSPOT_MAXIMIZE, COLOR_FACE, COLOR_BLACK);
+        gfx_outline((s16)(buttons_right - 17), (s16)(button_y + 2), 5, 5,
+                    COLOR_BLACK);
+        gui_button_colored((s16)(buttons_right - 9), button_y, 9, 9, "X",
+                           HOTSPOT_CLOSE, COLOR_FACE, COLOR_BLACK);
+        gfx_horizontal_line((s16)(frame_x + 1), (s16)(frame_y + 11),
+                            (s16)(frame_width - 2), COLOR_SHADOW);
     }
 }
 
@@ -367,13 +366,6 @@ static void clock_text(char *out, u16 capacity) {
         text_append_character(out, '0', capacity);
     }
     text_append_number(out, clock_minutes(), capacity);
-}
-
-/* Labelled text with the soft shadow xfdesktop paints behind icon names,
- * so captions stay readable over any part of the wallpaper. */
-static void text_shadowed(s16 x, s16 y, const char *text, u8 color) {
-    gfx_text((s16)(x + 1), (s16)(y + 1), text, COLOR_BLACK);
-    gfx_text(x, y, text, color);
 }
 
 /* The wallpaper is deliberately calm and bright: a pastel sky, a warm sun,
@@ -442,11 +434,6 @@ static void draw_desktop_surface(void) {
      * the launcher without a duplicate shortcut menu in the top-left. */
     gui_hotspot(0, (s16)DESKTOP_TOP, (s16)SCREEN_WIDTH, (s16)DESKTOP_HEIGHT,
                 HOTSPOT_DESKTOP);
-
-    text_shadowed(174, (s16)(DESKTOP_TOP + DESKTOP_HEIGHT - 29),
-                  "Right click: menu!", COLOR_HILITE);
-    text_shadowed(246, (s16)(DESKTOP_TOP + DESKTOP_HEIGHT - 17),
-                  "am-nyam!", COLOR_ACCENT);
 }
 
 /* Rounded glass for the clock, menus and setup cards: bright edge, cool face
@@ -678,10 +665,12 @@ static void tooltip_for(u16 id) {
                                                        : "Restore the window";
         tooltip_x = 32;
         tooltip_y = (s16)(TASK_BAR_TOP - 13);
-    } else if (id == HOTSPOT_SHADE) {
-        tooltip_text = "Roll up / unroll";
-        tooltip_x = (s16)(WINDOW_X + WINDOW_WIDTH - 44);
-        tooltip_y = (s16)(WINDOW_Y + 13);
+    } else if (id == HOTSPOT_MAXIMIZE) {
+        tooltip_text = (window_maximized != 0u) ? "Restore window"
+                                                : "Maximize window";
+        tooltip_x = (window_maximized != 0u) ? 295
+                                              : (s16)(WINDOW_X + WINDOW_WIDTH - 19);
+        tooltip_y = (window_maximized != 0u) ? 13 : (s16)(WINDOW_Y + 13);
     } else {
         tooltip_text = "";
     }
@@ -695,23 +684,6 @@ static void draw_frame(void) {
     if (active_application == 0xFFFFu) {
         draw_wallpaper();
         draw_desktop_surface();
-    } else if (window_rolled != 0u) {
-        /* Rolled up over the desktop: just the blind slat, Xfce style.
-         * The whole slat is the shade button, so one click unrolls it. */
-        draw_wallpaper();
-        gfx_fill((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH, 12,
-                 COLOR_DEEP);
-        gfx_gradient_vertical((s16)(WINDOW_X + 1), (s16)(WINDOW_Y + 1),
-                              (s16)(WINDOW_WIDTH - 2), 10,
-                              title_top_color, COLOR_DEEP);
-        gfx_text((s16)(WINDOW_X + 5), (s16)(WINDOW_Y + 2),
-                 application_list[active_application]->title, COLOR_WHITE);
-        gfx_text((s16)(WINDOW_X + WINDOW_WIDTH - 60), (s16)(WINDOW_Y + 2),
-                 "(rolled)", COLOR_ACCENT);
-        gfx_outline((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH, 12,
-                    COLOR_BLACK);
-        gui_hotspot((s16)WINDOW_X, (s16)WINDOW_Y, (s16)WINDOW_WIDTH, 12,
-                    HOTSPOT_SHADE);
     } else {
         const Application *app = application_list[active_application];
 
@@ -722,8 +694,10 @@ static void draw_frame(void) {
     if (panel_tooltip != HOTSPOT_NONE && tooltip_text[0] != '\0') {
         draw_tooltip();
     }
-    draw_dock();
-    draw_top_panel();
+    if (window_maximized == 0u) {
+        draw_dock();
+        draw_top_panel();
+    }
     if (menu_open != 0u) {
         draw_menu();
     }
@@ -782,7 +756,7 @@ void gui_open(u16 index) {
     arrows_reserved = 0u;
     status_line[0] = '\0';
     menu_open = 0u;
-    window_rolled = 0u;
+    window_maximized = 0u;
     panel_tooltip = HOTSPOT_NONE;
     title_top_color = COLOR_SELECTION;
     application_list[index]->open();
@@ -794,7 +768,7 @@ void gui_go_home(void) {
     pressed_id = HOTSPOT_NONE;
     focused_id = HOTSPOT_NONE;
     arrows_reserved = 0u;
-    window_rolled = 0u;
+    window_maximized = 0u;
     panel_tooltip = HOTSPOT_NONE;
     sound_stop();
 }
@@ -806,7 +780,7 @@ void gui_go_home(void) {
 static void deliver_to_application(u8 type, u16 id, const Event *event) {
     Event forwarded;
 
-    if (active_application == 0xFFFFu || window_rolled != 0u) {
+    if (active_application == 0xFFFFu) {
         return;
     }
     forwarded.type = type;
@@ -845,15 +819,13 @@ static void activate(u16 id, u8 right_button, const Event *event) {
         }
         return;
     }
-    if (id == HOTSPOT_SHADE || id == HOTSPOT_MINIMIZE) {
-        /* Roll the window up into the title bar, or minimize it... to the
-         * desktop, which is all a window of one can do. The Xfce shade
-         * button affects the frame, minimize sends the app to the dock. */
-        if (id == HOTSPOT_SHADE && active_application != 0xFFFFu) {
-            window_rolled = (u8)(window_rolled == 0u);
-        } else {
-            gui_go_home();
-        }
+    if (id == HOTSPOT_MINIMIZE) {
+        gui_go_home();
+        return;
+    }
+    if (id == HOTSPOT_MAXIMIZE && active_application != 0xFFFFu) {
+        window_maximized = (u8)(window_maximized == 0u);
+        panel_tooltip = HOTSPOT_NONE;
         return;
     }
     if (id == HOTSPOT_CLOSE) {
@@ -872,7 +844,7 @@ static void activate(u16 id, u8 right_button, const Event *event) {
         if (active_application == index) {
             /* Tapping the open app's dock icon hides it to the desktop,
              * the way plank minimizes a focused window. */
-            window_rolled = 0u;
+            window_maximized = 0u;
             gui_go_home();
         } else {
             gui_open(index);
@@ -949,8 +921,7 @@ static void handle_event(const Event *event) {
                 activate(focused_id, 0u, (const Event *)0);
                 return;
             }
-            if (menu_open == 0u && active_application != 0xFFFFu &&
-                window_rolled == 0u) {
+            if (menu_open == 0u && active_application != 0xFFFFu) {
                 application_list[active_application]->event(event);
             }
             return;
@@ -958,7 +929,7 @@ static void handle_event(const Event *event) {
         case EVENT_PRESS:
             pressed_id = gui_hotspot_at(event->x, event->y);
             if (pressed_id == HOTSPOT_POWER || pressed_id == HOTSPOT_SHRINK ||
-                pressed_id == HOTSPOT_SHADE) {
+                pressed_id == HOTSPOT_MAXIMIZE) {
                 tooltip_for(pressed_id);
             }
             if (pressed_id != HOTSPOT_NONE) {
@@ -1296,7 +1267,7 @@ void gui_run(void) {
             }
         }
 
-        if (active_application != 0xFFFFu && window_rolled == 0u) {
+        if (active_application != 0xFFFFu) {
             const Application *app = application_list[active_application];
 
             if (app->update != 0) {

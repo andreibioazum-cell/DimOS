@@ -13,7 +13,7 @@
  *   - the clock chip and the speaker.
  *
  * The runner and the simulated hardware share a block of memory at
- * 0x200000 (the protected-mode kernel uses 0x100000..0x1FFFFF for BSS): the
+ * 0x200000 (the long-mode kernel uses 0x100000..0x1FFFFF for BSS): the
  * runner writes input and time there, and the kernel writes the palette there.
  */
 

@@ -337,7 +337,7 @@ static void command_memory(char *arguments) {
     for (index = 0u; index < count; ++index) {
         text_append_character(line, ' ', (u16)sizeof(line));
         append_hex(line, (u16)sizeof(line),
-                   *(const volatile u8 *)(address + index), 2u);
+                   *(const volatile u8 *)(uptr)(address + index), 2u);
     }
     terminal_print(line);
 }
@@ -351,7 +351,7 @@ static void command_poke(char *arguments) {
         terminal_print("Usage: POKE 0xADDRESS 0xBYTE");
         return;
     }
-    *(volatile u8 *)address = (u8)value;
+    *(volatile u8 *)(uptr)address = (u8)value;
     terminal_print("Physical memory changed");
 }
 
@@ -420,7 +420,7 @@ static void run_command(char *command) {
         text_append_number(buffer, clock_day(), (u16)sizeof(buffer));
         terminal_print(buffer);
     } else if (text_equal_ignore_case(command, "VER") != 0u) {
-        terminal_print("DimOS 2.0 + DimXfce, i686 protected mode");
+        terminal_print("DimOS 2.0 x86-64 long mode, ring 0");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
         terminal_print("Palette switched");

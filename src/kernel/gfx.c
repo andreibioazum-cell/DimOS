@@ -372,7 +372,7 @@ static void font_init(void) {
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
-    font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_glyphs = (const u8 *)(uptr)bios_font_address;
     font_levels = (const u8 *)0;
     font_native_levels = (const u8 *)0;
     font_ready = font_looks_valid(font_glyphs);
@@ -504,7 +504,7 @@ static void high_text_restore(const HighText *commands, u16 count) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(uptr)video_framebuffer_address;
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
         const u8 scale = high_text_scale();
@@ -606,7 +606,7 @@ static void high_text_draw(void) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = (volatile u8 *)(uptr)video_framebuffer_address;
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
         const u8 scale = high_text_scale();
@@ -742,7 +742,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
      * viewport, which is the useful optimization for v86's small profile. */
     color = xrgb8888_color[COLOR_DESKTOP];
     if (video_bits_per_pixel == 32u) {
-        volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+        volatile u32 *framebuffer = (volatile u32 *)(uptr)video_framebuffer_address;
         u16 y;
 
         for (y = 0u; y < video_height; ++y) {
@@ -914,7 +914,7 @@ static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y
 
 static void present_vbe(void) {
     volatile u8 *framebuffer =
-        (volatile u8 *)(u32)video_framebuffer_address;
+        (volatile u8 *)(uptr)video_framebuffer_address;
     const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
     u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
     u16 y;
@@ -993,7 +993,7 @@ void gfx_show(void) {
 static void fill_bytes(u8 *target, u32 length, u8 color) {
     const u32 packed = (u32)color * 0x01010101u;
 
-    while (length != 0u && ((u32)target & 3u) != 0u) {
+    while (length != 0u && ((uptr)target & 3u) != 0u) {
         *target++ = color;
         --length;
     }

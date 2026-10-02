@@ -64,7 +64,7 @@ jobs:
             -boot c -display none -serial none -monitor none \
             -no-reboot -no-shutdown -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
-          grep -F "DIMOS:PROTECTED" qemu-debug.log
+          grep -F "DIMOS:LONGMODE:X86_64" qemu-debug.log
           grep -F "DIMOS:READY:VBE:1920x1080x32" qemu-debug.log
 
       - name: Create DimOS zip package

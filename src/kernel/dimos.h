@@ -1,7 +1,7 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a freestanding i686 protected-mode kernel with a graphical
+ * DimOS is a freestanding x86-64 long-mode kernel with a graphical
  * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
  * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
  * "DimXfce": a full Xfce style
@@ -13,11 +13,12 @@
  * text.
  *
  * Coding rules for this directory:
- *   - everything is plain C11, freestanding (no libc, no interrupts, no
+ *   - everything is plain C11 for the x86-64 System V ABI, freestanding
+ *     (no libc, no interrupts, no
  *     inline assembly);
  *   - the only assembly in the project is src/bootloader/boot.asm (the 512
  *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery and the
- *     switch into flat 32-bit protected mode), because those jobs need CPU
+ *     transition through protected mode into x86-64 long mode), because those jobs need CPU
  *     instructions and BIOS calls C cannot express;
  *   - hardware is reached through port_read_byte()/port_write_byte() and
  *     plain pointers, both defined below.
@@ -34,6 +35,7 @@ typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
 typedef signed long long s64;
+typedef u64 uptr; /* native x86-64 pointer-sized integer */
 
 /* ------------------------------------------------------------------ */
 /* Hardware ports                                                      */

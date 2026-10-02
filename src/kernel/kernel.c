@@ -3,8 +3,8 @@
  * uses (memory, text, restart).
  *
  * The bootloader loads this code at 0x20000 and kernel.asm selects the video
- * hardware and enters a flat 32-bit protected-mode environment before calling
- * kernel_main. From here on everything is plain C.
+ * hardware, identity-maps physical memory and enters x86-64 long mode before
+ * calling kernel_main. From here on everything uses the 64-bit System V ABI.
  */
 
 #include "dimos.h"
@@ -41,7 +41,7 @@ void memory_zero(void *destination, u32 length) {
  * the memory size word at 0x413. The address is a parameter so the compiler
  * cannot fold the access away. */
 u16 bios_read_word(u32 address) {
-    const volatile u16 *place = (const volatile u16 *)(u32)address;
+    const volatile u16 *place = (const volatile u16 *)(uptr)address;
 
     return *place;
 }
@@ -416,7 +416,7 @@ static void debug_marker(const char *text) {
 
 void kernel_main(void) {
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
-    debug_marker("DIMOS:PROTECTED\n");
+    debug_marker("DIMOS:LONGMODE:X86_64\n");
 
     timer_init();
     ram_disk_init();

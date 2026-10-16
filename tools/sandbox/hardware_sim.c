@@ -70,6 +70,7 @@ static u8 timer_divisor_high;
 /* PS/2 controller. */
 static u8 controller_expect_mouse_command;
 static u8 controller_acknowledgement_waiting;
+static u8 controller_mouse_id_waiting;
 
 /* VGA palette. */
 static u8 palette_index;
@@ -106,10 +107,12 @@ u8 port_read_byte(u16 port) {
             u8 status = 0u;
 
             if (controller_acknowledgement_waiting != 0u ||
-                SIMULATOR->keyboard_count != 0u) {
-                status |= 0x01u; /* a byte is waiting */
+                controller_mouse_id_waiting != 0u) {
+                status |= 0x01u | 0x20u; /* an auxiliary-device reply */
+            } else if (SIMULATOR->keyboard_count != 0u) {
+                status |= 0x01u;
             } else if (SIMULATOR->mouse_count != 0u) {
-                status |= 0x01u | 0x20u; /* ... and it came from the mouse */
+                status |= 0x01u | 0x20u; /* a mouse packet byte */
             }
             return status;
         }
@@ -117,6 +120,10 @@ u8 port_read_byte(u16 port) {
             if (controller_acknowledgement_waiting != 0u) {
                 controller_acknowledgement_waiting = 0u;
                 return 0xFAu; /* every mouse command is acknowledged */
+            }
+            if (controller_mouse_id_waiting != 0u) {
+                controller_mouse_id_waiting = 0u;
+                return 0u; /* standard three-byte PS/2 mouse */
             }
             if (SIMULATOR->keyboard_count != 0u) {
                 const u8 value = SIMULATOR->keyboard[0];
@@ -176,6 +183,9 @@ void port_write_byte(u16 port, u8 value) {
             if (controller_expect_mouse_command != 0u) {
                 controller_expect_mouse_command = 0u;
                 controller_acknowledgement_waiting = 1u;
+                if (value == 0xF2u) {
+                    controller_mouse_id_waiting = 1u;
+                }
             }
             return;
 

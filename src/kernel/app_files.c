@@ -229,6 +229,26 @@ static void files_draw(void) {
 static void files_event(const Event *event) {
     u16 row;
 
+    if (event->type == EVENT_WHEEL) {
+        const s16 direction = (s16)event->key;
+
+        if (direction > 0) {
+            if (viewing != 0u && text_top != 0u) {
+                --text_top;
+            } else if (viewing == 0u && page != 0u) {
+                --page;
+            }
+        } else if (direction < 0) {
+            if (viewing != 0u && text_top + 1u < text_lines) {
+                ++text_top;
+            } else if (viewing == 0u &&
+                       (u16)((page + 1u) * VISIBLE_ROWS) <
+                           file_system_visible_count()) {
+                ++page;
+            }
+        }
+        return;
+    }
     if (event->type != EVENT_CLICK) {
         return;
     }

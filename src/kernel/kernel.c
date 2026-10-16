@@ -185,21 +185,29 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 /* The programmable interval timer                                     */
 /* ------------------------------------------------------------------ */
 
-/* Channel 0 ticks 1,193,182 times per second. A long hardware period makes
- * polling resilient to expensive frames; software still emits one public
- * 10 ms tick for application timers every 11,932 input clocks. */
 #define TIMER_INPUT_FREQUENCY 1193182u
-#define TIMER_DIVISOR 65535u
 #define TIMER_TICK_COUNTS 11932u
-
 #define TIMER_LATCH_CHANNEL_0 0x00u
-
+#ifndef DIMOS_SANDBOX
+/* One IRQ per display interval. HLT sleeps between frames instead of
+ * spinning on the PIT, while maintaining the compositor's 60 Hz cadence. */
+#define TIMER_DIVISOR 19886u
+extern void timer_interrupts_init(void);
+volatile u32 timer_irq_low;
+volatile u32 timer_irq_high;
+static u64 timer_last_counts;
+#else
+/* The Unicorn simulator advances the PIT on reads and has no PIC/IDT. */
+#define TIMER_DIVISOR 65535u
 static u16 timer_last_counter;
-static u32 timer_leftover_counts;
 static u64 elapsed_input_counts;
+#endif
+
+static u64 timer_leftover_counts;
 static u32 elapsed_milliseconds;
 static u16 ticks_waiting;
 
+#ifdef DIMOS_SANDBOX
 static u16 timer_read_counter(void) {
     u8 low;
     u8 high;
@@ -209,25 +217,37 @@ static u16 timer_read_counter(void) {
     high = port_read_byte(PORT_PIT_CHANNEL_0);
     return (u16)((u16)low | (u16)((u16)high << 8u));
 }
+#endif
 
 void timer_init(void) {
+#ifdef DIMOS_SANDBOX
     /* Channel 0, rate generator, both bytes, binary counting. */
     port_write_byte(PORT_PIT_COMMAND, 0x34u);
     port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR & 0xFFu));
     port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR >> 8u));
-
     timer_last_counter = timer_read_counter();
-    timer_leftover_counts = 0u;
     elapsed_input_counts = 0u;
+#else
+    timer_irq_low = 0u;
+    timer_irq_high = 0u;
+    /* Channel 0, square-wave generator, approximately 60 interrupts/sec. */
+    port_write_byte(PORT_PIT_COMMAND, 0x36u);
+    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR & 0xFFu));
+    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR >> 8u));
+    timer_interrupts_init();
+    timer_last_counts = 0u;
+#endif
+    timer_leftover_counts = 0u;
     elapsed_milliseconds = 0u;
     ticks_waiting = 0u;
 }
 
 void timer_update(void) {
+#ifdef DIMOS_SANDBOX
     const u16 current = timer_read_counter();
     u16 elapsed;
 
-    /* The counter counts down and wraps around when it reaches zero. */
+    /* The simulated PIT counts down and wraps around on each read period. */
     if (timer_last_counter >= current) {
         elapsed = (u16)(timer_last_counter - current);
     } else {
@@ -236,6 +256,13 @@ void timer_update(void) {
     timer_last_counter = current;
     elapsed_input_counts += (u64)elapsed;
     timer_leftover_counts += elapsed;
+#else
+    const u64 current = timer_counter();
+    const u64 elapsed = current - timer_last_counts;
+
+    timer_last_counts = current;
+    timer_leftover_counts += elapsed;
+#endif
 
     while (timer_leftover_counts >= TIMER_TICK_COUNTS) {
         timer_leftover_counts -= TIMER_TICK_COUNTS;
@@ -248,11 +275,21 @@ u32 time_milliseconds(void) {
     return elapsed_milliseconds;
 }
 
-/* Raw PIT clocks retain the sub-millisecond precision that the public clock
- * deliberately rounds away. The compositor uses this monotonic counter for a
- * true 60 Hz cap instead of rounding every frame to the old 10 ms tick. */
+/* Raw PIT input clocks retain sub-millisecond precision for frame pacing. */
 u64 timer_counter(void) {
+#ifdef DIMOS_SANDBOX
     return elapsed_input_counts;
+#else
+    u32 low_before;
+    u32 high;
+    u32 low_after;
+    do {
+        low_before = timer_irq_low;
+        high = timer_irq_high;
+        low_after = timer_irq_low;
+    } while (low_before != low_after);
+    return ((u64)high << 32u) | low_before;
+#endif
 }
 
 u16 timer_take_ticks(void) {
@@ -268,6 +305,9 @@ void time_wait(u32 milliseconds) {
     while ((elapsed_milliseconds - start) < milliseconds) {
         timer_update();
         input_poll();
+#ifndef DIMOS_SANDBOX
+        cpu_halt();
+#endif
     }
 }
 
@@ -412,6 +452,22 @@ static void debug_marker(const char *text) {
         port_write_byte(0x00E9u, (u8)*text);
         ++text;
     }
+}
+
+u8 system_shutdown(void) {
+    sound_stop();
+#ifdef DIMOS_SANDBOX
+    debug_marker("DIMOS:SHUTDOWN\n");
+    return 0u; /* the simulator has no ACPI power controller */
+#else
+    /* ACPI S5 powers down machines whose firmware exposes the standard tables.
+     * If unavailable, leave the desktop running so the user can still restart. */
+    if (acpi_power_off() == 0u) {
+        return 0u;
+    }
+    cpu_halt_forever();
+    return 1u;
+#endif
 }
 
 void kernel_main(void) {

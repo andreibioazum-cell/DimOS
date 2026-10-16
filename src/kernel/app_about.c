@@ -60,7 +60,7 @@ static void about_video_value(char *value, u16 capacity) {
 
     /* Do not call every non-Full-HD VBE mode a fallback.  In particular, the
      * v86 image intentionally boots a real 640x480 physical VBE mode. */
-    text_append(value, "VBE GPU ", capacity);
+    text_append(value, "VBE SW ", capacity);
     text_append_number(value, video_width, capacity);
     text_append_character(value, 'x', capacity);
     text_append_number(value, video_height, capacity);
@@ -72,11 +72,10 @@ static void about_draw(void) {
     s16 y = (s16)(WINDOW_TOP + 3);
 
     gfx_text((s16)(WINDOW_LEFT + 6), y, "DimOS 2.0", COLOR_BLACK);
-    gfx_text((s16)(WINDOW_LEFT + 120), y, "i686 protected kernel in C", COLOR_BLUE);
+    gfx_text((s16)(WINDOW_LEFT + 120), y, "i686 C kernel", COLOR_BLUE);
     y = (s16)(y + 10);
 
-    /* xfce4-about would say the same, give or take a mouse. */
-    info_line(y, "Shell", "DimXfce am-nyam shell");
+    info_line(y, "Shell", "Win10-inspired shell");
     y = (s16)(y + 10);
 
     about_video_value(value, (u16)sizeof(value));
@@ -109,8 +108,9 @@ static void about_draw(void) {
     info_line(y, "Files", value);
     y = (s16)(y + 10);
 
-    info_line(y, "Mouse", (input_mouse_available() != 0u) ? "PS/2 mouse found"
-                                                          : "not found - keys work");
+    info_line(y, "Mouse", (input_mouse_available() != 0u)
+                              ? "PS/2 pointing device found"
+                              : "not found - keys work");
     y = (s16)(y + 10);
 
     value[0] = '\0';
@@ -142,7 +142,7 @@ static void about_draw(void) {
     gui_button((s16)(WINDOW_LEFT + 102), y, 90, 15, "Beep", ID_TEST_SOUND);
     gui_button((s16)(WINDOW_LEFT + 198), y, 90, 15, "Restart", ID_RESTART);
 
-    gui_message_bar("The mouse menu waits at the top left");
+    gui_message_bar("CPU idle: HLT | frame cap: 60 fps");
 }
 
 static void about_event(const Event *event) {

@@ -48,7 +48,7 @@ CFLAGS = [
     "-ffreestanding", "-fno-builtin", "-fno-pic", "-fno-pie",
     "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
     "-fno-unwind-tables", "-mno-red-zone", "-mgeneral-regs-only",
-    "-I", os.path.join(REPO, "src", "kernel"),
+    "-DDIMOS_SANDBOX", "-I", os.path.join(REPO, "src", "kernel"),
 ]
 
 # Scan code set 1, make codes, for the keys the tests type.
@@ -292,17 +292,17 @@ class Machine:
 # The two files the sandbox disk offers. NOTES.TXT is longer than one 512
 # byte cluster on purpose, so opening it also exercises the FAT12 chain.
 README_TEXT = (
-    "DIMOS 2.0 + DIMXFCE - THE TINY Xfce DESKTOP.\r\n"
-    "THE MOUSE AT TOP LEFT HIDES THE WHISKER MENU; A\r\n"
-    "RIGHT CLICK ON THE WALLPAPER WORKS TOO. THE ^ KEY\r\n"
-    "ROLLS A WINDOW UP, THE DOCK MONITOR HIDES IT ALL.\r\n"
+    "DIMOS 2.0 - A SMALL WINDOWS-INSPIRED DESKTOP.\r\n"
+    "THE START BUTTON OPENS A TILE MENU; RIGHT CLICK\r\n"
+    "ON THE WALLPAPER OPENS IT TOO. THE ^ KEY ROLLS\r\n"
+    "A WINDOW UP; THE TASKBAR HOLDS APPS AND TASK VIEW.\r\n"
     "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\r\n"
 )
 NOTES_TEXT = (
     "DIMOS BOOTS FROM A 512 BYTE SECTOR THAT LOADS KERNEL.BIN.\r\n"
-    "THE KERNEL IS PLAIN C: THE ONLY ASSEMBLY IS THE MODE SWITCH.\r\n"
-    "VIDEO IS VGA MODE 13H, 320 BY 200 PIXELS, 256 COLOURS.\r\n"
-    "THE 8 BY 8 TEXT FONT COMES FROM THE VIDEO BIOS AT BOOT.\r\n"
+    "C DRAWS THE DESKTOP; ASSEMBLY HANDLES BIOS AND PIT IRQ0.\r\n"
+    "THE 320 BY 200 LOGICAL SCREEN FITS THE OUTPUT ASPECT RATIO.\r\n"
+    "TTF TEXT IS ANTIALIASED; BIOS FONT IS A COMPATIBILITY FALLBACK.\r\n"
     "THIS FILE IS LONGER THAN ONE 512 BYTE CLUSTER, SO READING IT\r\n"
     "FOLLOWS A TWO LINK FAT12 CHAIN: CLUSTER 42 THEN CLUSTER 43.\r\n"
     "DELETE HIDES A FILE UNTIL REBOOT; KERNEL.BIN IS PROTECTED.\r\n"
@@ -389,40 +389,34 @@ def plant_boot_disk(machine, flat):
     machine.mu.mem_write(0x0413, (640).to_bytes(2, "little"))
 
 
-CLOSE_BOX = (304, 23)      # the red xfwm4 X: x=299..310, y=19..27
-SHADE_BOX = (280, 23)     # the roll-up button left of minimize
-ROLLED_SLAT = (160, 23)   # the rolled-up window's title strip
-MENU_BUTTON = (24, 6)     # the little mouse at the panel's left
-DOCK_SHRINK = (59, 190)   # the dock's show-desktop cell
-DOCK_Y = 190
+CLOSE_BOX = (304, 5)       # red close button in the application title bar
+SHADE_BOX = (280, 5)       # roll-up control beside the minimize button
+ROLLED_SLAT = (160, 5)     # rolled-up title strip
+MENU_BUTTON = (14, 190)    # Windows-style Start button
+TASK_VIEW = (118, 190)     # task-view / show-desktop button
+POWER_BUTTON = (17, 169)   # Start menu power icon
 
-# The window's inner frame the applications draw into.
+# The window's inner frame under the bottom taskbar desktop.
 WINDOW_LEFT = 9
-WINDOW_TOP = 30
+WINDOW_TOP = 16
 
 
 def icon_center(index):
-    # Desktop icons: two Xfce columns, cells 60x32 starting at (6, 19).
+    # Desktop shortcuts: two columns of 60x32 cells, aligned to the top-left.
     column = index % 2
     row = index // 2
-    return (6 + column * 60 + 28, 19 + row * 32 + 15)
-
-
-def dock_center(index):
-    # The compact glass dock: nine 20 px cells, centred in the pill.
-    left = (320 - 9 * 20) // 2
-    return (left + index * 20 + 10, DOCK_Y)
+    return (6 + column * 60 + 28, 5 + row * 32 + 15)
 
 
 def menu_cell(index):
-    # The compact launcher grid: three 52 px columns and 35 px rows.
+    # Three 52 px columns in the left-anchored Start menu.
     column = index % 3
     row = index // 3
-    return (78 + column * 52 + 24, 55 + row * 35 + 15)
+    return (32 + column * 52, 74 + row * 35)
 
 
 def menu_class_button(index):
-    return (74 + 5 + index * 40 + 18, 165)
+    return (27 + index * 40, 169)
 
 
 def calc_key(row, column):
@@ -440,7 +434,7 @@ def tour():
     machine = Machine(flat, table)
     plant_boot_disk(machine, flat)
 
-    print("\nBooting the DimXfce desktop")
+    print("\nBooting the DimOS desktop")
     machine.frames_run(3)
     machine.screenshot("01-desktop")
 
@@ -538,33 +532,38 @@ def tour():
     machine.send_keyboard([0x01, 0x81])
     machine.frames_run(2)
 
-    print("\nWhisker menu: the mouse button, the Games filter")
+    print("\nStart menu: the taskbar button, then the Games filter")
     machine.click(*MENU_BUTTON)
-    machine.screenshot("18-whisker-menu")
+    machine.screenshot("18-start-menu")
     machine.click(*menu_class_button(1))   # Games
-    machine.screenshot("19-whisker-games")
+    machine.screenshot("19-start-games")
     machine.click(*menu_cell(6))           # Cheesy Balls from the menu
-    machine.screenshot("20-menu-launched")
+    machine.screenshot("20-start-launched")
 
-    print("\nxfwm4 tricks: roll the window up, then unroll it")
+    print("\nWindow controls: roll the title bar up, then unroll it")
     machine.click(*SHADE_BOX)
     machine.screenshot("21-rolled-up")
     machine.click(*ROLLED_SLAT)
 
-    print("\nThe dock breastfeeding: Calc from plank, minimize to desktop")
-    machine.click(*dock_center(4))
-    machine.screenshot("22-dock-launched")
-    machine.click(*DOCK_SHRINK)            # show desktop
+    print("\nDesktop shortcut: launch Calc, minimize, restore with Task View")
+    machine.click(*icon_center(4))
+    machine.screenshot("22-calc-launched")
+    machine.click(*TASK_VIEW)              # show desktop
     machine.screenshot("23-show-desktop")
-    machine.click(*DOCK_SHRINK)            # and bring Calc back
+    machine.click(*TASK_VIEW)              # and bring Calc back
     machine.screenshot("24-restored")
     machine.send_keyboard([0x01, 0x81])
     machine.frames_run(2)
 
-    print("\nRight click on the wallpaper opens the menu, xfdesktop style")
+    print("\nRight-clicking the wallpaper opens the Start menu")
     machine.right_click(200, 60)
     machine.screenshot("25-right-click-menu")
-    machine.send_keyboard([0x01, 0x81])
+    machine.click(*POWER_BUTTON)
+    machine.screenshot("26-power-options")
+    machine.click(62, 133)  # exercise the sandbox-safe Shut down action
+    machine.screenshot("27-shutdown-requested")
+    machine.send_keyboard([0x01, 0x81])  # close the power submenu
+    machine.send_keyboard([0x01, 0x81])  # close Start
     machine.frames_run(2)
 
     clock = machine.clock()

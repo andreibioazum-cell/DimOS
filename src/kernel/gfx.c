@@ -216,6 +216,10 @@ static u8 nearest_cube(u16 red, u16 green, u16 blue) {
                 (u16)cube_step((u8)blue));
 }
 
+u8 gfx_color_from_rgb(u8 red, u8 green, u8 blue) {
+    return nearest_cube(red, green, blue);
+}
+
 static void palette_apply(void) {
     Color black;
     u16 index;

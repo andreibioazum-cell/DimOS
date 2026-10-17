@@ -17,6 +17,7 @@
  */
 
 #include "dimos.h"
+#include "wallpaper_data.h"
 
 /* 1,193,182 PIT clocks per second / 60, rounded up. Waiting against the raw
  * hardware counter gives a strict maximum of 60 FPS without the old 10 ms
@@ -357,22 +358,114 @@ static void draw_windows_mark(s16 x, s16 y, u8 color, s16 pane) {
     gfx_fill((s16)(x + pane + gap), (s16)(y + pane + gap), pane, pane, color);
 }
 
-static void draw_wallpaper(void) {
-    s16 ray;
+typedef struct {
+    u16 low;
+    u16 high;
+    u8 fraction;
+} WallpaperSample;
 
-    gfx_gradient_vertical(0, (s16)DESKTOP_TOP, (s16)SCREEN_WIDTH,
-                          (s16)DESKTOP_HEIGHT, COLOR_WIN_BG, COLOR_BLUE);
+static u8 wallpaper_cache_ready;
+static u8 wallpaper_cache[SCREEN_WIDTH * DESKTOP_HEIGHT];
 
-    /* Windows 10-style light beams radiate from a square four-pane mark;
-     * deliberately avoid the oversized circles that distorted the wallpaper. */
-    for (ray = -38; ray <= 38; ray = (s16)(ray + 3)) {
-        gfx_line(226, 79, 319, (s16)(79 + ray), COLOR_WIN_GLOW);
+static WallpaperSample wallpaper_sample(s32 coordinate, u16 limit) {
+    WallpaperSample sample;
+    const s32 maximum = (s32)(limit - 1u) * 256;
+
+    if (coordinate < 0) {
+        coordinate = 0;
     }
-    draw_windows_mark(184, 57, COLOR_WIN_LIGHT, 21);
-    draw_windows_mark(186, 59, COLOR_WIN_GLOW, 18);
-    gfx_vertical_line(205, 59, 39, COLOR_WIN_BG);
-    gfx_horizontal_line(186, 78, 39, COLOR_WIN_BG);
-    gfx_horizontal_line(186, 57, 39, COLOR_WIN_LIGHT);
+    if (coordinate > maximum) {
+        coordinate = maximum;
+    }
+    sample.low = (u16)(coordinate >> 8u);
+    sample.high = (u16)((sample.low + 1u < limit) ? sample.low + 1u : sample.low);
+    sample.fraction = (u8)(coordinate & 0xFF);
+    return sample;
+}
+
+static u8 wallpaper_index(u16 x, u16 y) {
+    const u32 pixel = (u32)y * WINDOWS_WALLPAPER_WIDTH + x;
+    const u8 packed = windows_wallpaper_pixels[pixel >> 1u];
+
+    return (pixel & 1u) != 0u ? (u8)(packed >> 4u) : (u8)(packed & 0x0Fu);
+}
+
+static u8 wallpaper_blend_channel(u8 upper_left, u8 upper_right,
+                                  u8 lower_left, u8 lower_right,
+                                  u8 x_fraction, u8 y_fraction) {
+    const u32 top = ((u32)upper_left * (256u - x_fraction) +
+                     (u32)upper_right * x_fraction + 128u) >> 8u;
+    const u32 bottom = ((u32)lower_left * (256u - x_fraction) +
+                        (u32)lower_right * x_fraction + 128u) >> 8u;
+
+    return (u8)((top * (256u - y_fraction) + bottom * y_fraction + 128u) >> 8u);
+}
+
+static void wallpaper_build_cache(void) {
+    WallpaperSample x_map[SCREEN_WIDTH];
+    WallpaperSample y_map[DESKTOP_HEIGHT];
+    u16 x;
+    u16 y;
+
+    for (x = 0u; x < SCREEN_WIDTH; ++x) {
+        /* 160 source pixels are scaled smoothly to the 320-pixel canvas. */
+        x_map[x] = wallpaper_sample((s32)x * 128 - 64,
+                                    WINDOWS_WALLPAPER_WIDTH);
+    }
+    for (y = 0u; y < DESKTOP_HEIGHT; ++y) {
+        /* Crop five source pixels from top and bottom to fill the 16:9
+         * desktop area without distorting the 16:10 wallpaper. */
+        y_map[y] = wallpaper_sample((s32)y * 128 + 5 * 256,
+                                    WINDOWS_WALLPAPER_HEIGHT);
+    }
+
+    for (y = 0u; y < DESKTOP_HEIGHT; ++y) {
+        const WallpaperSample sy = y_map[y];
+
+        for (x = 0u; x < SCREEN_WIDTH; ++x) {
+            const WallpaperSample sx = x_map[x];
+            const u8 index_00 = wallpaper_index(sx.low, sy.low);
+            const u8 index_10 = wallpaper_index(sx.high, sy.low);
+            const u8 index_01 = wallpaper_index(sx.low, sy.high);
+            const u8 index_11 = wallpaper_index(sx.high, sy.high);
+            const u8 red = wallpaper_blend_channel(
+                windows_wallpaper_palette[index_00][0],
+                windows_wallpaper_palette[index_10][0],
+                windows_wallpaper_palette[index_01][0],
+                windows_wallpaper_palette[index_11][0],
+                sx.fraction, sy.fraction);
+            const u8 green = wallpaper_blend_channel(
+                windows_wallpaper_palette[index_00][1],
+                windows_wallpaper_palette[index_10][1],
+                windows_wallpaper_palette[index_01][1],
+                windows_wallpaper_palette[index_11][1],
+                sx.fraction, sy.fraction);
+            const u8 blue = wallpaper_blend_channel(
+                windows_wallpaper_palette[index_00][2],
+                windows_wallpaper_palette[index_10][2],
+                windows_wallpaper_palette[index_01][2],
+                windows_wallpaper_palette[index_11][2],
+                sx.fraction, sy.fraction);
+
+            wallpaper_cache[(u32)y * SCREEN_WIDTH + x] =
+                gfx_color_from_rgb(red, green, blue);
+        }
+    }
+    wallpaper_cache_ready = 1u;
+}
+
+static void draw_wallpaper(void) {
+    u16 y;
+
+    if (wallpaper_cache_ready == 0u) {
+        wallpaper_build_cache();
+    }
+    for (y = 0u; y < DESKTOP_HEIGHT; ++y) {
+        const u32 offset = (u32)y * SCREEN_WIDTH;
+
+        memory_copy(screen + (u32)(DESKTOP_TOP + y) * SCREEN_WIDTH,
+                    wallpaper_cache + offset, SCREEN_WIDTH);
+    }
 }
 
 static void draw_desktop_icons(void) {

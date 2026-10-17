@@ -197,6 +197,7 @@ void gfx_show(void); /* copy the back buffer to the video card */
 void gfx_set_output_resolution(u16 width, u16 height);
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
+u8 gfx_color_from_rgb(u8 red, u8 green, u8 blue);
 void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha); /* alpha 0..16 */
 u8 gfx_shade(u8 foreground, u8 background, u8 alpha);   /* mix two colours */
 void gfx_horizontal_line(s16 x, s16 y, s16 length, u8 color);

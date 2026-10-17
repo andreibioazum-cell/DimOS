@@ -45,9 +45,12 @@ static u8 shift_held;
 static u8 extended_byte_coming;
 static u8 bytes_to_ignore;
 
-/* Mouse packet state. A packet is three bytes: flags, delta x, delta y. */
-static u8 packet[3];
+/* Standard PS/2 mice send three bytes. IntelliMouse-compatible devices add a
+ * fourth byte containing the wheel (and, on ID 4, two extra buttons). */
+static u8 packet[4];
 static u8 packet_index;
+static u8 packet_length = 3u;
+static u8 mouse_id;
 
 static s16 press_x;
 static s16 press_y;
@@ -96,14 +99,15 @@ static void controller_wait_until_ready_to_send(void) {
     }
 }
 
-static void controller_wait_until_byte_arrives(void) {
+static u8 controller_wait_until_byte_arrives(void) {
     u32 guard = 0u;
 
     while ((port_read_byte(PORT_KEYBOARD_STATUS) & STATUS_OUTPUT_FULL) == 0u) {
         if (++guard > 200000u) {
-            return;
+            return 0u;
         }
     }
+    return 1u;
 }
 
 static void controller_send(u8 command) {
@@ -118,9 +122,54 @@ static void mouse_send(u8 command) {
     port_write_byte(PORT_KEYBOARD_DATA, command);
 }
 
-static u8 mouse_reply(void) {
-    controller_wait_until_byte_arrives();
-    return port_read_byte(PORT_KEYBOARD_DATA);
+static u8 mouse_reply(u8 *reply) {
+    if (controller_wait_until_byte_arrives() == 0u) {
+        return 0u;
+    }
+    *reply = port_read_byte(PORT_KEYBOARD_DATA);
+    return 1u;
+}
+
+/* Mouse commands are acknowledged with FA. A few genuine PS/2 devices ask
+ * for a resend (FE), so retry the byte rather than silently losing init. */
+static u8 mouse_command(u8 command) {
+    u8 attempt;
+
+    for (attempt = 0u; attempt < 3u; ++attempt) {
+        u8 response;
+
+        mouse_send(command);
+        if (mouse_reply(&response) == 0u) {
+            return 0u;
+        }
+        if (response == MOUSE_ACKNOWLEDGE) {
+            return 1u;
+        }
+        if (response != 0xFEu) {
+            return 0u;
+        }
+    }
+    return 0u;
+}
+
+static u8 mouse_set_sample_rate(u8 rate) {
+    return (u8)(mouse_command(0xF3u) != 0u && mouse_command(rate) != 0u);
+}
+
+static void mouse_detect_protocol(void) {
+    u8 id = 0u;
+
+    /* The IntelliMouse sample-rate handshake is widely supported by real
+     * PS/2 mice and by VirtualBox's PS/2 pointing-device emulation. */
+    if (mouse_set_sample_rate(200u) != 0u &&
+        mouse_set_sample_rate(100u) != 0u &&
+        mouse_set_sample_rate(80u) != 0u &&
+        mouse_command(0xF2u) != 0u && mouse_reply(&id) != 0u) {
+        mouse_id = id;
+    } else {
+        mouse_id = 0u;
+    }
+    packet_length = (u8)((mouse_id == 3u || mouse_id == 4u) ? 4u : 3u);
 }
 
 static void controller_drain(void) {
@@ -295,7 +344,11 @@ static void mouse_finish_packet(void) {
         delta_y = (s16)(delta_y - 256);
     }
 
-    pointer_buttons = (u8)(flags & 0x03u);
+    pointer_buttons = (u8)(flags & 0x07u);
+    if (mouse_id == 4u) {
+        pointer_buttons = (u8)(pointer_buttons |
+                               ((packet[3] & 0x30u) >> 1u));
+    }
 
     if (delta_x != 0 || delta_y != 0) {
         pointer_x = (s16)(pointer_x + delta_x);
@@ -328,6 +381,22 @@ static void mouse_finish_packet(void) {
     if (right != 0u && right_was_down == 0u) {
         queue_push(EVENT_RIGHT_CLICK, KEY_NOTHING, pointer_x, pointer_y);
     }
+
+    if (packet_length == 4u) {
+        s8 wheel = (s8)(packet[3] & 0x0Fu);
+        u8 notches;
+
+        if ((wheel & 0x08) != 0) {
+            wheel = (s8)(wheel - 16);
+        }
+        /* Keep one event per notch so applications can scroll naturally. */
+        notches = (u8)((wheel < 0) ? -wheel : wheel);
+        while (notches != 0u) {
+            queue_push(EVENT_WHEEL, (u16)(s16)((wheel < 0) ? -1 : 1),
+                       pointer_x, pointer_y);
+            --notches;
+        }
+    }
 }
 
 static void mouse_receive_byte(u8 value) {
@@ -340,7 +409,7 @@ static void mouse_receive_byte(u8 value) {
     }
     packet[packet_index] = value;
     ++packet_index;
-    if (packet_index == 3u) {
+    if (packet_index == packet_length) {
         packet_index = 0u;
         mouse_finish_packet();
     }
@@ -368,6 +437,9 @@ void input_init(void) {
     extended_byte_coming = 0u;
     bytes_to_ignore = 0u;
     packet_index = 0u;
+    packet_length = 3u;
+    mouse_id = 0u;
+    mouse_present = 0u;
     queue_head = 0u;
     queue_tail = 0u;
     pointer_buttons = 0u;
@@ -379,12 +451,9 @@ void input_init(void) {
     controller_drain();
 
     controller_send(COMMAND_ENABLE_MOUSE);
-    mouse_send(MOUSE_SET_DEFAULTS);
-    if (mouse_reply() == MOUSE_ACKNOWLEDGE) {
-        mouse_send(MOUSE_START_STREAMING);
-        mouse_present = (u8)(mouse_reply() == MOUSE_ACKNOWLEDGE);
-    } else {
-        mouse_present = 0u;
+    if (mouse_command(MOUSE_SET_DEFAULTS) != 0u) {
+        mouse_detect_protocol();
+        mouse_present = mouse_command(MOUSE_START_STREAMING);
     }
     controller_drain();
 }

@@ -3,24 +3,18 @@
  *
  * DimOS is a freestanding i686 protected-mode kernel with a graphical
  * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
- * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The desktop is
- * "DimXfce": a full Xfce style
- * shell in miniature -- a pastel mountain wallpaper, a compact application
- * launcher, soft window decorations and a floating glass dock at the bottom.
- * The whole desktop is usable
- * with a pointing device alone: nothing needs a keyboard, and the terminal
- * application has its own on-screen keyboard for the commands that do take
- * text.
+ * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The
+ * compact desktop is Windows-inspired, with a blue wallpaper, bottom taskbar,
+ * Start menu and simple window controls. It is usable with a pointing device
+ * alone, and the terminal application has its own on-screen keyboard.
  *
  * Coding rules for this directory:
- *   - everything is plain C11, freestanding (no libc, no interrupts, no
- *     inline assembly);
- *   - the only assembly in the project is src/bootloader/boot.asm (the 512
- *     byte BIOS boot sector) and src/kernel/kernel.asm (VBE discovery and the
- *     switch into flat 32-bit protected mode), because those jobs need CPU
- *     instructions and BIOS calls C cannot express;
- *   - hardware is reached through port_read_byte()/port_write_byte() and
- *     plain pointers, both defined below.
+ *   - everything is plain C11, freestanding (no libc or inline assembly);
+ *     the PIT interrupt and CPU halt instruction live in kernel.asm;
+ *   - assembly is confined to src/bootloader/boot.asm (the 512-byte BIOS
+ *     boot sector) and src/kernel/kernel.asm (VBE discovery, protected-mode
+ *     entry, the PIT IRQ/IDT and interrupt-safe HLT waits);
+ *   - hardware is reached through the port I/O helpers and plain pointers.
  */
 
 #ifndef DIMOS_DIMOS_H
@@ -41,6 +35,10 @@ typedef signed long long s64;
 
 u8 port_read_byte(u16 port);
 void port_write_byte(u16 port, u8 value);
+u16 port_read_word(u16 port);
+void port_write_word(u16 port, u16 value);
+void cpu_halt_forever(void);
+u8 acpi_power_off(void);
 
 #define PORT_PIT_CHANNEL_0 0x40u
 #define PORT_PIT_CHANNEL_2 0x42u
@@ -100,19 +98,18 @@ extern u8 video_bits_per_pixel;
 #define BIOS_FONT_ADDRESS 0x0000E000u
 #define BIOS_FONT_BYTES 1024u /* 128 glyphs, 8 bytes each */
 
-/* Desktop chrome, DimXfce edition: a pastel desktop area, a light status
- * overlay and a floating launcher dock. The names of the old constants
- * remain, so the applications never notice. */
-#define TITLE_BAR_HEIGHT 14u                    /* the xfce4-panel          */
-#define TASK_BAR_HEIGHT 20u                     /* the dock                 */
+/* Windows-style shell proportions: a clear desktop area and a fixed bottom
+ * taskbar. Old constant names remain so apps keep their coordinate layout. */
+#define TITLE_BAR_HEIGHT 0u                     /* no top panel              */
+#define TASK_BAR_HEIGHT 20u                     /* Windows-like taskbar      */
 #define DESKTOP_TOP (TITLE_BAR_HEIGHT + 1u)
 #define DESKTOP_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 2u)
 #define TASK_BAR_TOP (SCREEN_HEIGHT - TASK_BAR_HEIGHT)
 
-/* The launcher is a centred Deepin-style glass panel above the dock. */
+/* A left-anchored Start menu opens immediately above the taskbar. */
 #define MENU_WIDTH 172u
-#define MENU_X ((SCREEN_WIDTH - MENU_WIDTH) / 2u)
-#define MENU_Y 30u
+#define MENU_X 4u
+#define MENU_Y (SCREEN_HEIGHT - TASK_BAR_HEIGHT - MENU_HEIGHT - 1u)
 #define MENU_HEIGHT 145u
 
 /* Application windows fill the desktop area. */
@@ -164,7 +161,11 @@ enum {
     COLOR_GRID = 29u,
     COLOR_DEEP = 30u,
     COLOR_CURSOR = 31u,
-    PALETTE_SIZE = 32u
+    COLOR_TASKBAR = 32u,
+    COLOR_WIN_BG = 33u,
+    COLOR_WIN_GLOW = 34u,
+    COLOR_WIN_LIGHT = 35u,
+    PALETTE_SIZE = 36u
 };
 
 /* Palette slots 32..247 are not roles at all: they hold a fixed 6x6x6
@@ -196,6 +197,7 @@ void gfx_show(void); /* copy the back buffer to the video card */
 void gfx_set_output_resolution(u16 width, u16 height);
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
+u8 gfx_color_from_rgb(u8 red, u8 green, u8 blue);
 void gfx_pixel_blend(s16 x, s16 y, u8 color, u8 alpha); /* alpha 0..16 */
 u8 gfx_shade(u8 foreground, u8 background, u8 alpha);   /* mix two colours */
 void gfx_horizontal_line(s16 x, s16 y, s16 length, u8 color);
@@ -247,7 +249,8 @@ enum {
     EVENT_CLICK,  /* left button came up over the same place          */
     EVENT_RIGHT_CLICK, /* right button, or a long press on a touch    */
     EVENT_DRAG,   /* the pointer moved while the left button was down */
-    EVENT_MOVE    /* the pointer moved                                */
+    EVENT_MOVE,   /* the pointer moved                                */
+    EVENT_WHEEL   /* event->key is a signed wheel-notch delta          */
 };
 
 typedef struct {
@@ -274,6 +277,8 @@ u8 input_mouse_available(void);
 #define TICK_MILLISECONDS 10u
 
 void timer_init(void);
+void cpu_halt(void);              /* HLT until the next hardware interrupt */
+void cpu_wait_until(u64 deadline); /* atomic, interrupt-driven PIT wait   */
 void timer_update(void);          /* fold elapsed time into the clock   */
 u32 time_milliseconds(void);
 u64 timer_counter(void);          /* raw PIT input clocks since boot    */
@@ -289,6 +294,7 @@ u8 clock_month(void);
 u16 clock_year(void);
 
 void system_restart(void);
+u8 system_shutdown(void);
 
 /* ------------------------------------------------------------------ */
 /* Text helpers (kernel.c)                                             */
@@ -362,7 +368,7 @@ void sound_update(u16 ticks);
 void sound_play(const Note *notes, u16 count, u8 repeat);
 void sound_stop(void);
 u8 sound_is_playing(void);
-void sound_play_startup(void);   /* the Xfce style login fanfare  */
+void sound_play_startup(void);   /* short PC-speaker startup fanfare */
 void sound_play_march(void);
 void sound_play_waltz(void);
 void sound_play_nom(void);       /* the cheese ball chomp         */
@@ -378,7 +384,7 @@ void sound_alert(void);
 #define HOTSPOT_LIMIT 96u
 
 typedef struct {
-    const char *dock_label;   /* short caption for icon and dock       */
+    const char *short_label;  /* compact caption for desktop shortcuts */
     const char *title;        /* full name shown in the title bar      */
     const char *const *icon;  /* 16 rows of 16 characters ASCII art    */
     u8 color;
@@ -413,7 +419,7 @@ void gui_window_title_color(u8 top_color);
 void gui_message_bar(const char *text);
 void gui_reserve_arrow_keys(u8 reserve);
 
-/* The Whisker menu behind the little mouse on the top panel. */
+/* The Start menu behind the taskbar button. */
 u8 gui_menu_is_open(void);
 void gui_menu_toggle(void);
 void gui_show_desktop(void);

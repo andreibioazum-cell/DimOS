@@ -20,6 +20,7 @@ KERNEL_BASE equ 0x00020000
 
 CODE32_SELECTOR equ 0x08
 DATA_SELECTOR equ 0x10
+TIMER_DIVISOR equ 19886
 
 VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
 VBE_MODE_LINEAR_BIT equ 0x4000
@@ -39,7 +40,12 @@ VBE_TARGET_HEIGHT equ 1080
 
 [BITS 16]
 global kernel_entry
+global timer_interrupts_init
+global cpu_halt
+global cpu_wait_until
 extern kernel_main
+extern timer_irq_low
+extern timer_irq_high
 
 kernel_entry:
     cli
@@ -250,6 +256,9 @@ protected_mode_entry:
 ; ------------------------------------------------------------------
 
 global port_read_byte
+global port_read_word
+global port_write_word
+global cpu_halt_forever
 port_read_byte:
     mov edx, [esp + 4]                 ; first argument: port
     xor eax, eax
@@ -262,6 +271,108 @@ port_write_byte:
     mov eax, [esp + 8]                 ; second argument: value
     out dx, al
     ret
+
+port_read_word:
+    mov edx, [esp + 4]
+    xor eax, eax
+    in ax, dx
+    ret
+
+port_write_word:
+    mov edx, [esp + 4]
+    mov eax, [esp + 8]
+    out dx, ax
+    ret
+
+; Fallback when firmware lacks a supported ACPI poweroff interface.
+cpu_halt_forever:
+    cli
+.loop:
+    hlt
+    jmp .loop
+
+; Install a minimal protected-mode IDT and remap the 8259 PIC so IRQ0 no
+; longer collides with CPU exceptions. Only the periodic PIT interrupt is
+; enabled; keyboard and mouse remain safely polled by input.c.
+timer_interrupts_init:
+    cli
+    mov eax, timer_irq_handler
+    mov word [idt + 0x20 * 8], ax
+    mov word [idt + 0x20 * 8 + 2], CODE32_SELECTOR
+    mov byte [idt + 0x20 * 8 + 4], 0
+    mov byte [idt + 0x20 * 8 + 5], 0x8E
+    shr eax, 16
+    mov word [idt + 0x20 * 8 + 6], ax
+    lidt [idtr]
+
+    ; ICW1: initialize both 8259 controllers.
+    mov al, 0x11
+    out 0x20, al
+    out 0x80, al
+    out 0xA0, al
+    out 0x80, al
+    ; Master IRQs start at 0x20, slave IRQs at 0x28.
+    mov al, 0x20
+    out 0x21, al
+    out 0x80, al
+    mov al, 0x28
+    out 0xA1, al
+    out 0x80, al
+    ; The slave is connected to master IRQ2; use 8086 mode.
+    mov al, 0x04
+    out 0x21, al
+    out 0x80, al
+    mov al, 0x02
+    out 0xA1, al
+    out 0x80, al
+    mov al, 0x01
+    out 0x21, al
+    out 0x80, al
+    out 0xA1, al
+    out 0x80, al
+    ; Unmask only IRQ0. Input devices remain polled once per frame.
+    mov al, 0xFE
+    out 0x21, al
+    mov al, 0xFF
+    out 0xA1, al
+    sti
+    ret
+
+cpu_halt:
+    sti
+    hlt
+    ret
+
+; Wait for an absolute PIT-count deadline. The deadline lives in the cdecl
+; stack slot as low/high dwords. Check atomically with IF clear so a timer IRQ
+; cannot land between the C check and HLT and force an extra frame of sleep.
+cpu_wait_until:
+    mov eax, [esp + 4]
+    mov edx, [esp + 8]
+.loop:
+    cli
+    cmp dword [timer_irq_high], edx
+    ja .done
+    jb .sleep
+    cmp dword [timer_irq_low], eax
+    jae .done
+.sleep:
+    sti
+    hlt
+    jmp .loop
+.done:
+    sti
+    ret
+
+align 16
+timer_irq_handler:
+    push eax
+    add dword [timer_irq_low], TIMER_DIVISOR
+    adc dword [timer_irq_high], 0
+    mov al, 0x20
+    out 0x20, al
+    pop eax
+    iretd
 
 ; ------------------------------------------------------------------
 ; GDT: flat 32-bit code and data segments.
@@ -294,8 +405,13 @@ gdt_descriptor:
     dd gdt_start
 
 section .data
-align 16
+align 4
+idtr:
+    dw 256 * 8 - 1
+timer_idt_pointer:
+    dd idt
 
+align 16
 global bios_font_address
 bios_font_address:
     dd 0
@@ -326,5 +442,10 @@ vbe_controller_info:
 align 16
 vbe_mode_info:
     times 256 db 0
+
+section .bss
+align 16
+idt:
+    resb 256 * 8
 
 section .note.GNU-stack noalloc noexec nowrite progbits

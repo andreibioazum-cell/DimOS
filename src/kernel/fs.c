@@ -31,6 +31,12 @@
 #define RAM_DISK_SECTOR_BYTES 512u
 #define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
 
+/* A raw pointer to the scratch disk. Paint keeps its picture there, so a
+ * 136 KiB bitmap does not have to sit in the kernel's 1 MiB BSS window. */
+u8 *ram_disk_buffer(void) {
+    return (u8 *)(u32)RAM_DISK_ADDRESS;
+}
+
 void ram_disk_init(void) {
     memory_zero((void *)(u32)RAM_DISK_ADDRESS,
                 RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);

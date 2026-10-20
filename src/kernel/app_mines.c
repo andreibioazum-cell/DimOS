@@ -9,11 +9,12 @@
 
 #define GRID 9
 #define MINES 10
-#define CELL 14
+#define CELL 26
 #define BOARD_WIDTH (GRID * CELL)
 #define BOARD_HEIGHT (GRID * CELL)
-#define BOARD_X (s16)(WINDOW_LEFT + 4)
-#define BOARD_Y (s16)(WINDOW_TOP + 4)
+#define BOARD_X (s16)APP_LEFT
+#define BOARD_Y 74
+#define BOARD_SIDE_X (s16)(BOARD_X + BOARD_WIDTH + 36)
 
 #define HIDDEN 0u
 #define OPENED 1u
@@ -26,19 +27,19 @@
 
 static const char *const icon[16] = {
     "................",
-    ".......XX.......",
-    ".......XX.......",
-    "..XX.XXXXXX.XX..",
-    "...XX.XXXX.XX...",
+    "...........XX...",
+    "..........XX....",
+    ".........XX.....",
+    "......XXXX......",
     "....XXXXXXXX....",
     "...XXXXXXXXXX...",
-    "..XXoXXXXXXoXX..",
+    "..XXXXXXoXXXXX..",
+    "..XXXXoXXXXXXX..",
+    "..XXXXXXXXXXXX..",
+    "..XXXXXXXXXXXX..",
     "...XXXXXXXXXX...",
     "....XXXXXXXX....",
-    "...XX.XXXX.XX...",
-    "..XX.XXXXXX.XX..",
-    ".......XX.......",
-    ".......XX.......",
+    "......XXXX......",
     "................",
     "................",
 };
@@ -164,15 +165,24 @@ static void open_square(u16 start) {
 
 static u8 number_color(u8 count) {
     switch (count) {
-        case 1u: return COLOR_BLUE;
-        case 2u: return COLOR_GREEN;
-        case 3u: return COLOR_RED;
-        case 4u: return COLOR_MAGENTA;
+        case 1u: return COLOR_SELECTION;
+        case 2u: return COLOR_GOOD;
+        case 3u: return COLOR_ALERT;
+        case 4u: return COLOR_IOS_INDIGO;
         case 5u: return COLOR_BROWN;
-        case 6u: return COLOR_CYAN;
-        case 7u: return COLOR_BLACK;
-        default: return COLOR_DARK_GRAY;
+        case 6u: return COLOR_IOS_TEAL;
+        case 7u: return COLOR_DEEP;
+        default: return COLOR_DISABLED;
     }
+}
+
+static void mines_overlay(const char *title, const char *note, u8 color) {
+    const s16 x = (s16)(BOARD_X + 30);
+    const s16 y = (s16)(BOARD_Y + 78);
+
+    gfx_round_fill(x, y, 174, 78, 16, COLOR_FACE);
+    gfx_text_size_centered(x, (s16)(y + 14), 174, title, color, 18);
+    gfx_text_size_centered(x, (s16)(y + 44), 174, note, COLOR_DISABLED, 9);
 }
 
 static void mines_draw(void) {
@@ -180,70 +190,67 @@ static void mines_draw(void) {
     u16 column;
     char buffer[20];
 
+    gui_window_frame("Mines");
+
     for (row = 0u; row < GRID; ++row) {
         for (column = 0u; column < GRID; ++column) {
             const u16 cell = (u16)(row * GRID + column);
             const s16 x = (s16)(BOARD_X + (s16)(column * CELL));
             const s16 y = (s16)(BOARD_Y + (s16)(row * CELL));
 
-            if (square_state[cell] == HIDDEN || square_state[cell] == MARKED) {
-                gfx_fill(x, y, CELL, CELL, COLOR_FACE);
-                gfx_raised_box(x, y, CELL, CELL, 1u);
+            if (square_state[cell] == HIDDEN ||
+                square_state[cell] == MARKED) {
+                gfx_round_fill((s16)(x + 1), (s16)(y + 1), CELL - 3, CELL - 3,
+                               6, COLOR_FACE);
                 if (square_state[cell] == MARKED) {
-                    gfx_text((s16)(x + 3), (s16)(y + 3), "F", COLOR_RED);
+                    /* A little flag: pole, cloth and a foot. */
+                    gfx_fill((s16)(x + 8), (s16)(y + 7), 2, 12, COLOR_DEEP);
+                    gfx_fill((s16)(x + 10), (s16)(y + 7), 8, 6, COLOR_ALERT);
+                    gfx_fill((s16)(x + 6), (s16)(y + 19), 9, 2, COLOR_DEEP);
+                } else {
+                    gfx_circle((s16)(x + CELL / 2), (s16)(y + CELL / 2), 2,
+                               COLOR_GRID, 1u);
                 }
             } else {
-                gfx_fill(x, y, CELL, CELL, COLOR_PANEL);
-                gfx_outline(x, y, CELL, CELL, COLOR_SHADOW);
+                gfx_round_fill((s16)(x + 1), (s16)(y + 1), CELL - 3, CELL - 3,
+                               5, COLOR_PANEL);
                 if (has_mine[cell] != 0u) {
-                    gfx_circle((s16)(x + CELL / 2), (s16)(y + CELL / 2), 4,
-                               COLOR_BLACK, 1u);
+                    gfx_circle((s16)(x + CELL / 2), (s16)(y + CELL / 2), 6,
+                               COLOR_DEEP, 1u);
                 } else if (neighbours[cell] != 0u) {
                     char digit[2];
 
                     digit[0] = (char)('0' + (char)neighbours[cell]);
                     digit[1] = '\0';
-                    gfx_text((s16)(x + 3), (s16)(y + 3), digit,
-                             number_color(neighbours[cell]));
+                    gfx_text_size_centered(x, (s16)(y + 6), CELL, digit,
+                                           number_color(neighbours[cell]), 15);
                 }
             }
         }
     }
-    gfx_outline((s16)(BOARD_X - 2), (s16)(BOARD_Y - 2), (s16)(BOARD_WIDTH + 4),
-                (s16)(BOARD_HEIGHT + 4), COLOR_SHADOW);
-    gui_hotspot(BOARD_X, BOARD_Y, (s16)BOARD_WIDTH, (s16)BOARD_HEIGHT, ID_BOARD);
+    gui_hotspot(BOARD_X, BOARD_Y, (s16)BOARD_WIDTH, (s16)BOARD_HEIGHT,
+                ID_BOARD);
 
+    gfx_text_size(BOARD_SIDE_X, 72, "MINES LEFT", COLOR_DISABLED, 9);
     buffer[0] = '\0';
-    text_append(buffer, "Mines left ", (u16)sizeof(buffer));
     text_append_number(buffer, (u32)(MINES - flags_used), (u16)sizeof(buffer));
-    gfx_text((s16)(BOARD_X + BOARD_WIDTH + 12), (s16)(BOARD_Y), buffer, COLOR_BLACK);
+    gfx_text_size(BOARD_SIDE_X, 84, buffer, COLOR_DEEP, 36);
 
-    gui_switch((s16)(BOARD_X + BOARD_WIDTH + 12), (s16)(BOARD_Y + 16), 100, 16,
-               "Flag mode", ID_FLAG_MODE, flag_mode);
-    gui_button((s16)(BOARD_X + BOARD_WIDTH + 12), (s16)(BOARD_Y + 40), 100, 16,
-               "New game", ID_NEW_GAME);
-    gui_button((s16)(BOARD_X + BOARD_WIDTH + 12), (s16)(BOARD_Y + 62), 100, 16,
-               "How to play", ID_HELP);
+    gui_switch(BOARD_SIDE_X, 142, 240, 36, "Flag mode", ID_FLAG_MODE,
+               flag_mode);
+    gui_button(BOARD_SIDE_X, 190, 240, 44, "New game", ID_NEW_GAME);
+    gui_button_colored(BOARD_SIDE_X, 242, 240, 40, "How to play", ID_HELP,
+                       COLOR_PANEL, COLOR_DEEP);
 
     if (won != 0u) {
-        gfx_fill((s16)(BOARD_X + 20), (s16)(BOARD_Y + 46), 100, 24, COLOR_FACE);
-        gfx_outline((s16)(BOARD_X + 20), (s16)(BOARD_Y + 46), 100, 24, COLOR_BLACK);
-        gfx_text_centered((s16)(BOARD_X + 20), (s16)(BOARD_Y + 50), 100, "CLEARED!",
-                          COLOR_GOOD);
-        gfx_text_centered((s16)(BOARD_X + 20), (s16)(BOARD_Y + 60), 100,
-                          "New game to play on", COLOR_BLACK);
+        mines_overlay("CLEARED", "Every safe square is open", COLOR_GOOD);
         return;
     }
     if (game_over != 0u) {
-        gfx_fill((s16)(BOARD_X + 20), (s16)(BOARD_Y + 46), 100, 24, COLOR_FACE);
-        gfx_outline((s16)(BOARD_X + 20), (s16)(BOARD_Y + 46), 100, 24, COLOR_BLACK);
-        gfx_text_centered((s16)(BOARD_X + 20), (s16)(BOARD_Y + 50), 100, "BOOM",
-                          COLOR_RED);
-        gfx_text_centered((s16)(BOARD_X + 20), (s16)(BOARD_Y + 60), 100,
-                          "New game to retry", COLOR_BLACK);
+        mines_overlay("BOOM", "Tap New game to retry", COLOR_ALERT);
         return;
     }
-    gui_message_bar("Click a square; hold it down to mark a mine");
+    gui_message_bar("Tap a square, or hold one to flag it");
 }
 
 static void mines_event(const Event *event) {
@@ -319,7 +326,7 @@ const Application application_mines = {
     "Mines",
     "Mines",
     icon,
-    COLOR_RED,
+    COLOR_IOS_INDIGO,
     mines_open,
     mines_draw,
     mines_event,

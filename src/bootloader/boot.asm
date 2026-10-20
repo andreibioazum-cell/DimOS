@@ -66,6 +66,22 @@ main:
         xor ax, ax
         int 0x13
 
+        ; A black boot splash with the word mark, the way a phone shows its
+        ; logo while it starts. Text mode keeps this to a few dozen bytes.
+        mov ax, 0x0003
+        int 0x10
+        mov ax, 0x0600                 ; scroll the window: clears the screen
+        xor cx, cx
+        mov dx, 0x184F
+        xor bx, bx                     ; black on black
+        int 0x10
+        mov ah, 0x02                   ; cursor to row 10, column 35
+        xor bh, bh
+        mov dx, 0x0A23
+        int 0x10
+        mov si, msgSplash
+        call Print
+
         ; Root directory -> 1000:0000
         mov ax, ROOT_LBA
         mov cx, ROOT_SECTS
@@ -142,6 +158,18 @@ main:
         jb .load
 
         jmp 0x2000:0x0000
+
+; Prints the zero-terminated string at DS:SI with the BIOS teletype.
+Print:
+        lodsb
+        or al, al
+        jz .done
+        mov ah, 0x0E
+        mov bx, 0x000F
+        int 0x10
+        jmp Print
+.done:
+        ret
 
 fail_disk:
         mov si, msgDisk
@@ -230,6 +258,8 @@ dap:
         dw 0, 0
         dd 0, 0
 
+msgSplash   db "D I M O S   1 4", 13, 10, 13, 10
+            db "        a phone in your PC", 0
 ImageName   db "KERNEL  BIN"
 msgDisk     db "Disk error", 0
 msgKernel   db "No KERNEL.BIN", 0

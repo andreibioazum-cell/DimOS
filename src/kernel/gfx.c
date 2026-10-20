@@ -1,11 +1,14 @@
 /*
  * gfx.c -- everything that touches a pixel.
  *
- * DimOS composes a 320x200 indexed canvas in its own back buffer. The preferred
- * VBE path expands changed pixels into a full 1920x1080 XRGB8888 hardware
- * framebuffer; 640x480 RGB565 and VGA mode 13h remain fallbacks. A shadow
- * buffer keeps unchanged pixels off the slow video bus, so a static desktop
- * costs comparisons rather than multi-megabyte framebuffer writes.
+ * DimOS composes an 844x390 indexed canvas (an iPhone-sized landscape
+ * screen) in its own back buffer. The preferred VBE path scales changed
+ * pixels into the physical framebuffer -- 1920x1080 XRGB8888 on a PC,
+ * 1024x768 on a small VM profile -- and letterboxes the phone screen
+ * without distorting it. VGA mode 13h remains a compatibility fallback
+ * that samples the canvas down to 320x200. A shadow buffer keeps unchanged
+ * pixels off the slow video bus, so a static screen costs comparisons
+ * rather than multi-megabyte framebuffer writes.
  *
  * Text is drawn with 8x8 glyphs. When the boot disk carries FONT.TTF
  * (put any TrueType file into fonts/ before building), font_ttf.c
@@ -20,9 +23,13 @@
 /* Filled by kernel.asm while the machine is still in real mode. */
 extern u32 bios_font_address;
 
-/* The canvas we draw into and the last canvas successfully presented. */
-u8 *const screen = (u8 *)BACK_BUFFER_ADDRESS;
-static u8 *const presented = (u8 *)PRESENT_BUFFER_ADDRESS;
+/* The canvas we draw into and the last canvas successfully presented.
+ * Both live in the kernel's BSS (starting at 1 MiB): at phone resolution
+ * they no longer fit between the kernel image and the VGA memory. */
+static u8 back_buffer[SCREEN_BYTES];
+static u8 present_buffer[SCREEN_BYTES];
+u8 *const screen = back_buffer;
+static u8 *const presented = present_buffer;
 static u16 rgb565_color[256];
 static u32 xrgb8888_color[256];
 static u8 first_present = 1u;
@@ -31,7 +38,7 @@ static u8 first_present = 1u;
  * text is queued and rendered from native TrueType coverage at the physical
  * output size, so it stays smooth instead of magnifying an 8x8 bitmap. Two
  * command lists erase the overlay without repainting the whole framebuffer. */
-#define HIGH_TEXT_LIMIT 160u
+#define HIGH_TEXT_LIMIT 48u
 #define HIGH_TEXT_LENGTH 64u
 
 typedef struct {
@@ -47,8 +54,8 @@ static u16 high_text_current_count;
 static u16 high_text_previous_count;
 
 /* Software output window selected by the startup display wizard. The BIOS
- * mode remains the real framebuffer, while the smaller target lets v86 and
- * other emulators touch far fewer physical pixels per frame. */
+ * mode remains the real framebuffer, while the smaller target lets slow
+ * emulators and old LCD panels touch far fewer physical pixels per frame. */
 static u16 render_width;
 static u16 render_height;
 static u16 render_left;
@@ -56,9 +63,8 @@ static u16 render_top;
 
 /* The mouse is an overlay, not part of the desktop.  Remember the 7x7 area
  * below it so a plain mouse move can repair only those pixels rather than
- * make gui.c compose the entire desktop again.  This matters in browser v86:
- * the compositor otherwise redraws 64,000 logical pixels for every PS/2
- * mouse packet. */
+ * make gui.c compose the entire desktop again.  Without it the compositor
+ * redraws 64,000 logical pixels for every PS/2 mouse packet. */
 #define POINTER_RADIUS 3
 #define POINTER_DIAMETER (POINTER_RADIUS * 2 + 1)
 static u8 pointer_under[POINTER_DIAMETER * POINTER_DIAMETER];
@@ -76,10 +82,10 @@ typedef struct {
     u8 blue;
 } Color;
 
-/* The sixteen classic DOS colours first, then the window manager roles.
- * The role values are the Greybird palette DimXfce borrows: warm grey
- * windows, a bright selection blue, a white canvas and a deep graphite
- * blue that gradients into both the wallpaper and the title bars. */
+/* The sixteen classic DOS colours first, then the phone shell roles. The
+ * role values follow the iOS 14 light appearance: system blue, grouped
+ * grey backgrounds, white cards, a graphite label colour and the vivid
+ * tints used by the rounded home screen icons. */
 static const Color palette[PALETTE_SIZE] = {
     { 0, 0, 0 },         /* COLOR_BLACK       */
     { 0, 0, 170 },       /* COLOR_BLUE        */
@@ -97,26 +103,30 @@ static const Color palette[PALETTE_SIZE] = {
     { 255, 85, 255 },    /* COLOR_LIGHT_MAGENTA */
     { 255, 255, 85 },    /* COLOR_YELLOW      */
     { 255, 255, 255 },   /* COLOR_WHITE       */
-    { 238, 244, 250 },   /* COLOR_FACE        */
-    { 150, 165, 190 },   /* COLOR_SHADOW      */
+    { 255, 255, 255 },   /* COLOR_FACE        */
+    { 198, 198, 200 },   /* COLOR_SHADOW      */
     { 255, 255, 255 },   /* COLOR_HILITE      */
-    { 70, 99, 158 },     /* COLOR_TITLE_BAR   */
-    { 155, 198, 231 },   /* COLOR_DESKTOP     */
-    { 252, 254, 255 },   /* COLOR_TEXT_FIELD  */
-    { 65, 126, 207 },    /* COLOR_SELECTION   */
-    { 175, 190, 211 },   /* COLOR_DISABLED    */
-    { 255, 132, 118 },   /* COLOR_ACCENT      */
-    { 67, 190, 153 },    /* COLOR_GOOD        */
-    { 232, 91, 112 },    /* COLOR_ALERT       */
-    { 90, 124, 174 },    /* COLOR_PANEL       */
+    { 0, 122, 255 },     /* COLOR_TITLE_BAR   */
+    { 28, 28, 30 },      /* COLOR_DESKTOP     */
+    { 255, 255, 255 },   /* COLOR_TEXT_FIELD  */
+    { 0, 122, 255 },     /* COLOR_SELECTION   */
+    { 142, 142, 147 },   /* COLOR_DISABLED    */
+    { 255, 149, 0 },     /* COLOR_ACCENT      */
+    { 52, 199, 89 },     /* COLOR_GOOD        */
+    { 255, 59, 48 },     /* COLOR_ALERT       */
+    { 242, 242, 247 },   /* COLOR_PANEL       */
     { 255, 255, 255 },   /* COLOR_CANVAS      */
-    { 201, 216, 232 },   /* COLOR_GRID        */
-    { 41, 63, 105 },      /* COLOR_DEEP        */
-    { 31, 47, 78 },       /* COLOR_CURSOR      */
-    { 24, 32, 48 },       /* COLOR_TASKBAR     */
-    { 8, 25, 54 },        /* COLOR_WIN_BG      */
-    { 0, 95, 190 },       /* COLOR_WIN_GLOW    */
-    { 90, 190, 255 }      /* COLOR_WIN_LIGHT    */
+    { 209, 209, 214 },   /* COLOR_GRID        */
+    { 28, 28, 30 },      /* COLOR_DEEP        */
+    { 255, 255, 255 },   /* COLOR_CURSOR      */
+    { 249, 249, 249 },   /* COLOR_TASKBAR     */
+    { 0, 0, 0 },         /* COLOR_WIN_BG      */
+    { 10, 132, 255 },    /* COLOR_WIN_GLOW    */
+    { 90, 200, 250 },    /* COLOR_WIN_LIGHT   */
+    { 175, 82, 222 },    /* COLOR_IOS_PURPLE  */
+    { 255, 45, 85 },     /* COLOR_IOS_PINK    */
+    { 48, 176, 199 },    /* COLOR_IOS_TEAL    */
+    { 88, 86, 214 }      /* COLOR_IOS_INDIGO  */
 };
 
 static u8 current_theme = THEME_COLOR;
@@ -176,10 +186,10 @@ static void palette_write_entry(u8 index, Color value) {
     }
 }
 
-/* The 6x6x6 colour cube that lives in slots 32..247. Six evenly spaced
- * levels per channel is the classic web-safe grid: coarse enough to fit
- * in the palette, fine enough that a blended edge is indistinguishable
- * from the exact colour at 320x200. */
+/* The 6x6x6 colour cube that lives in slots 40..255. Six evenly spaced
+ * levels per channel are coarse enough to fit in the palette, fine enough
+ * that a blended edge is indistinguishable from the exact colour at phone
+ * scale. */
 static u8 cube_level(u8 step) {
     return (u8)(((u16)step * 255u) / (COLOR_CUBE_STEPS - 1u));
 }
@@ -202,10 +212,8 @@ static Color color_of(u8 index) {
     if (index < PALETTE_SIZE) {
         return palette[index];
     }
-    if ((u16)index < COLOR_CUBE_BASE + COLOR_CUBE_COUNT) {
-        return cube_color((u16)(index - COLOR_CUBE_BASE));
-    }
-    return palette[COLOR_BLACK];
+    /* Roles and the blending cube together fill all 256 palette slots. */
+    return cube_color((u16)(index - COLOR_CUBE_BASE));
 }
 
 /* The cube slot closest to a colour. */
@@ -221,12 +229,7 @@ u8 gfx_color_from_rgb(u8 red, u8 green, u8 blue) {
 }
 
 static void palette_apply(void) {
-    Color black;
     u16 index;
-
-    black.red = 0u;
-    black.green = 0u;
-    black.blue = 0u;
 
     for (index = 0u; index < PALETTE_SIZE; ++index) {
         palette_write_entry((u8)index, themed(palette[index], current_theme));
@@ -236,11 +239,6 @@ static void palette_apply(void) {
     for (index = 0u; index < COLOR_CUBE_COUNT; ++index) {
         palette_write_entry((u8)(COLOR_CUBE_BASE + index),
                             themed(cube_color(index), current_theme));
-    }
-    /* The slots we never draw with stay black instead of the rainbow the
-     * video BIOS leaves behind after a mode change. */
-    for (index = COLOR_CUBE_BASE + COLOR_CUBE_COUNT; index < 256u; ++index) {
-        palette_write_entry((u8)index, black);
     }
 }
 
@@ -573,6 +571,7 @@ static void high_text_queue(s16 x, s16 y, const char *text, u8 color) {
         return;
     }
     item = &high_text_current[high_text_current_count++];
+    memory_zero(item, (u32)sizeof(HighText));
     item->x = x;
     item->y = y;
     item->color = color;
@@ -592,7 +591,7 @@ static u8 high_text_lists_equal(void) {
 
 /* The overlay only needs repainting when the logical pixels below a text
  * command changed. Mouse movement elsewhere must not make every label flash
- * or make v86 rewrite all glyphs again. */
+ * or make the text rasterizer run again. */
 static u8 high_text_background_changed(void) {
     u16 command;
 
@@ -698,18 +697,25 @@ static void high_text_draw(void) {
 /* Frame buffer                                                        */
 /* ------------------------------------------------------------------ */
 
+/* VGA mode 13h is a 320x200 window on a phone-shaped canvas, so the
+ * fallback presenter samples the canvas on a fixed grid. It is only used
+ * by machines with no usable linear framebuffer at all. */
+#define VGA_WIDTH 320u
+#define VGA_HEIGHT 200u
+
 static void present_vga(void) {
-    const u32 *source = (const u32 *)BACK_BUFFER_ADDRESS;
-    u32 *shadow = (u32 *)PRESENT_BUFFER_ADDRESS;
-    volatile u32 *target = (volatile u32 *)0x000A0000u;
-    u32 index;
+    volatile u8 *target = VGA_FRAME_BUFFER;
+    u16 row;
+    u16 column;
 
-    for (index = 0u; index < SCREEN_BYTES / 4u; ++index) {
-        const u32 pixels = source[index];
+    for (row = 0u; row < VGA_HEIGHT; ++row) {
+        const u16 source_y = (u16)(((u32)row * SCREEN_HEIGHT) / VGA_HEIGHT);
 
-        if (first_present != 0u || shadow[index] != pixels) {
-            target[index] = pixels;
-            shadow[index] = pixels;
+        for (column = 0u; column < VGA_WIDTH; ++column) {
+            const u16 source_x = (u16)(((u32)column * SCREEN_WIDTH) / VGA_WIDTH);
+
+            target[(u32)row * VGA_WIDTH + column] =
+                screen[(u32)source_y * SCREEN_WIDTH + source_x];
         }
     }
 }
@@ -777,7 +783,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
     first_present = 1u;
 
     /* Clear the letterbox once. Subsequent frames only touch the selected
-     * viewport, which is the useful optimization for v86's small profile. */
+     * viewport, which is the useful optimization for small VM profiles. */
     color = xrgb8888_color[COLOR_DESKTOP];
     if (video_bits_per_pixel == 32u) {
         volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
@@ -820,7 +826,7 @@ static u8 scale2x_color(u16 x, u16 y, u8 side_x, u8 side_y) {
     const u8 right = screen[(u32)y * SCREEN_WIDTH + right_x];
     const u8 below = screen[(u32)bottom_y * SCREEN_WIDTH + x];
 
-    /* The middle row of a 2.4x v86 cell remains the source colour. */
+    /* The middle row of a 2x scaled cell remains the source colour. */
     if (side_y == 1u) {
         return center;
     }
@@ -922,8 +928,8 @@ static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y
 static void present_vbe(void) {
     volatile u8 *framebuffer =
         (volatile u8 *)(u32)video_framebuffer_address;
-    const u32 *source_words = (const u32 *)BACK_BUFFER_ADDRESS;
-    u32 *shadow_words = (u32 *)PRESENT_BUFFER_ADDRESS;
+    const u32 *source_words = (const u32 *)back_buffer;
+    u32 *shadow_words = (u32 *)present_buffer;
     u16 y;
 
     if (vbe_map_ready == 0u) {
@@ -964,8 +970,8 @@ static void present_vbe(void) {
 
 void gfx_show(void) {
     if (video_backend == VIDEO_BACKEND_VBE &&
-        video_framebuffer_address != 0u && video_width >= SCREEN_WIDTH &&
-        video_height >= SCREEN_HEIGHT &&
+        video_framebuffer_address != 0u && video_width != 0u &&
+        video_height != 0u &&
         (video_bits_per_pixel == 16u || video_bits_per_pixel == 32u)) {
         {
             const u8 text_changed = (u8)(high_text_lists_equal() == 0u);
@@ -1011,6 +1017,13 @@ static void fill_bytes(u8 *target, u32 length, u8 color) {
         *target++ = color;
         --length;
     }
+}
+
+/* The shell composes a whole frame from scratch, so this starts a new
+ * deferred text list and forgets the pointer pixels of the previous frame. */
+void gfx_begin_frame(void) {
+    high_text_current_count = 0u;
+    pointer_drawn = 0u;
 }
 
 void gfx_clear(u8 color) {
@@ -1175,6 +1188,50 @@ void gfx_line(s16 x0, s16 y0, s16 x1, s16 y1, u8 color) {
 }
 
 /* Midpoint circle. Draws the outline, or every row when filled. */
+/* One quarter of a circle outline: quadrant 0 is the top-left arc, 1 the
+ * top-right, 2 the bottom-right and 3 the bottom-left. Rounded outlines use
+ * these instead of full rings, which would cut across the shape. */
+static void circle_arc(s16 center_x, s16 center_y, s16 radius, u8 color,
+                       u8 quadrant) {
+    const s16 left = (quadrant == 0u || quadrant == 3u) ? 0 : 1;
+    const s16 above = (quadrant < 2u) ? 1 : 0;
+    s16 x = radius;
+    s16 y = 0;
+    s16 decision = (s16)(1 - radius);
+
+    while (x >= y) {
+        s16 point_x[8];
+        s16 point_y[8];
+        u8 index;
+
+        point_x[0] = (s16)(center_x + x); point_y[0] = (s16)(center_y + y);
+        point_x[1] = (s16)(center_x - x); point_y[1] = (s16)(center_y + y);
+        point_x[2] = (s16)(center_x + x); point_y[2] = (s16)(center_y - y);
+        point_x[3] = (s16)(center_x - x); point_y[3] = (s16)(center_y - y);
+        point_x[4] = (s16)(center_x + y); point_y[4] = (s16)(center_y + x);
+        point_x[5] = (s16)(center_x - y); point_y[5] = (s16)(center_y + x);
+        point_x[6] = (s16)(center_x + y); point_y[6] = (s16)(center_y - x);
+        point_x[7] = (s16)(center_x - y); point_y[7] = (s16)(center_y - x);
+
+        for (index = 0u; index < 8u; ++index) {
+            const s16 side = (s16)(point_x[index] - center_x);
+            const s16 rise = (s16)(point_y[index] - center_y);
+
+            if ((left != 0 ? side <= 0 : side >= 0) &&
+                (above != 0 ? rise <= 0 : rise >= 0)) {
+                gfx_pixel(point_x[index], point_y[index], color);
+            }
+        }
+        ++y;
+        if (decision <= 0) {
+            decision = (s16)(decision + 2 * y + 1);
+        } else {
+            --x;
+            decision = (s16)(decision + 2 * y - 2 * x + 1);
+        }
+    }
+}
+
 void gfx_circle(s16 center_x, s16 center_y, s16 radius, u8 color, u8 filled) {
     s16 x = radius;
     s16 y = 0;
@@ -1303,6 +1360,26 @@ void gfx_gradient_vertical(s16 x, s16 y, s16 width, s16 height,
     }
 }
 
+void gfx_gradient_vertical_alpha(s16 x, s16 y, s16 width, s16 height,
+                                 u8 top_color, u8 bottom_color, u8 alpha) {
+    s16 row;
+
+    if (alpha >= (u8)FONT_ALPHA_MAX) {
+        gfx_gradient_vertical(x, y, width, height, top_color, bottom_color);
+        return;
+    }
+    for (row = 0; row < height; ++row) {
+        const u8 level = (u8)(((u32)row * (FONT_ALPHA_MAX - 1u)) /
+                              (u32)((height > 1) ? (height - 1) : 1));
+        const u8 color = gfx_shade(bottom_color, top_color, level);
+        s16 column;
+
+        for (column = 0; column < width; ++column) {
+            gfx_pixel_blend((s16)(x + column), (s16)(y + row), color, alpha);
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Text                                                                */
 /* ------------------------------------------------------------------ */
@@ -1416,6 +1493,346 @@ u16 gfx_text_width(const char *text) {
         ++text;
     }
     return width;
+}
+
+/* ------------------------------------------------------------------ */
+/* Round shapes and scaled text (the phone shell)                      */
+/* ------------------------------------------------------------------ */
+
+static void fill_alpha(s16 x, s16 y, s16 width, s16 height, u8 color, u8 alpha) {
+    s16 row;
+    s16 column;
+
+    if (alpha >= (u8)FONT_ALPHA_MAX) {
+        gfx_fill(x, y, width, height, color);
+        return;
+    }
+    if (alpha == 0u) {
+        return;
+    }
+    for (row = 0; row < height; ++row) {
+        for (column = 0; column < width; ++column) {
+            gfx_pixel_blend((s16)(x + column), (s16)(y + row), color, alpha);
+        }
+    }
+}
+
+static void circle_fill_alpha(s16 center_x, s16 center_y, s16 radius,
+                              u8 color, u8 alpha) {
+    s16 row;
+
+    for (row = -radius; row <= radius; ++row) {
+        const u16 rest = (u16)(radius * radius - row * row);
+        const s16 half = (s16)integer_sqrt(rest);
+
+        s16 column;
+        for (column = -half; column <= half; ++column) {
+            gfx_pixel_blend((s16)(center_x + column), (s16)(center_y + row),
+                            color, alpha);
+        }
+    }
+}
+
+/* A rounded rectangle, the basic shape of the phone shell: app icons, the
+ * dock, Control Centre modules, buttons and cards are all made of it. */
+void gfx_round_fill(s16 x, s16 y, s16 width, s16 height, s16 radius, u8 color) {
+    s16 limit;
+
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    limit = (s16)(((width < height) ? width : height) / 2);
+    if (radius > limit) {
+        radius = limit;
+    }
+    if (radius < 1) {
+        gfx_fill(x, y, width, height, color);
+        return;
+    }
+    gfx_fill((s16)(x + radius), y, (s16)(width - 2 * radius), height, color);
+    gfx_fill(x, (s16)(y + radius), width, (s16)(height - 2 * radius), color);
+    gfx_circle((s16)(x + radius), (s16)(y + radius), radius, color, 1u);
+    gfx_circle((s16)(x + width - radius - 1), (s16)(y + radius), radius,
+               color, 1u);
+    gfx_circle((s16)(x + radius), (s16)(y + height - radius - 1), radius,
+               color, 1u);
+    gfx_circle((s16)(x + width - radius - 1),
+               (s16)(y + height - radius - 1), radius, color, 1u);
+}
+
+void gfx_round_fill_alpha(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                          u8 color, u8 alpha) {
+    s16 limit;
+
+    if (width <= 0 || height <= 0 || alpha == 0u) {
+        return;
+    }
+    limit = (s16)(((width < height) ? width : height) / 2);
+    if (radius > limit) {
+        radius = limit;
+    }
+    if (radius < 1) {
+        fill_alpha(x, y, width, height, color, alpha);
+        return;
+    }
+    fill_alpha((s16)(x + radius), y, (s16)(width - 2 * radius), height,
+               color, alpha);
+    fill_alpha(x, (s16)(y + radius), width, (s16)(height - 2 * radius),
+               color, alpha);
+    circle_fill_alpha((s16)(x + radius), (s16)(y + radius), radius,
+                      color, alpha);
+    circle_fill_alpha((s16)(x + width - radius - 1), (s16)(y + radius),
+                      radius, color, alpha);
+    circle_fill_alpha((s16)(x + radius), (s16)(y + height - radius - 1),
+                      radius, color, alpha);
+    circle_fill_alpha((s16)(x + width - radius - 1),
+                      (s16)(y + height - radius - 1), radius, color, alpha);
+}
+
+/* A soft light falling from the top of a rounded tile: the iOS icons look
+ * like glass because of it. Every row is inset to stay inside the corners. */
+void gfx_round_gloss(s16 x, s16 y, s16 width, s16 height, s16 radius) {
+    const s16 rows = (s16)(height / 3);
+    s16 row;
+
+    if (rows < 2) {
+        return;
+    }
+    for (row = 0; row < rows; ++row) {
+        s16 inset = 0;
+        const u8 level = (u8)(((u32)(rows - row) * 5u) / (u32)rows);
+
+        if (row < radius) {
+            const s16 drop = (s16)(radius - row);
+            inset = (s16)(radius - (s16)integer_sqrt(
+                                       (u16)(radius * radius - drop * drop)));
+        }
+        if (level == 0u) {
+            continue;
+        }
+        fill_alpha((s16)(x + inset), (s16)(y + 1 + row),
+                   (s16)(width - 2 * inset), 1, COLOR_FACE, level);
+    }
+}
+
+/* A translucent horizontal band clipped to a rounded tile: the safe way to
+ * layer a gradient over corners without spilling outside them. */
+void gfx_round_band_alpha(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                          s16 band_top, s16 band_height, u8 color, u8 alpha) {
+    s16 row;
+
+    if (width <= 0 || height <= 0 || band_height <= 0) {
+        return;
+    }
+    for (row = 0; row < band_height; ++row) {
+        const s16 screen_y = (s16)(band_top + row);
+        s16 inset = 0;
+
+        if (screen_y < 0 || screen_y >= height) {
+            continue;
+        }
+        if (radius > 0 && screen_y < radius) {
+            const s16 drop = (s16)(radius - screen_y);
+
+            inset = (s16)(radius - (s16)integer_sqrt(
+                                       (u16)(radius * radius - drop * drop)));
+        } else if (radius > 0 && screen_y >= (s16)(height - radius)) {
+            const s16 drop = (s16)(screen_y - (height - radius - 1));
+
+            inset = (s16)(radius - (s16)integer_sqrt(
+                                       (u16)(radius * radius - drop * drop)));
+        }
+        fill_alpha((s16)(x + inset), (s16)(y + screen_y),
+                   (s16)(width - 2 * inset), 1, color, alpha);
+    }
+}
+
+void gfx_round_outline(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                       u8 color) {
+    s16 limit = (s16)(((width < height) ? width : height) / 2);
+
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    if (radius > limit) {
+        radius = limit;
+    }
+    if (radius < 1) {
+        gfx_outline(x, y, width, height, color);
+        return;
+    }
+    gfx_horizontal_line((s16)(x + radius), y, (s16)(width - 2 * radius),
+                        color);
+    gfx_horizontal_line((s16)(x + radius), (s16)(y + height - 1),
+                        (s16)(width - 2 * radius), color);
+    gfx_vertical_line(x, (s16)(y + radius), (s16)(height - 2 * radius),
+                      color);
+    gfx_vertical_line((s16)(x + width - 1), (s16)(y + radius),
+                      (s16)(height - 2 * radius), color);
+    circle_arc((s16)(x + radius), (s16)(y + radius), radius, color, 0u);
+    circle_arc((s16)(x + width - radius - 1), (s16)(y + radius), radius,
+               color, 1u);
+    circle_arc((s16)(x + width - radius - 1),
+               (s16)(y + height - radius - 1), radius, color, 2u);
+    circle_arc((s16)(x + radius), (s16)(y + height - radius - 1), radius,
+               color, 3u);
+}
+
+/* A crisp, scaled ASCII-art glyph: no smoothing, so small status bar
+ * symbols stay sharp. Used by the shell for its own little icons. */
+void gfx_glyph(s16 x, s16 y, const char *const *art, u16 rows, s16 scale,
+               u8 color) {
+    u16 row;
+
+    if (scale < 1) {
+        scale = 1;
+    }
+    for (row = 0u; row < rows; ++row) {
+        const char *line = art[row];
+        s16 column;
+
+        for (column = 0; line[column] != '\0'; ++column) {
+            if (line[column] == '.' || line[column] == ' ') {
+                continue;
+            }
+            gfx_fill((s16)(x + column * scale), (s16)(y + (s16)row * scale),
+                     scale, scale, color);
+        }
+    }
+}
+
+/* The cell of a scaled glyph: square-ish source raster squeezed to the
+ * natural width of a letter, which is about six tenths of its height. */
+static u16 text_cell_width(u16 height) {
+    u16 width = (u16)(((u32)height * 10u) / 16u);
+
+    if (width < 4u) {
+        width = 4u;
+    }
+    if (width > height) {
+        width = height;
+    }
+    return width;
+}
+
+static u8 text_sample(char character, u16 x_numerator, u16 y_numerator,
+                      u8 source_size) {
+    const u16 x = (u16)(x_numerator >> 8u);
+    const u16 y = (u16)(y_numerator >> 8u);
+    const u16 fx = (u16)(x_numerator & 0xFFu);
+    const u16 fy = (u16)(y_numerator & 0xFFu);
+    const u16 right = (u16)((x + 1u < source_size) ? x + 1u : x);
+    const u16 below = (u16)((y + 1u < source_size) ? y + 1u : y);
+    const u32 top = ((u32)high_text_alpha(character, (u8)y, (u8)x) *
+                         (256u - fx) +
+                     (u32)high_text_alpha(character, (u8)y, (u8)right) * fx +
+                     128u) >> 8u;
+    const u32 bottom = ((u32)high_text_alpha(character, (u8)below, (u8)x) *
+                            (256u - fx) +
+                        (u32)high_text_alpha(character, (u8)below, (u8)right) *
+                            fx +
+                        128u) >> 8u;
+
+    return (u8)((top * (256u - fy) + bottom * fy + 128u) >> 8u);
+}
+
+static void text_size_faded(s16 x, s16 y, const char *text, u8 color,
+                            u16 height, u8 alpha) {
+    const u8 source_size = high_text_glyph_pixels();
+    const u16 cell = text_cell_width(height);
+    u16 origin = (u16)x;
+
+    while (*text != '\0') {
+        const char character = *text;
+        u16 row;
+
+        for (row = 0u; row < height; ++row) {
+            const u16 sy = (u16)(((u32)row * source_size * 256u) / height);
+            u16 column;
+
+            for (column = 0u; column < cell; ++column) {
+                const u16 sx = (u16)(((u32)column * source_size * 256u) / cell);
+                const u8 coverage = text_sample(character, sx, sy, source_size);
+
+                if (coverage != 0u) {
+                    gfx_pixel_blend((s16)(origin + column), (s16)(y + row),
+                                    color,
+                                    (u8)(((u16)coverage * alpha) /
+                                         FONT_ALPHA_MAX));
+                }
+            }
+        }
+        origin = (u16)(origin + cell);
+        ++text;
+    }
+}
+
+void gfx_text_size_shadowed(s16 x, s16 y, const char *text, u8 color,
+                            u16 height) {
+    text_size_faded((s16)(x + 1), (s16)(y + 2), text, COLOR_WIN_BG, height, 9u);
+    gfx_text_size(x, y, text, color, height);
+}
+
+void gfx_text_size(s16 x, s16 y, const char *text, u8 color, u16 height) {
+    const u8 source_size = high_text_glyph_pixels();
+    const u16 cell = text_cell_width(height);
+    u16 origin = (u16)x;
+
+    if (height < 8u) {
+        gfx_text(x, y, text, color);
+        return;
+    }
+    while (*text != '\0') {
+        const char character = *text;
+        u16 row;
+
+        for (row = 0u; row < height; ++row) {
+            const u16 sy = (u16)(((u32)row * source_size * 256u) / height);
+            u16 column;
+
+            for (column = 0u; column < cell; ++column) {
+                const u16 sx = (u16)(((u32)column * source_size * 256u) / cell);
+                const u8 alpha = text_sample(character, sx, sy, source_size);
+
+                if (alpha != 0u) {
+                    gfx_pixel_blend((s16)(origin + column),
+                                    (s16)(y + row), color, alpha);
+                }
+            }
+        }
+        origin = (u16)(origin + cell);
+        ++text;
+    }
+}
+
+u16 gfx_text_size_width(const char *text, u16 height) {
+    u16 count = 0u;
+
+    if (height < 8u) {
+        return gfx_text_width(text);
+    }
+    while (*text != '\0') {
+        ++count;
+        ++text;
+    }
+    return (u16)(count * text_cell_width(height));
+}
+
+void gfx_text_size_centered(s16 x, s16 y, s16 width, const char *text,
+                            u8 color, u16 height) {
+    const u16 used = gfx_text_size_width(text, height);
+
+    if (used < (u16)width) {
+        x = (s16)(x + (s16)(((u16)width - used) / 2u));
+    }
+    gfx_text_size(x, y, text, color, height);
+}
+
+void gfx_text_size_right(s16 x, s16 y, const char *text, u8 color,
+                         u16 height) {
+    const u16 used = gfx_text_size_width(text, height);
+
+    gfx_text_size((s16)(x - (s16)used), y, text, color, height);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1745,10 +2162,17 @@ void gfx_draw_pointer(s16 x, s16 y) {
     pointer_drawn_y = y;
     pointer_drawn = 1u;
 
+    /* A white cross with a dark halo, so the pointer stays visible on the
+     * dark wallpaper and on white application pages alike. */
     for (offset = -POINTER_RADIUS; offset <= POINTER_RADIUS; ++offset) {
-        gfx_pixel((s16)(x + offset), y, COLOR_CURSOR);
-        gfx_pixel(x, (s16)(y + offset), COLOR_CURSOR);
+        gfx_pixel((s16)(x + offset), y, COLOR_DEEP);
+        gfx_pixel(x, (s16)(y + offset), COLOR_DEEP);
     }
+    gfx_pixel(x, y, COLOR_CURSOR);
+    gfx_pixel((s16)(x - 1), y, COLOR_CURSOR);
+    gfx_pixel((s16)(x + 1), y, COLOR_CURSOR);
+    gfx_pixel(x, (s16)(y - 1), COLOR_CURSOR);
+    gfx_pixel(x, (s16)(y + 1), COLOR_CURSOR);
 }
 
 void gfx_init(void) {

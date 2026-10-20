@@ -10,7 +10,7 @@
  *   - KERNEL.BIN is really in the root directory, with the right size;
  *   - the hard disk image is the floppy image plus zero padding;
  *   - the ISO carries an El Torito boot catalog for 1.44M floppy
- *     emulation, which is what v86 and SeaBIOS expect.
+ *     emulation, which is what the BIOS firmware expects.
  *
  * Usage: image_check BOOT.BIN KERNEL.BIN dimos.img dimos.hdd [dimos.iso]
  */

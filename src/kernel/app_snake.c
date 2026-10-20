@@ -1,20 +1,22 @@
 /*
  * app_snake.c -- the snake game.
  *
- * The snake can be steered three ways: with the four buttons on the screen,
- * with the arrow keys, or by clicking anywhere in the field, which turns the
- * snake towards the click.
+ * The snake can be steered three ways: with the on-screen direction pad,
+ * with the arrow keys, or by tapping anywhere in the field, which turns
+ * the snake towards the tap. The board is a rounded card in the style of
+ * a phone game.
  */
 
 #include "dimos.h"
 
-#define CELL 4
+#define CELL 8
 #define FIELD_COLUMNS 42
 #define FIELD_ROWS 25
 #define FIELD_WIDTH (FIELD_COLUMNS * CELL)
 #define FIELD_HEIGHT (FIELD_ROWS * CELL)
-#define FIELD_X (s16)(WINDOW_LEFT + 4)
-#define FIELD_Y (s16)(WINDOW_TOP + 4)
+#define FIELD_X (s16)APP_LEFT
+#define FIELD_Y 74
+#define SIDE_X (s16)(FIELD_X + FIELD_WIDTH + 36)
 #define SNAKE_LIMIT 300u
 #define STEP_MILLISECONDS 140u
 
@@ -29,20 +31,20 @@ enum { GOING_UP = 0u, GOING_RIGHT = 1u, GOING_DOWN = 2u, GOING_LEFT = 3u };
 
 static const char *const icon[16] = {
     "................",
-    "..........XX....",
-    ".........XXXX...",
-    "........XXoXX...",
+    "...XXXXXXX......",
+    "..XXXXXXXXX.....",
+    "..XX.....XXX....",
+    "..XX......XX....",
+    "...XXX....XX....",
+    ".....XX...XX....",
+    "......XX.XX.....",
     ".......XXXX.....",
-    "......XXXX......",
-    ".....XXXX.......",
-    "....XXXX........",
-    "...XXXX.........",
-    "..XXXX..........",
-    "..XXX...........",
-    "................",
-    "................",
-    "................",
-    "................",
+    ".......XX.......",
+    "......XX........",
+    ".....XX.........",
+    "....XXXXXX......",
+    "...XXXXXXXX.....",
+    "....XXXXXX......",
     "................",
 };
 
@@ -192,54 +194,87 @@ static void snake_update(u16 elapsed) {
     }
 }
 
+static void dpad_key(s16 x, s16 y, const char *label, u16 id) {
+    const u8 pressed = gui_is_pressed(id);
+
+    gfx_round_fill(x, y, 56, 50, 14,
+                   (pressed != 0u) ? COLOR_SELECTION : COLOR_FACE);
+    gfx_text_size_centered(x, (s16)(y + 17), 56, label,
+                           (pressed != 0u) ? COLOR_FACE : COLOR_DEEP, 13);
+    gui_hotspot(x, y, 56, 50, id);
+}
+
 static void snake_draw(void) {
-    const s16 right = (s16)(FIELD_X + FIELD_WIDTH);
     u16 index;
     char buffer[16];
 
-    gfx_fill(FIELD_X, FIELD_Y, (s16)FIELD_WIDTH, (s16)FIELD_HEIGHT, COLOR_DEEP);
-    gfx_outline((s16)(FIELD_X - 1), (s16)(FIELD_Y - 1), (s16)(FIELD_WIDTH + 2),
-                (s16)(FIELD_HEIGHT + 2), COLOR_SHADOW);
+    gui_window_frame("Snake");
 
-    gfx_fill((s16)(FIELD_X + (s16)(food_cell % FIELD_COLUMNS) * CELL),
-             (s16)(FIELD_Y + (s16)(food_cell / FIELD_COLUMNS) * CELL),
-             CELL, CELL, COLOR_RED);
+    /* The field: a deep green rounded board with a subtle grid. */
+    gfx_round_fill(FIELD_X - 6, FIELD_Y - 6, (s16)(FIELD_WIDTH + 12),
+                   (s16)(FIELD_HEIGHT + 12), 16,
+                   gfx_shade(COLOR_GOOD, COLOR_BLACK, 12));
+    gfx_fill(FIELD_X, FIELD_Y, (s16)FIELD_WIDTH, (s16)FIELD_HEIGHT,
+             gfx_shade(COLOR_GOOD, COLOR_BLACK, 10));
 
-    for (index = 0u; index < length; ++index) {
-        const u8 color = (index == 0u) ? COLOR_LIGHT_GREEN : COLOR_GREEN;
-
-        gfx_fill((s16)(FIELD_X + (s16)(cells[index] % FIELD_COLUMNS) * CELL),
-                 (s16)(FIELD_Y + (s16)(cells[index] / FIELD_COLUMNS) * CELL),
-                 CELL, CELL, color);
+    for (index = 0u; index < FIELD_COLUMNS; ++index) {
+        if ((index % 3u) == 0u) {
+            gfx_vertical_line((s16)(FIELD_X + (s16)index * CELL), FIELD_Y,
+                              (s16)FIELD_HEIGHT,
+                              gfx_shade(COLOR_GOOD, COLOR_BLACK, 6));
+        }
+    }
+    for (index = 0u; index < FIELD_ROWS; ++index) {
+        if ((index % 3u) == 0u) {
+            gfx_horizontal_line(FIELD_X, (s16)(FIELD_Y + (s16)index * CELL),
+                                (s16)FIELD_WIDTH,
+                                gfx_shade(COLOR_GOOD, COLOR_BLACK, 6));
+        }
     }
 
+    /* The apple. */
+    gfx_round_fill((s16)(FIELD_X + (s16)(food_cell % FIELD_COLUMNS) * CELL + 1),
+                   (s16)(FIELD_Y + (s16)(food_cell / FIELD_COLUMNS) * CELL + 1),
+                   CELL - 2, CELL - 2, (CELL - 2) / 2, COLOR_ALERT);
+
+    for (index = 0u; index < length; ++index) {
+        const u8 color = (index == 0u) ? COLOR_FACE : COLOR_WIN_LIGHT;
+
+        gfx_round_fill((s16)(FIELD_X + (s16)(cells[index] % FIELD_COLUMNS) * CELL + 1),
+                       (s16)(FIELD_Y + (s16)(cells[index] / FIELD_COLUMNS) * CELL + 1),
+                       CELL - 2, CELL - 2, (CELL - 2) / 2, color);
+    }
+
+    /* Score and length, as big phone-game numbers. */
+    gfx_text_size(SIDE_X, 70, "SCORE", COLOR_DISABLED, 9);
     buffer[0] = '\0';
-    text_append(buffer, "Score ", (u16)sizeof(buffer));
     text_append_number(buffer, score, (u16)sizeof(buffer));
-    gfx_text((s16)(right + 8), (s16)(FIELD_Y), buffer, COLOR_BLACK);
-    gfx_text((s16)(right + 8), (s16)(FIELD_Y + 10), "Len", COLOR_BLACK);
+    gfx_text_size(SIDE_X, 82, buffer, COLOR_DEEP, 34);
+
+    gfx_text_size((s16)(SIDE_X + 140), 70, "LENGTH", COLOR_DISABLED, 9);
     buffer[0] = '\0';
     text_append_number(buffer, length, (u16)sizeof(buffer));
-    gfx_text((s16)(right + 34), (s16)(FIELD_Y + 10), buffer, COLOR_BLACK);
+    gfx_text_size((s16)(SIDE_X + 140), 82, buffer, COLOR_DEEP, 34);
 
-    gui_button((s16)(right + 34), (s16)(FIELD_Y + 26), 28, 22, "^", ID_UP);
-    gui_button((s16)(right + 4), (s16)(FIELD_Y + 50), 28, 22, "<", ID_LEFT);
-    gui_button((s16)(right + 64), (s16)(FIELD_Y + 50), 28, 22, ">", ID_RIGHT);
-    gui_button((s16)(right + 34), (s16)(FIELD_Y + 74), 28, 22, "v", ID_DOWN);
-    gui_button((s16)(right + 4), (s16)(FIELD_Y + 106), 88, 14, "New game",
-               ID_NEW_GAME);
+    /* A proper direction pad. */
+    dpad_key((s16)(SIDE_X + 66), 150, "^", ID_UP);
+    dpad_key(SIDE_X, 208, "<", ID_LEFT);
+    dpad_key((s16)(SIDE_X + 66), 208, "v", ID_DOWN);
+    dpad_key((s16)(SIDE_X + 132), 208, ">", ID_RIGHT);
+
+    gui_button((s16)(SIDE_X + 66), 288, 122, 44, "New game", ID_NEW_GAME);
 
     gui_hotspot(FIELD_X, FIELD_Y, (s16)FIELD_WIDTH, (s16)FIELD_HEIGHT, ID_FIELD);
 
     if (alive == 0u) {
-        gfx_fill((s16)(FIELD_X + 30), (s16)(FIELD_Y + 36), 108, 26, COLOR_FACE);
-        gfx_outline((s16)(FIELD_X + 30), (s16)(FIELD_Y + 36), 108, 26, COLOR_BLACK);
-        gfx_text_centered((s16)(FIELD_X + 30), (s16)(FIELD_Y + 40), 108,
-                          "GAME OVER", COLOR_RED);
-        gfx_text_centered((s16)(FIELD_X + 30), (s16)(FIELD_Y + 50), 108,
-                          "New game to retry", COLOR_BLACK);
+        gfx_round_fill((s16)(FIELD_X + 68), (s16)(FIELD_Y + 66), 200, 68, 16,
+                       COLOR_FACE);
+        gfx_text_size_centered((s16)(FIELD_X + 68), (s16)(FIELD_Y + 76), 200,
+                               "GAME OVER", COLOR_ALERT, 18);
+        gfx_text_size_centered((s16)(FIELD_X + 68), (s16)(FIELD_Y + 104), 200,
+                               "Tap New game to retry", COLOR_DISABLED, 9);
     } else {
-        gui_message_bar("Arrows, buttons or click the field to steer");
+        gui_message_bar("Arrows, the direction pad, or tap the field");
     }
 }
 
@@ -309,7 +344,7 @@ const Application application_snake = {
     "Snake",
     "Snake",
     icon,
-    COLOR_LIGHT_GREEN,
+    COLOR_GOOD,
     snake_open,
     snake_draw,
     snake_event,

@@ -4,8 +4,8 @@
 #
 # The primary artifact is dimos.hdd, a hard disk image: the bootable FAT12
 # volume occupies the first 1.44 MB and the rest is zero padding. It boots as
-# an IDE/USB disk in QEMU, on the v86 website (hard disk slot) and on real
-# hardware, because the loader uses LBA and keeps the BIOS drive unit from DL.
+# an IDE/USB disk in QEMU and on real hardware, because the loader uses LBA
+# and keeps the BIOS drive unit from DL.
 # dimos.iso is the same system as a bootable El Torito CD for real PCs, and
 # dimos.img is the raw 1.44M floppy volume.
 
@@ -17,7 +17,7 @@ readonly HDD_SIZE_BYTES=8388608
 # real ceiling is the preloaded data window at 0x30000: 126 sectors.
 readonly MAX_KERNEL_LOADER_BYTES=64512
 readonly BOOT_IMAGE="disk_img/dimos.img"
-# FAT12 image + zero padding: boots as an IDE/USB hard disk in QEMU, v86 and
+# FAT12 image + zero padding: boots as an IDE/USB hard disk in QEMU and
 # on real PCs.
 readonly HDD_IMAGE="disk_img/dimos.hdd"
 # Kept as a blank compatibility disk for existing release automation.
@@ -129,6 +129,7 @@ build_kernel() {
             -m32 -march=i686 -std=c11 -Os ${KERNEL_CFLAGS:-} \
             -Wall -Wextra -Wpedantic -Werror \
             -ffreestanding -fno-builtin -fno-pic -fno-pie \
+            -ffunction-sections -fdata-sections \
             -fno-stack-protector -fno-asynchronous-unwind-tables \
             -fno-unwind-tables -mno-red-zone -mgeneral-regs-only \
             -c "$source" -o "bin/$(basename "${source%.c}").o"
@@ -136,7 +137,7 @@ build_kernel() {
     log_ok "Compiled ${#objects[@]} i686 C files"
 
     log_info "Linking flat 32-bit protected-mode kernel"
-    "$linker" -m elf_i386 --build-id=none -nostdlib \
+    "$linker" -m elf_i386 --build-id=none -nostdlib --gc-sections \
         -T src/kernel/linker.ld -Map="$KERNEL_MAP" \
         "$KERNEL_ENTRY_OBJECT" "${objects[@]}" -o "$KERNEL_ELF"
     "$object_copy" -O binary "$KERNEL_ELF" bin/KERNEL.BIN
@@ -168,7 +169,7 @@ create_iso_image() {
     mkdir -p "$staging_directory"
     cp "$BOOT_IMAGE" "$staging_directory/dimos.img"
 
-    # Floppy-emulation El Torito: SeaBIOS in v86 maps this 1.44M image as
+    # Floppy-emulation El Torito: SeaBIOS maps this 1.44M image as
     # drive 0x00. Do not pass -no-emul-boot or -boot-info-table — both break
     # the FAT12 boot sector that DimOS actually starts from.
     xorriso -as mkisofs \
@@ -223,7 +224,7 @@ mkfs.vfat -F 12 -n EMPTY "$SECOND_FLOPPY_IMAGE" >/dev/null
 dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
 mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
 
-# The desktop font: any TrueType file dropped into fonts/font.ttf ships on
+# The system font: any TrueType file dropped into fonts/font.ttf ships on
 # the disk as FONT.TTF and the kernel rasterizes it at boot (font_ttf.c).
 # It must fit inside the 256 data sectors the bootloader preloads,
 # together with the kernel that sits in front of it.
@@ -236,7 +237,7 @@ if [[ -f fonts/font.ttf ]]; then
 the preloaded disk window next to the kernel. Subset the font to ASCII, e.g.:
   pyftsubset yourfont.ttf --unicodes=U+0020-007E --no-hinting --output-file=fonts/font.ttf"
     mcopy -i "$BOOT_IMAGE" fonts/font.ttf ::/FONT.TTF
-    log_ok "Desktop font: fonts/font.ttf ($font_size bytes) -> FONT.TTF"
+    log_ok "System font: fonts/font.ttf ($font_size bytes) -> FONT.TTF"
 else
     log_info "fonts/font.ttf not found -- the kernel will use the BIOS font"
 fi

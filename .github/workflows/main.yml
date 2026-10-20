@@ -32,6 +32,7 @@ jobs:
             mtools \
             nasm \
             qemu-system-x86 \
+            python3-venv \
             xorriso \
             zip
 
@@ -65,7 +66,36 @@ jobs:
             -no-reboot -no-shutdown -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
           grep -F "DIMOS:PROTECTED" qemu-debug.log
-          grep -F "DIMOS:READY:VBE:1920x1080x32" qemu-debug.log
+          grep -F "DIMOS:READY:VBE" qemu-debug.log
+
+      # The sandbox runs the real kernel against a fake PC, so the phone
+      # shell can be exercised (and screenshotted) on a build machine.
+      - name: Phone shell smoke test
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet unicorn pillow
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --build
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --frames 30
+          test -s tools/sandbox/out/kernel.bin
+          test -s tools/sandbox/out/00-smoke.png
+          file tools/sandbox/out/00-smoke.png
+
+      # The 1.5K panel and the disk are the two things a build machine can
+      # prove without hardware: the canvas has to scale into 2712x1220, and
+      # files have to survive a reboot.
+      - name: 1.5K display and disk test
+        run: |
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --display 2712x1220
+          test -s tools/sandbox/out/display-2712x1220-home.png
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
+          test -s tools/sandbox/out/26-reboot-load.png
+
+      - name: Upload sandbox screenshots
+        uses: actions/upload-artifact@v6
+        with:
+          name: DimOS-screenshots
+          path: tools/sandbox/out/*.png
+          retention-days: 14
 
       - name: Create DimOS zip package
         run: |

@@ -26,11 +26,6 @@ clang-tidy-fixes.patch
 
 disk_img/
 
-# The browser package: built next to the page, never committed
-web/dimos.img
-web/dimos.iso
-web/dist/
-
 # Other
 lpt/
 __pycache__/

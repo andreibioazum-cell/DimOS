@@ -75,27 +75,26 @@ jobs:
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install --quiet unicorn pillow
           /tmp/venv/bin/python tools/sandbox/run_kernel.py --build
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --frames 90
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --frames 30
           test -s tools/sandbox/out/kernel.bin
+          test -s tools/sandbox/out/00-smoke.png
+          file tools/sandbox/out/00-smoke.png
 
-      - name: Assemble the browser package
+      # The 1.5K panel and the disk are the two things a build machine can
+      # prove without hardware: the canvas has to scale into 2712x1220, and
+      # files have to survive a reboot.
+      - name: 1.5K display and disk test
         run: |
-          make clean
-          make emulator
-          mkdir -p web/dist
-          cp web/index.html web/styles.css web/manifest.webmanifest \
-             web/sw.js web/pc.html web/dist/
-          cp -r web/js web/icons web/dist/
-          cp disk_img/dimos.img web/dist/dimos.img
-          cp disk_img/dimos.iso web/dist/dimos.iso
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --display 2712x1220
+          test -s tools/sandbox/out/display-2712x1220-home.png
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
+          test -s tools/sandbox/out/26-reboot-load.png
 
-      - name: Upload browser package
+      - name: Upload sandbox screenshots
         uses: actions/upload-artifact@v6
         with:
-          name: DimOS-web
-          path: web/dist
-          if-no-files-found: error
-          compression-level: 6
+          name: DimOS-screenshots
+          path: tools/sandbox/out/*.png
           retention-days: 14
 
       - name: Create DimOS zip package

@@ -478,7 +478,21 @@ void kernel_main(void) {
     ram_disk_init();
     file_system_init();
     clock_init();
+
+    /* The disk comes up before the screen: it decides whether DimOS can
+     * remember anything, and the saved settings are applied to the very
+     * first frame the user sees. */
+    if (volume_init() != 0u) {
+        debug_marker("DIMOS:DISK:VOLUME\n");
+        settings_load();
+    } else if (ata_present() != 0u) {
+        debug_marker("DIMOS:DISK:BLANK\n");
+    } else {
+        debug_marker("DIMOS:DISK:NONE\n");
+    }
+
     gfx_init();
+    settings_apply();
     input_init();
     sound_init();
     if (video_backend == VIDEO_BACKEND_VBE) {

@@ -132,7 +132,11 @@ static void command_help(void) {
     terminal_print("Commands:");
     terminal_print("  DIR          list the files on the disk");
     terminal_print("  TYPE name    read a file");
-    terminal_print("  DEL name     hide a file until reboot");
+    terminal_print("  DEL name     delete a file");
+    terminal_print("  DISK         the IDE disk DimOS can write");
+    terminal_print("  SAVE n text  write a file to the disk");
+    terminal_print("  LOAD name    read a saved file");
+    terminal_print("  FORMAT YES   write a fresh FAT12 volume");
     terminal_print("  CLS          clear this window");
     terminal_print("  TIME         show the clock");
     terminal_print("  DATE         show the date");
@@ -161,6 +165,93 @@ static void command_directory(void) {
         text_append(line, " bytes", (u16)sizeof(line));
         terminal_print(line);
     }
+
+    if (volume_present() == 0u) {
+        return;
+    }
+    terminal_print("");
+    terminal_print("Saved on the disk:");
+    for (slot = 0u; slot < volume_file_count(); ++slot) {
+        char name[VOLUME_NAME_LENGTH];
+        u32 size = 0u;
+
+        if (volume_file(slot, name, &size) == 0u) {
+            break;
+        }
+        text_copy(line, name, (u16)sizeof(line));
+        text_pad_right(line, 13u, (u16)sizeof(line));
+        text_append_number(line, size, (u16)sizeof(line));
+        text_append(line, " bytes", (u16)sizeof(line));
+        terminal_print(line);
+    }
+}
+
+static void command_disk(void) {
+    char line[TERM_COLUMNS + 1u];
+
+    if (ata_present() == 0u) {
+        terminal_print("No IDE disk answered on the primary channel");
+        return;
+    }
+    text_copy(line, ata_model(), (u16)sizeof(line));
+    terminal_print(line);
+    if (volume_present() == 0u) {
+        terminal_print("No FAT12 volume - FORMAT YES writes one");
+        return;
+    }
+    line[0] = '\0';
+    text_append_number(line, volume_total_bytes() / 1024u, (u16)sizeof(line));
+    text_append(line, " KiB, ", (u16)sizeof(line));
+    text_append_number(line, volume_free_bytes() / 1024u, (u16)sizeof(line));
+    text_append(line, " free, ", (u16)sizeof(line));
+    text_append_number(line, volume_file_count(), (u16)sizeof(line));
+    text_append(line, " files", (u16)sizeof(line));
+    terminal_print(line);
+}
+
+/* SAVE NOTES.TXT the text to keep */
+static void command_save(const char *argument) {
+    char name[VOLUME_NAME_LENGTH];
+    const char *text = argument;
+    u16 length = 0u;
+
+    while (*text != ' ' && *text != '\0' && length < (VOLUME_NAME_LENGTH - 1u)) {
+        name[length++] = *text++;
+    }
+    name[length] = '\0';
+    while (*text == ' ') {
+        ++text;
+    }
+    if (length == 0u) {
+        terminal_print("Usage: SAVE NOTES.TXT text to keep");
+        return;
+    }
+    if (volume_present() == 0u) {
+        terminal_print("No writable volume - FORMAT YES writes one");
+        return;
+    }
+    if (volume_write_file(name, text, text_length(text)) != 0u) {
+        terminal_print("Saved");
+    } else {
+        terminal_print("Could not save: only 8.3 names, and 224 files fit");
+    }
+}
+
+static void command_load(const char *name) {
+    char buffer[512];
+    u32 bytes;
+
+    if (*name == '\0') {
+        terminal_print("Usage: LOAD NOTES.TXT");
+        return;
+    }
+    bytes = volume_read_file(name, buffer, (u32)sizeof(buffer) - 1u);
+    if (bytes == 0u) {
+        terminal_print("Nothing saved under that name");
+        return;
+    }
+    buffer[bytes] = '\0';
+    terminal_print(buffer);
 }
 
 static void command_type(const char *name) {
@@ -215,6 +306,10 @@ static void command_delete(const char *name) {
     }
     index = file_system_find(name);
     if (index == FILE_NOT_FOUND) {
+        if (volume_delete_file(name) != 0u) {
+            terminal_print("Deleted from the disk");
+            return;
+        }
         terminal_print("No such file");
         return;
     }
@@ -286,6 +381,20 @@ static void run_command(char *command) {
         command_type(argument);
     } else if (text_equal_ignore_case(command, "DEL") != 0u) {
         command_delete(argument);
+    } else if (text_equal_ignore_case(command, "DISK") != 0u) {
+        command_disk();
+    } else if (text_equal_ignore_case(command, "SAVE") != 0u) {
+        command_save(argument);
+    } else if (text_equal_ignore_case(command, "LOAD") != 0u) {
+        command_load(argument);
+    } else if (text_equal_ignore_case(command, "FORMAT") != 0u) {
+        if (text_equal_ignore_case(argument, "YES") == 0u) {
+            terminal_print("FORMAT YES erases the volume on the IDE disk");
+        } else if (volume_format() != 0u) {
+            terminal_print("Formatted: a fresh FAT12 volume is ready");
+        } else {
+            terminal_print("No disk to format");
+        }
     } else if (text_equal_ignore_case(command, "CLS") != 0u ||
                text_equal_ignore_case(command, "CLEAR") != 0u) {
         history_count = 0u;

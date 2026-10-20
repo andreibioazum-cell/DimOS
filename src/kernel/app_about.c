@@ -99,30 +99,47 @@ static void about_draw(void) {
                 shown = value;
                 break;
             case 3u:
-                label = "Storage";
-                text_append_number(value, ram_disk_sectors() / 2u,
-                                   (u16)sizeof(value));
-                text_append(value, " KiB RAM disk", (u16)sizeof(value));
-                shown = value;
+                label = "Disk";
+                shown = (ata_present() != 0u) ? ata_model() : "none found";
                 break;
             case 4u:
-                label = "Memory";
-                text_append_number(value, (u32)bios_read_word(0x00000413u),
-                                   (u16)sizeof(value));
-                text_append(value, " KiB", (u16)sizeof(value));
+                label = "Volume";
+                if (volume_present() != 0u) {
+                    text_append_number(value, volume_total_bytes() / 1024u,
+                                       (u16)sizeof(value));
+                    text_append(value, " KiB, ", (u16)sizeof(value));
+                    text_append_number(value, volume_free_bytes() / 1024u,
+                                       (u16)sizeof(value));
+                    text_append(value, " free", (u16)sizeof(value));
+                } else {
+                    text_append(value, "not formatted", (u16)sizeof(value));
+                }
                 shown = value;
                 break;
             case 5u:
                 label = "Files";
+                if (volume_present() != 0u) {
+                    text_append_number(value, volume_file_count(),
+                                       (u16)sizeof(value));
+                    text_append(value, " saved, ", (u16)sizeof(value));
+                }
                 text_append_number(value, file_system_visible_count(),
                                    (u16)sizeof(value));
                 text_append(value, " on the boot disk", (u16)sizeof(value));
                 shown = value;
                 break;
             case 6u:
-                label = "Mouse";
-                shown = (input_mouse_available() != 0u)
-                            ? "PS/2 pointer found" : "no pointer";
+                label = "Saved";
+                if (settings_saved() != 0u) {
+                    text_append(value, theme_names[settings_saved_theme()],
+                                (u16)sizeof(value));
+                    text_append(value, ", level ", (u16)sizeof(value));
+                    text_append_number(value, settings_saved_brightness(),
+                                       (u16)sizeof(value));
+                } else {
+                    text_append(value, "this session only", (u16)sizeof(value));
+                }
+                shown = value;
                 break;
             default:
                 label = "Clock";
@@ -173,6 +190,7 @@ static void about_event(const Event *event) {
     }
     if (event->key == ID_THEME) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
+        settings_save();
         return;
     }
     if (event->key == ID_TEST_SOUND) {

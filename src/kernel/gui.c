@@ -6,8 +6,8 @@
  * wallpaper, a translucent dock, a status bar and a Control Centre. Pages
  * are drawn edge to edge with a navigation bar and a home indicator, the
  * way a phone application is laid out, and every control is a touch-sized
- * hotspot so the same build works on a real touch panel, on a phone
- * browser running the web emulator, and under a mouse on a PC.
+ * hotspot so the same build works on a real touch panel, in a virtual
+ * machine and under a PS/2 mouse on a PC.
  *
  * Everything on screen is either a shape or a button, and every button
  * announces where it is while it is being drawn. A tap is then simply
@@ -951,8 +951,25 @@ static void deliver_to_application(u8 type, u16 id, const Event *event) {
     application_list[active_application]->event(&forwarded);
 }
 
+u8 gui_brightness(void) {
+    return brightness;
+}
+
+void gui_set_brightness(u8 level) {
+    brightness = (u8)(level > 16u ? 16u : level);
+}
+
+u8 gui_volume(void) {
+    return volume;
+}
+
+void gui_set_volume(u8 level) {
+    volume = (u8)(level > 16u ? 16u : level);
+}
+
 static void set_level(u16 id, s16 x, s16 origin, s16 width) {
     s32 level = ((s32)(x - 8 - origin) * 16) / (width - 16);
+    u8 changed;
 
     if (level < 0) {
         level = 0;
@@ -961,9 +978,16 @@ static void set_level(u16 id, s16 x, s16 origin, s16 width) {
         level = 16;
     }
     if (id == HOTSPOT_CC_BRIGHTNESS) {
+        changed = (u8)(brightness != (u8)level);
         brightness = (u8)level;
     } else {
+        changed = (u8)(volume != (u8)level);
         volume = (u8)level;
+    }
+    /* Persist once the slider settles: the record is 16 bytes, but writing
+     * it on every pixel of a drag would be wasteful on a real disk. */
+    if (changed != 0u) {
+        settings_save();
     }
 }
 
@@ -994,6 +1018,7 @@ static void activate(u16 id, const Event *event) {
         }
         if (id == HOTSPOT_CC_THEME) {
             gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
+            settings_save();
             return;
         }
         if (id == HOTSPOT_CC_LOCK) {
@@ -1184,7 +1209,7 @@ void gui_run(void) {
     u8 shown_minute;
 
     /* Fit the phone canvas into any physical display: a real panel, a PC
-     * monitor, or the browser emulator's framebuffer. */
+     * monitor, or a virtual machine's framebuffer. */
     gfx_set_output_resolution(video_width, video_height);
     selected_icon = 0u;
     active_application = 0xFFFFu;

@@ -378,6 +378,49 @@ u32 file_system_volume_sectors(void);   /* straight from the boot sector */
 u16 file_system_sector_bytes(void);
 
 /* ------------------------------------------------------------------ */
+/* ata.c -- the IDE disk, programmed I/O, LBA28                        */
+/* ------------------------------------------------------------------ */
+
+u8 ata_init(void);            /* 1 when a drive answered IDENTIFY      */
+u8 ata_present(void);
+u32 ata_sectors(void);
+const char *ata_model(void);
+u8 ata_read(u32 lba, void *buffer, u16 count);
+u8 ata_write(u32 lba, const void *buffer, u16 count);
+u8 ata_flush(void);
+
+/* ------------------------------------------------------------------ */
+/* volume.c -- the FAT12 volume DimOS can write                        */
+/* ------------------------------------------------------------------ */
+
+#define VOLUME_NAME_LENGTH 13u
+
+u8 volume_init(void);         /* mount the disk; 0 when unformatted   */
+u8 volume_format(void);       /* write a fresh FAT12 volume           */
+u8 volume_present(void);
+u32 volume_sectors(void);
+u32 volume_total_bytes(void);
+u32 volume_free_bytes(void);
+u16 volume_file_count(void);
+u8 volume_file(u16 slot, char *name, u32 *size);
+u32 volume_read_file(const char *name, void *buffer, u32 capacity);
+u8 volume_write_file(const char *name, const void *data, u32 length);
+u8 volume_delete_file(const char *name);
+
+/* ------------------------------------------------------------------ */
+/* config.c -- the settings record CONFIG.CFG keeps on that volume     */
+/* ------------------------------------------------------------------ */
+
+void settings_load(void);
+void settings_apply(void);    /* theme, brightness and volume         */
+u8 settings_save(void);
+u8 settings_saved(void);
+u8 settings_saved_theme(void);
+u8 settings_saved_brightness(void);
+u8 settings_saved_volume(void);
+u8 settings_forget(void);
+
+/* ------------------------------------------------------------------ */
 /* font_ttf.c -- a real TrueType font (FONT.TTF on the boot volume)    */
 /* ------------------------------------------------------------------ */
 
@@ -468,6 +511,12 @@ void gui_window_title_color(u8 top_color);
 void gui_message_bar(const char *text);
 void gui_reserve_arrow_keys(u8 reserve);
 void gui_status_light(u8 light);   /* white status bar text for dark apps */
+
+/* The two levels Control Centre shows. Settings keeps them on the disk. */
+u8 gui_brightness(void);
+void gui_set_brightness(u8 level);
+u8 gui_volume(void);
+void gui_set_volume(u8 level);
 
 /* Grouped iOS-style building blocks. */
 void gui_card(s16 x, s16 y, s16 width, s16 height);

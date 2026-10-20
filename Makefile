@@ -12,7 +12,7 @@ all: iso
 iso: tools
 	./build-linux.sh
 
-# The v86 package needs both halves of the kernel to agree on its profile:
+# The economy profile needs both halves of the kernel to agree on it:
 # C selects the full output area and the real-mode VBE code selects the
 # smaller physical 640x480 mode. Passing the define only to C leaves a tiny
 # viewport inside a 1920x1080 VBE screen.

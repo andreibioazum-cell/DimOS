@@ -4,7 +4,7 @@
  * DimOS composes an 844x390 indexed canvas (an iPhone-sized landscape
  * screen) in its own back buffer. The preferred VBE path scales changed
  * pixels into the physical framebuffer -- 1920x1080 XRGB8888 on a PC,
- * 1024x768 in the browser emulator -- and letterboxes the phone screen
+ * 1024x768 on a small VM profile -- and letterboxes the phone screen
  * without distorting it. VGA mode 13h remains a compatibility fallback
  * that samples the canvas down to 320x200. A shadow buffer keeps unchanged
  * pixels off the slow video bus, so a static screen costs comparisons
@@ -54,8 +54,8 @@ static u16 high_text_current_count;
 static u16 high_text_previous_count;
 
 /* Software output window selected by the startup display wizard. The BIOS
- * mode remains the real framebuffer, while the smaller target lets v86 and
- * other emulators touch far fewer physical pixels per frame. */
+ * mode remains the real framebuffer, while the smaller target lets slow
+ * emulators and old LCD panels touch far fewer physical pixels per frame. */
 static u16 render_width;
 static u16 render_height;
 static u16 render_left;
@@ -63,9 +63,8 @@ static u16 render_top;
 
 /* The mouse is an overlay, not part of the desktop.  Remember the 7x7 area
  * below it so a plain mouse move can repair only those pixels rather than
- * make gui.c compose the entire desktop again.  This matters in browser v86:
- * the compositor otherwise redraws 64,000 logical pixels for every PS/2
- * mouse packet. */
+ * make gui.c compose the entire desktop again.  Without it the compositor
+ * redraws 64,000 logical pixels for every PS/2 mouse packet. */
 #define POINTER_RADIUS 3
 #define POINTER_DIAMETER (POINTER_RADIUS * 2 + 1)
 static u8 pointer_under[POINTER_DIAMETER * POINTER_DIAMETER];
@@ -188,9 +187,9 @@ static void palette_write_entry(u8 index, Color value) {
 }
 
 /* The 6x6x6 colour cube that lives in slots 40..255. Six evenly spaced
- * levels per channel is the classic web-safe grid: coarse enough to fit
- * in the palette, fine enough that a blended edge is indistinguishable
- * from the exact colour at phone scale. */
+ * levels per channel are coarse enough to fit in the palette, fine enough
+ * that a blended edge is indistinguishable from the exact colour at phone
+ * scale. */
 static u8 cube_level(u8 step) {
     return (u8)(((u16)step * 255u) / (COLOR_CUBE_STEPS - 1u));
 }
@@ -592,7 +591,7 @@ static u8 high_text_lists_equal(void) {
 
 /* The overlay only needs repainting when the logical pixels below a text
  * command changed. Mouse movement elsewhere must not make every label flash
- * or make v86 rewrite all glyphs again. */
+ * or make the text rasterizer run again. */
 static u8 high_text_background_changed(void) {
     u16 command;
 
@@ -784,7 +783,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
     first_present = 1u;
 
     /* Clear the letterbox once. Subsequent frames only touch the selected
-     * viewport, which is the useful optimization for v86's small profile. */
+     * viewport, which is the useful optimization for small VM profiles. */
     color = xrgb8888_color[COLOR_DESKTOP];
     if (video_bits_per_pixel == 32u) {
         volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
@@ -827,7 +826,7 @@ static u8 scale2x_color(u16 x, u16 y, u8 side_x, u8 side_y) {
     const u8 right = screen[(u32)y * SCREEN_WIDTH + right_x];
     const u8 below = screen[(u32)bottom_y * SCREEN_WIDTH + x];
 
-    /* The middle row of a 2.4x v86 cell remains the source colour. */
+    /* The middle row of a 2x scaled cell remains the source colour. */
     if (side_y == 1u) {
         return center;
     }

@@ -5,10 +5,9 @@
 ; selects the best VBE linear framebuffer, enables A20, and switches to a
 ; flat 32-bit protected-mode environment before calling kernel_main.
 ;
-; v86 emulates the Bochs VBE device and 32-bit protected mode, but it does
-; not implement the x86-64 long-mode CPU instructions. Keeping the kernel in
-; protected mode also leaves the VBE framebuffer directly addressable without
-; a paging dependency. All physical addresses used by DimOS are below 4 GiB.
+; DimOS stays in 32-bit protected mode: every machine with a VBE adapter can
+; reach it, and the framebuffer stays directly addressable without a paging
+; dependency. All physical addresses used by DimOS are below 4 GiB.
 ; ==================================================================
 
 [CPU 386]
@@ -30,10 +29,14 @@ VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
 ; do. Rather than demanding one exact resolution (a phone panel is nothing
 ; like a 1920x1080 monitor), every direct-colour linear mode is scored and
 ; the biggest sensible one is chosen. 32bpp beats 16bpp at equal size.
+;
+; The ceiling is the 1.5K panel DimOS targets: 2712 x 1220, the 3.1x render
+; scale of the 844 x 390 phone canvas. Modes above it (2560x1440, 3840x2160)
+; are still offered, and there the largest one wins as before.
 %ifdef DIMOS_EMULATOR
-; The browser emulator runs on phone CPUs, so it caps the physical surface
-; at roughly 1024x768: enough for a sharp 844x390 phone screen, and four
-; times less framebuffer traffic than full HD.
+; The economy profile caps the physical surface at roughly 1024x768: enough
+; for a sharp 844x390 phone screen, and four times less framebuffer traffic
+; for slow hosts.
 VBE_MIN_WIDTH equ 640
 VBE_MIN_HEIGHT equ 400
 VBE_MAX_WIDTH equ 1024
@@ -41,8 +44,11 @@ VBE_MAX_HEIGHT equ 768
 %else
 VBE_MIN_WIDTH equ 640
 VBE_MIN_HEIGHT equ 400
-VBE_MAX_WIDTH equ 1920
-VBE_MAX_HEIGHT equ 1200
+; 1.5K: a 2712 x 1220 panel renders the 844 x 390 canvas at 3.2x, which is
+; exactly what a modern phone screen is. The cap leaves headroom for wider
+; 1440p and 4K displays, so a desktop monitor still gets its own mode.
+VBE_MAX_WIDTH equ 3840
+VBE_MAX_HEIGHT equ 2160
 %endif
 
 [BITS 16]

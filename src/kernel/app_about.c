@@ -11,6 +11,7 @@
 #define ID_THEME 1u
 #define ID_RESTART 2u
 #define ID_TEST_SOUND 3u
+#define ID_TOUCH 4u
 
 static const char *const icon[16] = {
     "..XXXXXXXXXXXX..",
@@ -132,6 +133,11 @@ static void about_draw(void) {
     y = (s16)(y + 10);
 
     value[0] = '\0';
+    text_append(value, input_touch_mode() != 0u ? "ON (finger + quick right)" : "OFF (mouse)", (u16)sizeof(value));
+    info_line(y, "Touch", value);
+    y = (s16)(y + 10);
+
+    value[0] = '\0';
     text_append(value, "Up ", (u16)sizeof(value));
     text_append_number(value, time_milliseconds() / 1000u, (u16)sizeof(value));
     text_append(value, " s - see Cheesy!", (u16)sizeof(value));
@@ -140,9 +146,12 @@ static void about_draw(void) {
 
     gui_button((s16)(WINDOW_LEFT + 6), y, 90, 15, "Theme", ID_THEME);
     gui_button((s16)(WINDOW_LEFT + 102), y, 90, 15, "Beep", ID_TEST_SOUND);
-    gui_button((s16)(WINDOW_LEFT + 198), y, 90, 15, "Restart", ID_RESTART);
+    gui_button((s16)(WINDOW_LEFT + 198), y, 72, 15, "Restart", ID_RESTART);
+    y = (s16)(y + 17);
+    gui_button((s16)(WINDOW_LEFT + 6), y, 120, 15, input_touch_mode() != 0u ? "Touch: ON" : "Touch: OFF", ID_TOUCH);
+    gui_button((s16)(WINDOW_LEFT + 132), y, 90, 15, "HDD: OK", 0xFFFFu);
 
-    gui_message_bar("CPU idle: HLT | frame cap: 60 fps");
+    gui_message_bar(input_touch_mode() != 0u ? "Touch ON: drag=move tap=click hold=right" : "CPU idle: HLT | frame cap: 60 fps");
 }
 
 static void about_event(const Event *event) {
@@ -159,6 +168,12 @@ static void about_event(const Event *event) {
     }
     if (event->key == ID_RESTART) {
         system_restart();
+        return;
+    }
+    if (event->key == ID_TOUCH) {
+        input_set_touch_mode((u8)(input_touch_mode() == 0u ? 1u : 0u));
+        sound_beep();
+        return;
     }
 }
 

@@ -264,6 +264,13 @@ checker_arguments=(bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE" "$HDD_IMAGE")
 (( ! BUILD_ISO )) || checker_arguments+=("$ISO_IMAGE")
 "$IMAGE_CHECKER" "${checker_arguments[@]}"
 
+# Copy images for browser use: web/ pocket PC can load both .img and .hdd.
+# Keep them next to index.html so python http.server serves them.
+if [[ -d web ]]; then
+    cp "$BOOT_IMAGE" web/dimos.img 2>/dev/null && log_info "Browser image: web/dimos.img"
+    cp "$HDD_IMAGE" web/dimos.hdd 2>/dev/null && log_info "Browser image: web/dimos.hdd (HDD)"
+fi
+
 log_ok "Floppy image: $BOOT_IMAGE"
 log_ok "Hard disk image: $HDD_IMAGE"
 (( ! BUILD_ISO )) || log_ok "ISO image: $ISO_IMAGE"

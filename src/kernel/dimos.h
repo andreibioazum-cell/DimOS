@@ -269,6 +269,11 @@ s16 input_pointer_x(void);
 s16 input_pointer_y(void);
 u8 input_pointer_buttons(void);
 u8 input_mouse_available(void);
+/* Touch mode: when enabled, long-press threshold is shorter and pointer
+ * acceleration is higher for finger use; also used by UI to show
+ * larger targets. Toggle from About or via hotkey. */
+void input_set_touch_mode(u8 enabled);
+u8 input_touch_mode(void);
 
 /* ------------------------------------------------------------------ */
 /* Time and clock (kernel.c)                                           */

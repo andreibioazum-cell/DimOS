@@ -30,6 +30,9 @@
 
 /* A press longer than this, without moving, counts as a right click. */
 #define LONG_PRESS_TICKS 55u
+#define LONG_PRESS_TICKS_TOUCH 32u
+
+static u8 touch_mode_enabled;
 
 static Event queue[QUEUE_SIZE];
 static u8 queue_head;
@@ -351,6 +354,15 @@ static void mouse_finish_packet(void) {
     }
 
     if (delta_x != 0 || delta_y != 0) {
+        if (touch_mode_enabled != 0u) {
+            /* Finger needs a bit more speed than a mouse wheel. */
+            delta_x = (s16)(delta_x + delta_x / 2);
+            delta_y = (s16)(delta_y + delta_y / 2);
+            if (delta_x > 40) delta_x = 40;
+            if (delta_x < -40) delta_x = -40;
+            if (delta_y > 40) delta_y = 40;
+            if (delta_y < -40) delta_y = -40;
+        }
         pointer_x = (s16)(pointer_x + delta_x);
         /* Moving the mouse up reports a positive delta. */
         pointer_y = (s16)(pointer_y - delta_y);
@@ -418,11 +430,12 @@ static void mouse_receive_byte(u8 value) {
 /* Called once per frame and while waiting, so a press that is never released
  * still turns into a right click on a touch screen. */
 static void mouse_update_long_press(u16 ticks) {
+    const u16 threshold = (touch_mode_enabled != 0u) ? LONG_PRESS_TICKS_TOUCH : LONG_PRESS_TICKS;
     if (press_pending == 0u || long_press_sent != 0u) {
         return;
     }
     press_ticks = (u16)(press_ticks + ticks);
-    if (press_ticks >= LONG_PRESS_TICKS) {
+    if (press_ticks >= threshold) {
         long_press_sent = 1u;
         queue_push(EVENT_RIGHT_CLICK, KEY_NOTHING, pointer_x, pointer_y);
     }
@@ -494,4 +507,12 @@ u8 input_mouse_available(void) {
 
 void input_advance(u16 ticks) {
     mouse_update_long_press(ticks);
+}
+
+void input_set_touch_mode(u8 enabled) {
+    touch_mode_enabled = (enabled != 0u) ? 1u : 0u;
+}
+
+u8 input_touch_mode(void) {
+    return touch_mode_enabled;
 }

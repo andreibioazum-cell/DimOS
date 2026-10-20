@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#101b31">
-  <title>DimOS · pocket PC</title>
+  <title>DimOS · pocket PC — сенсорный режим и HDD</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #101b31; color: #f3f7ff; }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background: #101b31; color: #f3f7ff; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100svh; background: radial-gradient(ellipse at 50% -20%, #34547b 0, #172742 42%, #101b31 78%); }
+    body { margin: 0; min-height: 100svh; background: radial-gradient(ellipse at 50% -20%, #34547b 0, #172742 42%, #101b31 78%); -webkit-tap-highlight-color: transparent; }
     .shell { width: min(100%, 1120px); margin: 0 auto; padding: max(18px, env(safe-area-inset-top)) 20px max(22px, env(safe-area-inset-bottom)); }
     header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
     .brand { display: flex; align-items: center; gap: 12px; }
@@ -17,59 +17,118 @@
     .tag { color: #9facc5; font-size: 12px; margin-top: 5px; }
     .badge { border: 1px solid #ffffff24; color: #c2cee1; border-radius: 999px; padding: 7px 10px; font-size: 11px; white-space: nowrap; }
     main { background: #dce6ef; border: 1px solid #ffffff30; border-radius: 24px; padding: clamp(10px, 2vw, 18px); box-shadow: 0 24px 70px #0007; }
-    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 0 2px 13px; }
-    button, .file-label { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; min-height: 42px; padding: 0 15px; color: #172742; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 0 2px 10px; }
+    .toolbar-row2 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 2px 13px; }
+    .toolbar-row2 .file-info { font-size: 11px; color: #4a5d79; background: #eef4fa; border: 1px solid #d4deea; border-radius: 999px; padding: 6px 10px; }
+    .toolbar-row2 .file-info strong { color: #172742; }
+    button, .file-label { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 12px; min-height: 42px; padding: 0 15px; color: #172742; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; touch-action: manipulation; user-select: none; }
     .primary { background: #58c9ae; box-shadow: 0 4px 12px #1c74664a; }
     .soft { background: #f5f8fb; }
+    .ghost { background: #e8eef6; }
+    .active { background: #58c9ae !important; color: #0e2a24 !important; box-shadow: 0 4px 14px #1c74664a; }
     button:disabled { opacity: .45; cursor: default; }
     input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-    .status { margin-left: auto; color: #3e5068; font-size: 12px; min-width: 140px; text-align: right; }
-    .screen-frame { position: relative; display: grid; place-items: center; width: 100%; min-height: 180px; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 16px; background: #0b1424; outline: 1px solid #162944; touch-action: none; }
+    .status { margin-left: auto; color: #3e5068; font-size: 12px; min-width: 140px; text-align: right; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .screen-frame { position: relative; display: grid; place-items: center; width: 100%; min-height: 200px; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 16px; background: #0b1424; outline: 1px solid #162944; touch-action: none; }
+    .screen-frame.dragover { outline: 2px solid #58c9ae; box-shadow: 0 0 0 6px #58c9ae33, inset 0 0 30px #58c9ae22; }
     #screen_container { width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden; }
     #screen_container .screen, #screen_container canvas { max-width: 100%; max-height: 100%; image-rendering: pixelated; touch-action: none; }
     #screen_container canvas { width: 100%; height: 100%; object-fit: contain; }
-    .empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; padding: 24px; }
+    .empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; padding: 24px; z-index: 2; }
     .empty .orb { width: 50px; height: 50px; display: grid; place-items: center; margin: 0 auto 12px; border-radius: 18px; background: #213752; color: #92e4cf; font-size: 23px; }
-    .empty strong { font-size: 15px; }
-    .empty span { max-width: 340px; color: #9baac2; font-size: 12px; line-height: 1.5; margin-top: 6px; }
-    .hint { display: flex; justify-content: space-between; gap: 10px; color: #53657d; padding: 12px 3px 1px; font-size: 11px; line-height: 1.5; }
+    .empty strong { font-size: 15px; color: #e8eef8; }
+    .empty span { max-width: 360px; color: #9baac2; font-size: 12px; line-height: 1.5; margin-top: 6px; }
+    .empty small { display: block; margin-top: 8px; color: #7fa0c0; font-size: 11px; }
+    .hint { display: flex; justify-content: space-between; gap: 10px; color: #53657d; padding: 12px 3px 1px; font-size: 11px; line-height: 1.5; flex-wrap: wrap; }
     .hint b { color: #263b55; }
-    @media (max-width: 600px) {
+    /* Touch controls */
+    .touch-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px; background: #0f1d33; border-radius: 14px; border: 1px solid #1f334d; }
+    .touch-bar.hidden { display: none; }
+    .touch-bar .label { color: #9facc5; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; margin-right: 4px; }
+    .touch-pad { display: grid; grid-template-columns: 42px 42px 42px; grid-template-rows: 42px 42px 42px; gap: 4px; }
+    .touch-pad button { min-height: 42px; border-radius: 10px; font-size: 15px; font-weight: 800; background: #1e3556; color: #cfe3ff; border: 1px solid #294866; }
+    .touch-pad button:active { background: #2a4a75; transform: scale(.97); }
+    .touch-pad .mid { background: #243855; }
+    .touch-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+    .touch-actions button { min-height: 40px; padding: 0 12px; border-radius: 10px; font-size: 12px; background: #1e3556; color: #d6e6ff; border: 1px solid #294866; }
+    .touch-actions button.primary-touch { background: #58c9ae; color: #0e2a24; border-color: #4abca7; }
+    .touch-actions button:active { transform: scale(.97); }
+    .touch-actions .sep { width: 1px; height: 28px; background: #294866; margin: 0 2px; }
+    .kbd-hint { color: #6b7e9b; font-size: 11px; margin-left: 6px; }
+    .drop-hint { position: absolute; inset: 0; display: grid; place-items: center; background: #58c9ae1f; backdrop-filter: blur(2px); border-radius: 16px; color: #a3ffe6; font-weight: 800; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 3; }
+    .screen-frame.dragover .drop-hint { opacity: 1; }
+    @media (max-width: 720px) {
       .shell { padding-left: 11px; padding-right: 11px; }
       header { margin: 2px 4px 13px; }
       .badge { display: none; }
       main { padding: 9px; border-radius: 18px; }
-      .toolbar { gap: 7px; padding-bottom: 9px; }
+      .toolbar { gap: 7px; padding-bottom: 7px; }
+      .toolbar-row2 { gap: 6px; padding-bottom: 9px; }
       button, .file-label { min-height: 40px; padding: 0 12px; font-size: 12px; }
       .status { order: 4; width: 100%; text-align: left; padding-left: 3px; }
       .screen-frame { border-radius: 12px; }
       .hint { flex-direction: column; gap: 3px; }
+      .touch-bar { flex-direction: column; align-items: stretch; }
+      .touch-pad { grid-template-columns: 48px 48px 48px; grid-template-rows: 48px 48px 48px; justify-content: center; }
+      .touch-actions { justify-content: center; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
     <header>
-      <div class="brand"><div class="mark">D</div><div><h1>DimOS</h1><div class="tag">Your tiny retro computer, anywhere.</div></div></div>
-      <div class="badge">PC · VirtualBox · v86 · touch</div>
+      <div class="brand"><div class="mark">D</div><div><h1>DimOS</h1><div class="tag">Ваш крошечный ретро-компьютер — теперь с сенсором и HDD</div></div></div>
+      <div class="badge">PC · VirtualBox · v86 · touch · HDD</div>
     </header>
     <main>
       <div class="toolbar">
-        <label class="file-label soft" for="disk">Choose image</label>
-        <input id="disk" type="file" accept=".img,.hdd,application/octet-stream">
-        <button id="start" class="primary" disabled>Start</button>
-        <button id="stop" class="soft" disabled>Stop</button>
-        <button id="full" class="soft">Fullscreen</button>
-        <div id="status" class="status" role="status">Choose dimos.img or dimos.hdd</div>
+        <label class="file-label soft" for="disk">📁 Выбрать образ</label>
+        <input id="disk" type="file" accept=".img,.hdd,.iso,application/octet-stream">
+        <button id="start" class="primary" disabled>▶ Запустить</button>
+        <button id="stop" class="soft" disabled>■ Стоп</button>
+        <button id="full" class="soft">⛶ На весь экран</button>
+        <button id="touchModeToggle" class="ghost" title="Включить/выключить сенсорный режим">🤚 Сенсорный режим: выкл</button>
+        <div id="status" class="status" role="status">Выберите dimos.img или dimos.hdd (Floppy или HDD)</div>
+      </div>
+      <div class="toolbar-row2">
+        <span class="file-info" id="fileInfo" style="display:none"></span>
+        <span class="file-info" id="hddInfo">💾 Поддержка: <strong>.img</strong> 1.44 MB (Floppy) и <strong>.hdd</strong> 8 MB (HDD) — перетащите файл на экран</span>
+        <span class="file-info" id="touchInfo">👆 Сенсор: тап — движение+клик, удержание — правый клик, свайп — перетаскивание</span>
       </div>
       <div id="frame" class="screen-frame">
         <div id="screen_container">
           <div class="screen" style="white-space:pre; font:14px monospace; line-height:14px"></div>
           <canvas style="display:none"></canvas>
         </div>
-        <div id="empty" class="empty"><div class="orb">◉</div><strong>Bring DimOS to life</strong><span>Build with <b>make emulator</b>, choose the generated disk image, then press Start. Touch the screen to move and click.</span></div>
+        <div id="empty" class="empty"><div class="orb">◉</div><strong>Оживите DimOS</strong><span>Соберите <b>make emulator</b> (или <b>make iso</b> для PC), выберите <b>dimos.img</b> или <b>dimos.hdd</b> и нажмите Запустить.<br>Включите сенсорный режим для управления пальцем.</span><small>Перетащите .img / .hdd прямо на экран — DimOS загрузит его как флоппи или жёсткий диск</small></div>
+        <div class="drop-hint">Отпустите чтобы загрузить .img / .hdd</div>
       </div>
-      <div class="hint"><span><b>Phone:</b> rotate to landscape and tap the screen; press and hold for right-click.</span><span><b>Computer:</b> mouse, touchpad, or keyboard work.</span></div>
+
+      <!-- Touch controls overlay -->
+      <div id="touchBar" class="touch-bar hidden">
+        <span class="label">Сенсорный пульт</span>
+        <div class="touch-pad" aria-label="Крестовина">
+          <div></div><button data-key="up" aria-label="Вверх">▲</button><div></div>
+          <button data-key="left" aria-label="Влево">◀</button><button data-key="enter" class="mid" aria-label="Enter">↵</button><button data-key="right" aria-label="Вправо">▶</button>
+          <div></div><button data-key="down" aria-label="Вниз">▼</button><div></div>
+        </div>
+        <div class="touch-actions">
+          <button data-key="esc">Esc</button>
+          <button data-key="enter2">Enter</button>
+          <button data-key="space">Пробел</button>
+          <div class="sep"></div>
+          <button data-action="lclick" class="primary-touch">ЛКМ</button>
+          <button data-action="rclick">ПКМ</button>
+          <button data-action="wheelup">Колесо ↑</button>
+          <button data-action="wheeldown">Колесо ↓</button>
+          <div class="sep"></div>
+          <button data-key="tab">Tab</button>
+          <button data-key="backspace">⌫</button>
+          <span class="kbd-hint">Стрелки + Enter/Esc работают и с клавиатуры</span>
+        </div>
+      </div>
+
+      <div class="hint"><span><b>Телефон:</b> включите сенсорный режим, поверните в альбом, тап — клик, удержание 0.5с — правый клик.</span><span><b>Компьютер:</b> мышь, тачпад и клавиатура работают как обычно. <b>.hdd</b> грузится как жёсткий диск (IDE hda), <b>.img</b> — как флоппи.</span></div>
     </main>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/v86@0.5.471/build/libv86.js"></script>
@@ -79,64 +138,267 @@
       const startButton = document.querySelector('#start');
       const stopButton = document.querySelector('#stop');
       const fullscreenButton = document.querySelector('#full');
+      const touchToggle = document.querySelector('#touchModeToggle');
       const status = document.querySelector('#status');
       const empty = document.querySelector('#empty');
       const frame = document.querySelector('#frame');
+      const screenContainer = document.querySelector('#screen_container');
+      const fileInfo = document.querySelector('#fileInfo');
+      const touchBar = document.querySelector('#touchBar');
       let imageFile = null;
       let emulator = null;
+      let touchMode = localStorage.getItem('dimos-touch-mode') === '1';
+
+      function vibrate(ms){ try{ if(navigator.vibrate) navigator.vibrate(ms); }catch(_){} }
 
       function setStatus(text) { status.textContent = text; }
+      function isHddFile(file){
+        if(!file) return false;
+        const name = file.name.toLowerCase();
+        if(name.endsWith('.hdd') || name.endsWith('.iso')) return true;
+        if(name.endsWith('.img') && file.size > 2 * 1024 * 1024) return true;
+        // fallback: treat >2MB as HDD
+        return file.size > 2 * 1024 * 1024;
+      }
+      function formatSize(bytes){
+        if(bytes >= 1048576) return (bytes/1048576).toFixed(1)+' MB';
+        if(bytes >= 1024) return (bytes/1024).toFixed(0)+' KB';
+        return bytes+' B';
+      }
+      function updateFileInfo(){
+        if(!imageFile){ fileInfo.style.display='none'; return; }
+        const hdd = isHddFile(imageFile);
+        const type = hdd ? (imageFile.name.toLowerCase().endsWith('.iso') ? 'ISO / CD' : 'HDD-образ') : 'Floppy-образ';
+        const icon = hdd ? '💾' : '💿';
+        fileInfo.style.display='';
+        fileInfo.innerHTML = `${icon} <strong>${imageFile.name}</strong> · ${formatSize(imageFile.size)} · ${type} · ${hdd ? 'загрузится как hda' : 'загрузится как fda'}`;
+      }
+      function updateTouchUI(){
+        if(touchMode){
+          touchToggle.classList.add('active');
+          touchToggle.textContent = '🤚 Сенсорный режим: вкл';
+          touchToggle.title = 'Сенсорный режим включён — тап и свайп управляют курсором';
+          frame.style.touchAction = 'none';
+          if(emulator) touchBar.classList.remove('hidden');
+        } else {
+          touchToggle.classList.remove('active');
+          touchToggle.textContent = '🤚 Сенсорный режим: выкл';
+          touchToggle.title = 'Включить сенсорный режим для телефона/планшета';
+          touchBar.classList.add('hidden');
+        }
+        localStorage.setItem('dimos-touch-mode', touchMode ? '1' : '0');
+        // update status hint
+        if(!imageFile){
+          setStatus(touchMode ? 'Сенсорный режим включён · выберите dimos.img или dimos.hdd' : 'Выберите dimos.img или dimos.hdd (Floppy или HDD)');
+        }
+      }
+
       function stop() {
         if (emulator) {
           try { emulator.destroy(); } catch (_) {}
           emulator = null;
         }
-        document.querySelector('#screen_container').innerHTML =
-          '<div class="screen" style="white-space:pre;font:14px monospace;line-height:14px"></div><canvas style="display:none"></canvas>';
+        screenContainer.innerHTML =
+          '<div class=\"screen\" style=\"white-space:pre;font:14px monospace;line-height:14px\"></div><canvas style=\"display:none\"></canvas>';
         stopButton.disabled = true;
         startButton.disabled = !imageFile;
         empty.hidden = false;
-        if (imageFile) setStatus('Stopped · ready to start');
+        touchBar.classList.add('hidden');
+        if (imageFile) setStatus('Остановлено · готово к запуску' + (touchMode ? ' · сенсорный режим вкл' : ''));
       }
 
       fileInput.addEventListener('change', () => {
         imageFile = fileInput.files && fileInput.files[0] || null;
         startButton.disabled = !imageFile || !!emulator;
-        if (imageFile) setStatus(`${imageFile.name} · ${(imageFile.size / 1048576).toFixed(1)} MB`);
+        if (imageFile){
+          const hdd = isHddFile(imageFile);
+          setStatus(`${imageFile.name} · ${formatSize(imageFile.size)} · ${hdd ? 'HDD готов к загрузке как hda' : 'Floppy готов к загрузке как fda'}`);
+          updateFileInfo();
+          if(touchMode) vibrate(20);
+        } else {
+          setStatus('Выберите dimos.img или dimos.hdd');
+          fileInfo.style.display='none';
+        }
       });
+
+      // Drag & drop support for .img/.hdd
+      ['dragenter','dragover'].forEach(ev=>{
+        frame.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); frame.classList.add('dragover'); });
+      });
+      ['dragleave','drop'].forEach(ev=>{
+        frame.addEventListener(ev, e=>{ frame.classList.remove('dragover'); });
+      });
+      frame.addEventListener('drop', e=>{
+        e.preventDefault(); e.stopPropagation();
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(!file) return;
+        const allowed = /\.(img|hdd|iso)$/i;
+        if(!allowed.test(file.name) && file.size < 512) {
+          setStatus('Нужен .img или .hdd образ DimOS');
+          return;
+        }
+        // Put file into input for consistency (DataTransfer hack)
+        try{
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+        }catch(_){}
+        imageFile = file;
+        startButton.disabled = !!emulator;
+        const hdd = isHddFile(imageFile);
+        setStatus(`${imageFile.name} · ${formatSize(imageFile.size)} · ${hdd ? 'HDD готов (hda)' : 'Floppy готов (fda)'} — перетаскивание успешно`);
+        updateFileInfo();
+        vibrate(30);
+      });
+
+      touchToggle.addEventListener('click', ()=>{
+        touchMode = !touchMode;
+        updateTouchUI();
+        vibrate(touchMode ? 30 : 15);
+        setStatus(touchMode ? 'Сенсорный режим включён · тап по экрану двигает курсор, удержание — правый клик' : 'Сенсорный режим выключен · используется мышь/тачпад');
+      });
+      // init touch UI
+      updateTouchUI();
+
+      // Virtual key handling via v86
+      function sendScancodes(codes){
+        if(!emulator) { setStatus('Сначала запустите образ'); return; }
+        try{
+          if(emulator.keyboard_send_scancodes) {
+            emulator.keyboard_send_scancodes(codes);
+            return true;
+          }
+          if(emulator.bus && emulator.bus.send){
+            // fallback: send via bus keyboard-code
+            codes.forEach(c=>{
+              const isRelease = (c & 0x80) !== 0;
+              // v86 keyboard adapter listens to "keyboard-code" with scancode
+              // try both buses
+              try{ emulator.bus.send("keyboard-code", c, !isRelease); }catch(_){}
+              try{ if(emulator.emulator_bus) emulator.emulator_bus.send("keyboard-code", c, !isRelease); }catch(_){}
+            });
+            return true;
+          }
+        }catch(e){ console.error(e); }
+        return false;
+      }
+      function tapKey(codes){
+        // codes is array of press codes, will auto-release
+        if(!sendScancodes(codes)) return;
+        const release = codes.map(c => c===0xE0 ? 0xE0 : (c|0x80));
+        setTimeout(()=> sendScancodes(release), 90);
+        vibrate(15);
+      }
+      const KEY_MAP = {
+        up: [0xE0, 0x48],
+        down: [0xE0, 0x50],
+        left: [0xE0, 0x4B],
+        right: [0xE0, 0x4D],
+        enter: [0x1C],
+        enter2: [0x1C],
+        esc: [0x01],
+        space: [0x39],
+        tab: [0x0F],
+        backspace: [0x0E],
+      };
+      function handleVirtualKey(key){
+        const codes = KEY_MAP[key];
+        if(codes) tapKey(codes);
+      }
+      function dispatchMouse(action){
+        if(!emulator) { setStatus('Сначала запустите образ'); return; }
+        const canvas = screenContainer.querySelector('canvas');
+        const target = canvas || screenContainer;
+        const rect = target.getBoundingClientRect();
+        const cx = rect.left + rect.width/2;
+        const cy = rect.top + rect.height/2;
+        // Try bus API first
+        try{
+          if(emulator.bus){
+            if(action==='lclick'){
+              emulator.bus.send("mouse-click", [true,false,false]);
+              setTimeout(()=> emulator.bus.send("mouse-click", [false,false,false]), 120);
+            } else if(action==='rclick'){
+              emulator.bus.send("mouse-click", [false,false,true]);
+              setTimeout(()=> emulator.bus.send("mouse-click", [false,false,false]), 120);
+            } else if(action==='wheelup'){
+              emulator.bus.send("mouse-wheel", [1,0]);
+            } else if(action==='wheeldown'){
+              emulator.bus.send("mouse-wheel", [-1,0]);
+            }
+            vibrate(20);
+            return;
+          }
+        }catch(_){}
+        // Fallback: synthesize DOM mouse events on canvas
+        try{
+          const opts = {bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy,button: action==='rclick'?2:0, buttons:1};
+          if(action==='lclick' || action==='rclick'){
+            target.dispatchEvent(new MouseEvent('mousedown', opts));
+            setTimeout(()=>{
+              target.dispatchEvent(new MouseEvent('mouseup', {...opts, buttons:0}));
+              target.dispatchEvent(new MouseEvent('click', opts));
+            }, 80);
+          }
+          vibrate(20);
+        }catch(e){ console.error(e); }
+      }
+
+      touchBar.addEventListener('click', (e)=>{
+        const btn = e.target.closest('button');
+        if(!btn) return;
+        if(btn.dataset.key) handleVirtualKey(btn.dataset.key);
+        else if(btn.dataset.action) dispatchMouse(btn.dataset.action);
+      });
+      // also support touchstart for faster response
+      touchBar.addEventListener('touchstart', (e)=>{
+        const btn = e.target.closest('button');
+        if(!btn) return;
+        e.preventDefault();
+        if(btn.dataset.key) handleVirtualKey(btn.dataset.key);
+        else if(btn.dataset.action) dispatchMouse(btn.dataset.action);
+      }, {passive:false});
 
       startButton.addEventListener('click', async () => {
         if (!imageFile || emulator) return;
         startButton.disabled = true;
-        setStatus('Loading BIOS and disk…');
+        setStatus('Загрузка BIOS и диска…');
         empty.hidden = true;
         try {
           const buffer = new Uint8Array(await imageFile.arrayBuffer());
-          const disk = imageFile.name.toLowerCase().endsWith('.hdd') || imageFile.size > 2 * 1024 * 1024
+          const hdd = isHddFile(imageFile);
+          const disk = hdd
             ? { hda: { buffer } }
             : { fda: { buffer } };
+          const isIso = imageFile.name.toLowerCase().endsWith('.iso');
+          const diskConfig = isIso ? { cdrom: { buffer } } : disk;
           emulator = new V86({
             wasm_path: 'https://cdn.jsdelivr.net/npm/v86@0.5.471/build/v86.wasm',
             bios: { url: 'https://cdn.jsdelivr.net/gh/copy/v86@94faf3d6b19ecabc53a4010aaa24252fa6a162e2/bios/seabios.bin' },
             vga_bios: { url: 'https://cdn.jsdelivr.net/gh/copy/v86@94faf3d6b19ecabc53a4010aaa24252fa6a162e2/bios/vgabios.bin' },
             memory_size: 64 * 1024 * 1024,
             vga_memory_size: 8 * 1024 * 1024,
-            screen_container: document.querySelector('#screen_container'),
+            screen_container: screenContainer,
             autostart: true,
-            ...disk
+            ...diskConfig
           });
           emulator.add_listener('emulator-ready', () => {
-            setStatus('Running · touch the screen to control the pointer');
+            const modeText = touchMode ? 'сенсорный режим вкл — касайтесь экрана' : 'коснитесь экрана для управления курсором';
+            const diskType = isIso ? 'CD' : (hdd ? 'HDD (hda)' : 'Floppy (fda)');
+            setStatus(`Запущено · ${diskType} · ${modeText}`);
             stopButton.disabled = false;
+            if(touchMode) touchBar.classList.remove('hidden');
+            empty.hidden = true;
+            vibrate(30);
           });
           emulator.add_listener('emulator-stop', () => {
-            if (emulator) setStatus('Emulator stopped');
+            if (emulator) setStatus('Эмулятор остановлен');
           });
         } catch (error) {
           emulator = null;
           startButton.disabled = !imageFile;
           empty.hidden = false;
-          setStatus('Could not start · check image and internet');
+          setStatus('Не удалось запустить · проверьте образ и интернет');
           console.error(error);
         }
       });
@@ -149,12 +411,21 @@
             if (screen.orientation && screen.orientation.lock) {
               try { await screen.orientation.lock('landscape'); } catch (_) {}
             }
+            vibrate(20);
           } else {
             await document.exitFullscreen();
           }
-        } catch (_) { setStatus('Fullscreen is not available in this browser'); }
+        } catch (_) { setStatus('Полноэкранный режим недоступен в этом браузере'); }
       });
       window.addEventListener('pagehide', stop);
+
+      // Keyboard shortcuts: Esc = stop, Tab = toggle touch when running
+      window.addEventListener('keydown', (e)=>{
+        if(e.key==='Escape' && emulator){ /* let guest handle first */ }
+      });
+
+      // Expose for debugging / tests
+      window.DimOS = { get touchMode(){ return touchMode; }, set touchMode(v){ touchMode=v; updateTouchUI(); }, isHddFile, get emulator(){ return emulator; } };
     })();
   </script>
 </body>

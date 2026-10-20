@@ -1,18 +1,19 @@
 /*
- * app_calculator.c -- a pocket calculator.
+ * app_calculator.c -- a pocket calculator with iOS key styling.
  *
- * Every key is a button, which makes this the one application that never
- * needed a keyboard in the first place.
+ * Every key is a rounded button, which makes this the one application that
+ * never needed a keyboard in the first place. The arithmetic is the same
+ * whole-number calculator the small DimOS always had.
  */
 
 #include "dimos.h"
 
-#define KEY_WIDTH 54
-#define KEY_HEIGHT 22
-#define KEY_STEP_X (KEY_WIDTH + 6)
-#define KEY_STEP_Y (KEY_HEIGHT + 3)
-#define KEY_TOP (s16)(WINDOW_TOP + 27)
-#define KEY_LEFT (s16)(WINDOW_LEFT + 4)
+#define KEY_WIDTH 84
+#define KEY_HEIGHT 46
+#define KEY_STEP_X (KEY_WIDTH + 12)
+#define KEY_STEP_Y (KEY_HEIGHT + 10)
+#define KEY_LEFT (s16)((SCREEN_WIDTH - (4 * KEY_STEP_X + 12)) / 2)
+#define KEY_TOP 146
 
 #define ID_DIGIT_FIRST 1u   /* 1 .. 10 for '0' .. '9' */
 #define ID_CLEAR 20u
@@ -29,16 +30,16 @@ static const char *const icon[16] = {
     "................",
     "..XXXXXXXXXXXX..",
     "..XooooooooooX..",
-    "..XooooooooooX..",
+    "..XoXXXXXXXXoX..",
+    "..XoXXXXXXXXoX..",
     "..XooooooooooX..",
     "..XXXXXXXXXXXX..",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
-    "..XX.XX.XX.XX...",
+    "..XX.XX.XX.XXX..",
+    "..XX.XX.XX.XXX..",
+    "..XX.XX.XX.XXX..",
+    "..XX.XX.XX.XXX..",
+    "..XX.XX.XX.XXX..",
+    "..XX.XX.XX.XXX..",
     "..XXXXXXXXXXXX..",
     "................",
     "................",
@@ -137,6 +138,19 @@ static void press_digit(u8 digit) {
     show_display();
 }
 
+/* One rounded iOS-style key: numbers are graphite, operators orange and
+ * the top row a quiet light grey. */
+static void key_face(s16 x, s16 y, const char *label, u16 id, u8 face,
+                     u8 ink) {
+    const u8 pressed = gui_is_pressed(id);
+
+    gfx_round_fill(x, y, KEY_WIDTH, KEY_HEIGHT, 14,
+                   (pressed != 0u) ? gfx_shade(face, COLOR_FACE, 3) : face);
+    gfx_text_size_centered(x, (s16)(y + (KEY_HEIGHT - 16) / 2), KEY_WIDTH,
+                           label, ink, 16);
+    gui_hotspot(x, y, KEY_WIDTH, KEY_HEIGHT, id);
+}
+
 static void calculator_draw(void) {
     static const char *const labels[4][5] = {
         { "7", "8", "9", "/", "C" },
@@ -151,33 +165,40 @@ static void calculator_draw(void) {
         { 2u, 3u, 4u, ID_SUBTRACT, ID_NEGATE },
         { 1u, ID_DOT, ID_EQUALS, ID_ADD, 0u }
     };
+    const u8 digit_face = gfx_shade(COLOR_FACE, COLOR_BLACK, 3);
     u8 row;
     u8 column;
 
-    gfx_fill((s16)KEY_LEFT, (s16)(WINDOW_TOP + 2), 294, 21, COLOR_TEXT_FIELD);
-    gfx_panel((s16)KEY_LEFT, (s16)(WINDOW_TOP + 2), 294, 21);
-    gfx_text((s16)(KEY_LEFT + 290 - (s16)gfx_text_width(display)),
-             (s16)(WINDOW_TOP + 8), display, COLOR_BLACK);
+    gui_window_frame_dark("Calculator", COLOR_WIN_BG);
+
+    /* The display: large, right aligned, like a real calculator. */
+    gfx_text_size_right((s16)APP_RIGHT, 88, display, COLOR_FACE, 44);
+    gfx_text_size_right((s16)APP_RIGHT, 132,
+                        (pending_operator != 0u) ? "pending" : "",
+                        COLOR_DISABLED, 9);
 
     for (row = 0u; row < 4u; ++row) {
         for (column = 0u; column < 5u; ++column) {
             const s16 x = (s16)(KEY_LEFT + (s16)(column * KEY_STEP_X));
             const s16 y = (s16)(KEY_TOP + (s16)(row * KEY_STEP_Y));
+            const u16 id = ids[row][column];
 
-            if (ids[row][column] == 0u) {
+            if (id == 0u) {
                 continue; /* the bottom right corner stays empty */
             }
-            if (ids[row][column] <= 10u) {
-                gui_button_colored(x, y, (s16)KEY_WIDTH, (s16)KEY_HEIGHT,
-                                   labels[row][column], ids[row][column],
-                                   COLOR_HILITE, COLOR_BLACK);
+            if (id <= 10u) {
+                key_face(x, y, labels[row][column], id, digit_face, COLOR_FACE);
+            } else if (id == ID_ADD || id == ID_SUBTRACT ||
+                       id == ID_MULTIPLY || id == ID_DIVIDE ||
+                       id == ID_EQUALS) {
+                key_face(x, y, labels[row][column], id, COLOR_ACCENT,
+                         COLOR_FACE);
             } else {
-                gui_button(x, y, (s16)KEY_WIDTH, (s16)KEY_HEIGHT,
-                           labels[row][column], ids[row][column]);
+                key_face(x, y, labels[row][column], id, COLOR_SHADOW,
+                         COLOR_DEEP);
             }
         }
     }
-    gui_message_bar("Whole numbers only - point and click");
 }
 
 static void calculator_event(const Event *event) {
@@ -232,10 +253,10 @@ static void calculator_event(const Event *event) {
 }
 
 const Application application_calculator = {
-    "Calc",
-    "Calc",
+    "Calculator",
+    "Calculator",
     icon,
-    COLOR_LIGHT_CYAN,
+    COLOR_ACCENT,
     calculator_open,
     calculator_draw,
     calculator_event,

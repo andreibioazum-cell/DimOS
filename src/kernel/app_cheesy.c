@@ -1,11 +1,10 @@
 /*
  * app_cheesy.c -- cheese balls with ketchup. Ам-ням-ням!
  *
- * The DimXfce mouse insisted: a shell with a rodent logo cannot ship
- * without cheese. So here is a full cheese ball kitchen: a bowl of freshly
- * fried balls with a ketchup drip, one hungry [NYAM!] button, a splash of
- * ketchup drops on every chomp, a burp-o-meter that proudly fills up, and
- * a cook-on-demand supply of more balls. All served in 320x200.
+ * A full cheese ball kitchen in phone style: a big bowl of freshly fried
+ * balls with a ketchup drip, one hungry NYAM button, a splash of ketchup
+ * drops on every chomp, a burp-o-meter that proudly fills up, and a
+ * cook-on-demand supply of more balls.
  */
 
 #include "dimos.h"
@@ -13,95 +12,43 @@
 #define ID_NOM 1u
 #define ID_COOK 2u
 
-#define BALL_ROWS 3u
 #define BALLS_ON_PLATE 9u          /* 4 + 3 + 2, stacked in the bowl     */
 #define BURP_AT 12u                /* balls between two mighty burps     */
 #define DOUGH_LIMIT 240u           /* the kitchen is not infinite        */
 #define DROP_COUNT 12u
-
-/* Where the ball pile sits, in screen pixels: the bottom row of four,
- * then three, then two. Ball art is 13 pixels across. */
 #define BALL_TOP_Y 118
+#define BALL_RADIUS 20
+#define BOWL_CENTER_X 256
+#define PANEL_X (s16)(APP_LEFT + 470)
+
 static const s16 ball_x[BALLS_ON_PLATE] = {
-    121, 135, 149, 163,
-    128, 142, 156,
-    135, 149
+    196, 236, 276, 316,
+    216, 256, 296,
+    236, 276
 };
 static const s16 ball_y[BALLS_ON_PLATE] = {
-    104, 104, 104, 104,
-    94, 94, 94,
-    84, 84
+    206, 206, 206, 206,
+    168, 168, 168,
+    132, 132
 };
 
 static const char *const icon[16] = {
     "................",
-    ".....XXXXXX.....",
-    "...XXXXXXXXXX...",
+    "................",
+    ".....XXX.XXX....",
+    "....XXXX.XXXX...",
+    ".....XXX.XXX....",
+    "................",
     "..XXXXXXXXXXXX..",
-    ".XXoXXXXXXXXXX..",
-    ".XXXXXXXXXXXXX..",
-    ".XXXXXXXXoXXXX..",
-    ".XXXXXXXXXXXXXX.",
-    ".XXXXXXXXXXXX.XX",
-    "..XXXXXXXXXXXX..",
-    "..XXXXXXXXXXXX..",
-    "...XXXXXXXXXX...",
-    ".....XXXXXX.....",
+    "..XooooooooooX..",
+    "..XooooooooooX..",
+    "..XooooooooooX..",
+    "..XooooooooooX..",
+    "...XooooooooX...",
+    "....XXXXXXXX....",
     "................",
     "................",
     "................",
-};
-
-/* A single crispy ball. */
-static const char *const ball_art[12] = {
-    ".....XXX.....",
-    "...XXXXXXX...",
-    "..XXXXXXXXX..",
-    ".XXXXXXXXXXX.",
-    "XXXXXXXXXXXXX",
-    "XXXXXXXXXXXXX",
-    "XXoXXXXXXXXXX",
-    "XXXXXXXXXXXXX",
-    ".XXXXXXXXXXX.",
-    "..XXXXXXXXX..",
-    "...XXXXXXX...",
-    ".....XXX....."
-};
-
-/* The cast iron bowl with the golden rim every cheese kitchen deserves. */
-static const char *const bowl_art[12] = {
-    "XXooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooXX",
-    "..XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX..",
-    "...XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX...",
-    "....XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX....",
-    ".....XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.....",
-    ".......XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.......",
-    ".........XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.........",
-    "...........XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX...........",
-    ".............XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.............",
-    "...............XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX...............",
-    ".................XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.................",
-    "...................XXXXXXXXXXXXXXXXXXXXXXXXXX..................."
-};
-
-/* A thin drip of ketchup over the top ball: the chef's signature. */
-static const char *const ketchup_drip[6] = {
-    "..XXXXX..",
-    ".XXXXXXX.",
-    "XXXX.XXXX",
-    "XX....XXX",
-    "X......XX",
-    ".......XX"
-};
-
-/* The burp-o-meter: one lamp per ball since the last burp. */
-static const char *const lamp_art[6] = {
-    "..XXXX..",
-    ".XXXXXX.",
-    "XXXXXXXX",
-    "XXXXXXXX",
-    ".XXXXXX.",
-    "..XXXX.."
 };
 
 static const char *const yum_phrases[] = {
@@ -152,8 +99,10 @@ static void ketchup_splash(void) {
     u8 index;
 
     for (index = 0u; index < DROP_COUNT; ++index) {
-        drops_x[index] = (u8)(130u + (next_random() % 52u));
-        drops_y[index] = (u8)(74u + (next_random() % 20u));
+        /* Drops start just above the bowl, so they never cross the caption
+         * that sits along the top of the card. */
+        drops_x[index] = (u8)(200u + (next_random() % 110u));
+        drops_y[index] = (u8)(164u + (next_random() % 20u));
         drops_speed[index] = (u8)(1u + (next_random() % 3u));
     }
 }
@@ -183,76 +132,107 @@ static void build_message(char *out, u16 capacity) {
     text_append_number(out, (u32)(BURP_AT - streak), capacity);
 }
 
+static void draw_ball(s16 x, s16 y, u8 hot) {
+    gfx_circle(x, y, BALL_RADIUS, COLOR_ACCENT, 1u);
+    gfx_circle((s16)(x - 6), (s16)(y - 7), 7,
+               gfx_shade(COLOR_ACCENT, COLOR_FACE, 6), 1u);
+    if (hot != 0u) {
+        gfx_circle(x, (s16)(y + 2), (s16)(BALL_RADIUS - 4),
+                   gfx_shade(COLOR_ACCENT, COLOR_ALERT, 4), 1u);
+    }
+    /* A dot of ketchup on top of every ball. */
+    gfx_circle((s16)(x + 5), (s16)(y - 9), 5, COLOR_ALERT, 1u);
+}
+
 static void cheesy_draw(void) {
     const u32 now = time_milliseconds();
-    char message[40];
+    char message[48];
+    char buffer[16];
     s16 shake = 0;
     u16 index;
 
-    gfx_text((s16)(WINDOW_LEFT + 10), (s16)(WINDOW_TOP + 4),
-             "Fresh cheese balls with ketchup!", COLOR_BLACK);
+    gui_window_frame("Cheesy Balls");
+
+    /* The counter: a warm rounded card, a bowl, and the pile of balls. */
+    gfx_round_fill((s16)APP_LEFT, 74, 470, 274, 22, COLOR_PANEL);
+    gfx_text_size((s16)(APP_LEFT + 24), 88,
+                  "Fresh cheese balls with ketchup", COLOR_DEEP, 12);
 
     /* The burp-o-meter: twelve lamps above the bowl. */
     for (index = 0u; index < BURP_AT; ++index) {
-        gfx_picture((s16)(97 + (s16)index * 11), (s16)(WINDOW_TOP + 16),
-                    lamp_art, 6u,
-                    (index < streak) ? COLOR_ACCENT : COLOR_DARK_GRAY,
-                    COLOR_DARK_GRAY);
+        gfx_circle((s16)(APP_LEFT + 30 + (s16)index * 18), 114, 5,
+                   (index < streak) ? COLOR_ACCENT : COLOR_GRID, 1u);
     }
 
     if (now < shake_until) {
         shake = ((now / 50u) % 2u == 0u) ? 1 : -1;
-        gfx_text((s16)(WINDOW_LEFT + 4), (s16)(WINDOW_TOP + 34),
-                 "BURRRP!", COLOR_ALERT);
+        gfx_text_size_right((s16)(APP_LEFT + 446), 110, "BURRRP!",
+                            COLOR_ALERT, 13);
     }
 
+    /* The cast iron bowl. */
+    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), 250, 196, 62, COLOR_DEEP);
+    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), 242, 190, 52,
+                     gfx_shade(COLOR_DEEP, COLOR_FACE, 3));
+
     if (plate == 0u) {
-        gfx_text((s16)(122), (s16)(WINDOW_TOP + 44), "the bowl is empty...",
-                 COLOR_DARK_GRAY);
-        gfx_text((s16)(114), (s16)(WINDOW_TOP + 56), "press [Cook more]!",
-                 COLOR_BLACK);
+        gfx_text_size_centered((s16)(BOWL_CENTER_X - 150), 170, 300,
+                               "the bowl is empty...", COLOR_DISABLED, 14);
+        gfx_text_size_centered((s16)(BOWL_CENTER_X - 150), 198, 300,
+                               "press Cook more", COLOR_DEEP, 12);
     } else {
-        /* The pile: every ball bobs gently, as every hot ball should. */
         for (index = 0u; index < plate; ++index) {
             const u16 phase = (u16)(((now / 170u) + (u32)index * 2u) % 6u);
             const s16 bob = (phase < 3u) ? (s16)phase : (s16)(5u - phase);
 
-            gfx_picture((s16)(ball_x[index] + shake),
-                        (s16)(ball_y[index] - 2 - bob),
-                        ball_art, 12u, COLOR_ACCENT, COLOR_LIGHT_RED);
+            draw_ball((s16)(ball_x[index] + shake),
+                      (s16)(ball_y[index] - bob),
+                      (u8)(index + 1u == plate));
         }
-        /* Ketchup drip on the top ball, and the falling drops. */
-        gfx_picture((s16)(ball_x[plate - 1] + 3 + shake),
-                    (s16)(ball_y[plate - 1] + 1),
-                    ketchup_drip, 6u, COLOR_LIGHT_RED, COLOR_LIGHT_RED);
-        for (index = 0u; index < DROP_COUNT; ++index) {
-            if (drops_speed[index] != 0u) {
-                gfx_fill((s16)drops_x[index], (s16)drops_y[index], 2, 3,
-                         (index % 2u == 0u) ? COLOR_ALERT : COLOR_LIGHT_RED);
-            }
+        /* The ketchup drip running down the top ball. */
+        gfx_fill((s16)(ball_x[plate - 1u] + 2 + shake),
+                 (s16)(ball_y[plate - 1u] - 10), 5, 9, COLOR_ALERT);
+        gfx_circle((s16)(ball_x[plate - 1u] + 4 + shake),
+                   (s16)(ball_y[plate - 1u] + 4), 4, COLOR_ALERT, 1u);
+    }
+
+    for (index = 0u; index < DROP_COUNT; ++index) {
+        if (drops_speed[index] != 0u) {
+            gfx_circle(drops_x[index], drops_y[index], 2,
+                       (index % 2u == 0u) ? COLOR_ALERT : COLOR_IOS_PINK, 1u);
         }
     }
 
-    gfx_picture((s16)(121 + shake), (s16)(BALL_TOP_Y), bowl_art, 12u,
-                COLOR_DARK_GRAY, COLOR_ACCENT);
-    gfx_horizontal_line(101, (s16)(BALL_TOP_Y + 13), 104, COLOR_SHADOW);
-
-    /* The nom-nom face: while the chew timer runs, big letters say it. */
     if (now < chew_until) {
-        gfx_text(138, (s16)(WINDOW_TOP + 22), "OM NOM!", COLOR_ALERT);
-        phrase_index = (u16)(phrase_index % 8u);
+        gfx_text_size_right((s16)(APP_LEFT + 446), 132, "OM NOM!",
+                            COLOR_ALERT, 13);
     } else {
-        gfx_text_centered(110, (s16)(WINDOW_TOP + 22), 100,
-                          yum_phrases[phrase_index % 8u], COLOR_DEEP);
+        gfx_text_size((s16)(APP_LEFT + 24), 132,
+                      yum_phrases[phrase_index % 8u], COLOR_ACCENT, 10);
     }
 
-    gui_button((s16)(WINDOW_LEFT + 8), (s16)(WINDOW_TOP + 102), 92, 16,
-               "NYAM!", ID_NOM);
-    gui_button((s16)(WINDOW_LEFT + 202), (s16)(WINDOW_TOP + 102), 92, 16,
-               "Cook more", ID_COOK);
+    /* The right-hand side: the big hungry controls. */
+    gfx_text_size(PANEL_X, 74, "CHEESY BALLS", COLOR_DISABLED, 9);
+    gfx_text_size(PANEL_X, 88, "Kitchen", COLOR_DEEP, 24);
+
+    gfx_text_size(PANEL_X, 140, "BALLS IN BOWL", COLOR_DISABLED, 9);
+    buffer[0] = '\0';
+    text_append_number(buffer, plate, (u16)sizeof(buffer));
+    gfx_text_size(PANEL_X, 152, buffer, COLOR_DEEP, 30);
+
+    gfx_text_size((s16)(PANEL_X + 120), 140, "BURPS", COLOR_DISABLED, 9);
+    buffer[0] = '\0';
+    text_append_number(buffer, burps, (u16)sizeof(buffer));
+    gfx_text_size((s16)(PANEL_X + 120), 152, buffer, COLOR_DEEP, 30);
+
+    gui_button(PANEL_X, 200, 250, 56, "NYAM!", ID_NOM);
+    gui_button_colored(PANEL_X, 266, 250, 44, "Cook more", ID_COOK,
+                       COLOR_PANEL, COLOR_DEEP);
+
+    gui_message_bar("Hold on: every chomp splashes ketchup");
 
     build_message(message, (u16)sizeof(message));
-    gui_message_bar(message);
+    (void)message;
 }
 
 static void eat_ball(void) {
@@ -311,7 +291,7 @@ const Application application_cheesy = {
     "Cheesy",
     "Cheesy Balls",
     icon,
-    COLOR_ACCENT,
+    COLOR_YELLOW,
     cheesy_open,
     cheesy_draw,
     cheesy_event,

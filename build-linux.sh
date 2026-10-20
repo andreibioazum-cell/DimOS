@@ -223,7 +223,7 @@ mkfs.vfat -F 12 -n EMPTY "$SECOND_FLOPPY_IMAGE" >/dev/null
 dd if=bin/BOOT.BIN of="$BOOT_IMAGE" conv=notrunc status=none
 mcopy -i "$BOOT_IMAGE" bin/KERNEL.BIN ::/
 
-# The desktop font: any TrueType file dropped into fonts/font.ttf ships on
+# The system font: any TrueType file dropped into fonts/font.ttf ships on
 # the disk as FONT.TTF and the kernel rasterizes it at boot (font_ttf.c).
 # It must fit inside the 256 data sectors the bootloader preloads,
 # together with the kernel that sits in front of it.
@@ -236,7 +236,7 @@ if [[ -f fonts/font.ttf ]]; then
 the preloaded disk window next to the kernel. Subset the font to ASCII, e.g.:
   pyftsubset yourfont.ttf --unicodes=U+0020-007E --no-hinting --output-file=fonts/font.ttf"
     mcopy -i "$BOOT_IMAGE" fonts/font.ttf ::/FONT.TTF
-    log_ok "Desktop font: fonts/font.ttf ($font_size bytes) -> FONT.TTF"
+    log_ok "System font: fonts/font.ttf ($font_size bytes) -> FONT.TTF"
 else
     log_info "fonts/font.ttf not found -- the kernel will use the BIOS font"
 fi
@@ -263,6 +263,12 @@ fi
 checker_arguments=(bin/BOOT.BIN bin/KERNEL.BIN "$BOOT_IMAGE" "$HDD_IMAGE")
 (( ! BUILD_ISO )) || checker_arguments+=("$ISO_IMAGE")
 "$IMAGE_CHECKER" "${checker_arguments[@]}"
+
+# The browser package serves this file from the same directory as index.html.
+if [[ -d web ]]; then
+    cp "$BOOT_IMAGE" web/dimos.img
+    log_info "Browser image: web/dimos.img"
+fi
 
 log_ok "Floppy image: $BOOT_IMAGE"
 log_ok "Hard disk image: $HDD_IMAGE"

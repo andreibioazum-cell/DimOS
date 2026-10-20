@@ -1,12 +1,14 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a freestanding i686 protected-mode kernel with a graphical
- * desktop. It prefers a VBE 2.0 linear framebuffer (1920x1080 XRGB8888) and
- * keeps 640x480 RGB565 plus VGA mode 13h as compatibility fallbacks. The
- * compact desktop is Windows-inspired, with a blue wallpaper, bottom taskbar,
- * Start menu and simple window controls. It is usable with a pointing device
- * alone, and the terminal application has its own on-screen keyboard.
+ * DimOS is a freestanding i686 protected-mode kernel with a mobile shell:
+ * a lock screen, a home screen with rounded app icons, a translucent dock,
+ * a status bar and a Control Centre, in the spirit of iOS 14. The logical
+ * screen is an iPhone-sized 844x390 landscape canvas that is scaled to
+ * whatever VBE display the machine offers, so the phone layout is the
+ * primary one while PC monitors and emulators show it letterboxed and
+ * perfectly usable with a mouse. The shell needs no keyboard: everything
+ * is a touch target, and the terminal brings its own keyboard.
  *
  * Coding rules for this directory:
  *   - everything is plain C11, freestanding (no libc or inline assembly);
@@ -65,16 +67,14 @@ u16 bios_read_word(u32 address);   /* a word the BIOS left in low memory */
 /* Screen layout                                                       */
 /* ------------------------------------------------------------------ */
 
-#define SCREEN_WIDTH 320u
-#define SCREEN_HEIGHT 200u
+#define SCREEN_WIDTH 844u
+#define SCREEN_HEIGHT 390u
 #define SCREEN_BYTES (SCREEN_WIDTH * SCREEN_HEIGHT)
 
-/* The visible VGA frame buffer, our logical 320x200 canvas, and the shadow of
- * the last frame sent to the display. The shadow makes presentation dirty:
- * unchanged four-pixel groups never touch slow video memory. */
+/* The visible VGA frame buffer. The indexed canvas and its shadow live in
+ * the kernel's own BSS: at phone resolution two of them no longer fit in
+ * the 64 KiB window between the kernel and the VGA memory. */
 #define VGA_FRAME_BUFFER ((volatile u8 *)0x000A0000u)
-#define BACK_BUFFER_ADDRESS 0x00060000u
-#define PRESENT_BUFFER_ADDRESS 0x00070000u
 
 /* Video backend selected by kernel.asm while BIOS calls are still possible.
  * VBE is an actual linear framebuffer exposed by the display adapter; mode
@@ -98,29 +98,39 @@ extern u8 video_bits_per_pixel;
 #define BIOS_FONT_ADDRESS 0x0000E000u
 #define BIOS_FONT_BYTES 1024u /* 128 glyphs, 8 bytes each */
 
-/* Windows-style shell proportions: a clear desktop area and a fixed bottom
- * taskbar. Old constant names remain so apps keep their coordinate layout. */
-#define TITLE_BAR_HEIGHT 0u                     /* no top panel              */
-#define TASK_BAR_HEIGHT 20u                     /* Windows-like taskbar      */
-#define DESKTOP_TOP (TITLE_BAR_HEIGHT + 1u)
-#define DESKTOP_HEIGHT (SCREEN_HEIGHT - TITLE_BAR_HEIGHT - TASK_BAR_HEIGHT - 2u)
-#define TASK_BAR_TOP (SCREEN_HEIGHT - TASK_BAR_HEIGHT)
+/* ------------------------------------------------------------------ */
+/* Phone shell layout                                                  */
+/* ------------------------------------------------------------------ */
 
-/* A left-anchored Start menu opens immediately above the taskbar. */
-#define MENU_WIDTH 172u
-#define MENU_X 4u
-#define MENU_Y (SCREEN_HEIGHT - TASK_BAR_HEIGHT - MENU_HEIGHT - 1u)
-#define MENU_HEIGHT 145u
+/* The status bar runs across the top of every screen. In an application
+ * the navigation bar sits directly below it and the content starts under
+ * that; the home indicator always floats just above the bottom edge. */
+#define STATUS_BAR_HEIGHT 22u
+#define NAV_BAR_HEIGHT 36u
+#define APP_TOP (STATUS_BAR_HEIGHT + NAV_BAR_HEIGHT + 2u)
+#define APP_LEFT 26u
+#define APP_RIGHT (SCREEN_WIDTH - 26u)
+#define APP_WIDTH (SCREEN_WIDTH - 2u * APP_LEFT)
+#define APP_BOTTOM (SCREEN_HEIGHT - 26u)
+#define APP_HEIGHT (APP_BOTTOM - APP_TOP)
+#define HOME_INDICATOR_Y (SCREEN_HEIGHT - 9u)
+#define HOME_INDICATOR_WIDTH 128u
 
-/* Application windows fill the desktop area. */
-#define WINDOW_X 6u
-#define WINDOW_Y (TITLE_BAR_HEIGHT + 3u)
-#define WINDOW_WIDTH (SCREEN_WIDTH - 12u)
-#define WINDOW_HEIGHT (DESKTOP_HEIGHT - 6u)
-#define WINDOW_LEFT (WINDOW_X + 3u)
-#define WINDOW_TOP (WINDOW_Y + 13u)
-#define WINDOW_INNER_WIDTH (WINDOW_WIDTH - 6u)
-#define WINDOW_INNER_HEIGHT (WINDOW_HEIGHT - 16u)
+/* Home screen grid: five columns of rounded icons on two rows, with the
+ * dock underneath. Coordinates are derived so the whole grid stays
+ * centred on any width the canvas may take. */
+#define ICON_COLUMNS 5u
+#define ICON_ROWS 2u
+#define ICON_SIZE 64u
+#define ICON_COLUMN_STEP 112u
+#define ICON_ROW_STEP 108u
+#define ICON_GRID_TOP 46u
+#define ICON_GRID_LEFT ((s16)((SCREEN_WIDTH - (s16)(ICON_COLUMNS - 1u) * ICON_COLUMN_STEP - (s16)ICON_SIZE) / 2))
+#define ICON_LABEL_GAP 8u
+#define DOCK_HEIGHT 70u
+#define DOCK_Y (SCREEN_HEIGHT - DOCK_HEIGHT - 18u)
+#define DOCK_ICON_SIZE 52u
+#define DOCK_SLOTS 4u
 
 /* ------------------------------------------------------------------ */
 /* Colours                                                             */
@@ -161,14 +171,18 @@ enum {
     COLOR_GRID = 29u,
     COLOR_DEEP = 30u,
     COLOR_CURSOR = 31u,
-    COLOR_TASKBAR = 32u,
+    COLOR_TASKBAR = 32u,     /* the dock's translucent white           */
     COLOR_WIN_BG = 33u,
-    COLOR_WIN_GLOW = 34u,
-    COLOR_WIN_LIGHT = 35u,
-    PALETTE_SIZE = 36u
+    COLOR_WIN_GLOW = 34u,    /* the brighter iOS tint for pressed keys */
+    COLOR_WIN_LIGHT = 35u,   /* sky blue used by a few app icons       */
+    COLOR_IOS_PURPLE = 36u,
+    COLOR_IOS_PINK = 37u,
+    COLOR_IOS_TEAL = 38u,
+    COLOR_IOS_INDIGO = 39u,
+    PALETTE_SIZE = 40u
 };
 
-/* Palette slots 32..247 are not roles at all: they hold a fixed 6x6x6
+/* Palette slots 40..255 are not roles at all: they hold a fixed 6x6x6
  * cube of red/green/blue mixtures. Anti-aliasing needs colours *between*
  * the ones above -- half ink and half window face for the edge of a
  * letter, a quarter of the icon colour where a curve grazes a pixel --
@@ -194,6 +208,7 @@ extern u8 *const screen; /* the back buffer, SCREEN_BYTES bytes */
 
 void gfx_init(void);
 void gfx_show(void); /* copy the back buffer to the video card */
+void gfx_begin_frame(void); /* start a fresh full composition */
 void gfx_set_output_resolution(u16 width, u16 height);
 void gfx_clear(u8 color);
 void gfx_pixel(s16 x, s16 y, u8 color);
@@ -211,12 +226,37 @@ void gfx_ellipse_fill(s16 center_x, s16 center_y, s16 radius_x, s16 radius_y,
 void gfx_checker(s16 x, s16 y, s16 width, s16 height, u8 first, u8 second);
 void gfx_gradient_vertical(s16 x, s16 y, s16 width, s16 height,
                            u8 top_color, u8 bottom_color);
+void gfx_gradient_vertical_alpha(s16 x, s16 y, s16 width, s16 height,
+                                 u8 top_color, u8 bottom_color, u8 alpha);
 void gfx_raised_box(s16 x, s16 y, s16 width, s16 height, u8 raised);
+void gfx_round_fill(s16 x, s16 y, s16 width, s16 height, s16 radius, u8 color);
+void gfx_round_fill_alpha(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                          u8 color, u8 alpha);
+void gfx_round_outline(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                       u8 color);
+void gfx_round_gloss(s16 x, s16 y, s16 width, s16 height, s16 radius);
+void gfx_round_band_alpha(s16 x, s16 y, s16 width, s16 height, s16 radius,
+                          s16 band_top, s16 band_height, u8 color,
+                          u8 alpha);
+void gfx_glyph(s16 x, s16 y, const char *const *art, u16 rows, s16 scale,
+               u8 color);
 void gfx_panel(s16 x, s16 y, s16 width, s16 height);
 void gfx_text(s16 x, s16 y, const char *text, u8 color);
 void gfx_text_filled(s16 x, s16 y, const char *text, u8 foreground, u8 background);
 void gfx_text_centered(s16 x, s16 y, s16 width, const char *text, u8 color);
 void gfx_character(s16 x, s16 y, char character, u8 color);
+
+/* Scaled, anti-aliased text for the phone UI. A glyph cell is `height`
+ * pixels tall and about six tenths of that wide, which is the natural
+ * proportion of the TrueType raster the kernel carries. Heights of eight
+ * or less fall back to the bitmap path above. */
+void gfx_text_size(s16 x, s16 y, const char *text, u8 color, u16 height);
+void gfx_text_size_centered(s16 x, s16 y, s16 width, const char *text,
+                            u8 color, u16 height);
+void gfx_text_size_right(s16 x, s16 y, const char *text, u8 color, u16 height);
+void gfx_text_size_shadowed(s16 x, s16 y, const char *text, u8 color,
+                            u16 height);
+u16 gfx_text_size_width(const char *text, u16 height);
 void gfx_picture(s16 x, s16 y, const char *const *art, u16 rows, u8 color, u8 background);
 void gfx_picture_opaque(s16 x, s16 y, const char *const *art, u16 rows, u8 on, u8 off);
 void gfx_draw_pointer(s16 x, s16 y);
@@ -324,6 +364,7 @@ u32 ram_disk_sectors(void);
 #define FILE_NOT_FOUND 0xFFFFu
 #define FILE_READ_LIMIT 32768u
 
+u8 *ram_disk_buffer(void);              /* the 4 MiB scratch disk */
 void file_system_init(void);
 u16 file_system_visible_count(void);
 u16 file_system_visible(u16 slot);      /* directory index of a visible slot */
@@ -397,7 +438,8 @@ typedef struct {
 void gui_run(void);
 void gui_open(u16 index);
 void gui_go_home(void);
-u16 gui_active_application(void);   /* 0xFFFF when the desktop is shown */
+void gui_lock(void);      /* back to the lock screen */
+u16 gui_active_application(void);   /* 0xFFFF when the home screen is shown */
 u16 gui_application_count(void);
 const Application *gui_application(u16 index);
 
@@ -408,21 +450,30 @@ void gui_hotspots_reset(void);
 void gui_hotspot(s16 x, s16 y, s16 width, s16 height, u16 id);
 u16 gui_hotspot_at(s16 x, s16 y);
 u8 gui_has_focus(u16 id);
+u8 gui_is_pressed(u16 id);   /* the button under the finger right now */
 void gui_focus(u16 id);
 void gui_move_focus(s16 step_x, s16 step_y);
 void gui_button(s16 x, s16 y, s16 width, s16 height, const char *label, u16 id);
 void gui_button_colored(s16 x, s16 y, s16 width, s16 height, const char *label,
                         u16 id, u8 face, u8 text);
 void gui_switch(s16 x, s16 y, s16 width, s16 height, const char *label, u16 id, u8 on);
+
+/* The application screen: a white (or dark) phone page, a status bar, a
+ * navigation bar with the app title and a back control, and the home
+ * indicator. An application calls one of these first and draws its own
+ * content between APP_TOP and APP_BOTTOM afterwards. */
 void gui_window_frame(const char *title);
+void gui_window_frame_dark(const char *title, u8 background);
 void gui_window_title_color(u8 top_color);
 void gui_message_bar(const char *text);
 void gui_reserve_arrow_keys(u8 reserve);
+void gui_status_light(u8 light);   /* white status bar text for dark apps */
 
-/* The Start menu behind the taskbar button. */
-u8 gui_menu_is_open(void);
-void gui_menu_toggle(void);
-void gui_show_desktop(void);
+/* Grouped iOS-style building blocks. */
+void gui_card(s16 x, s16 y, s16 width, s16 height);
+void gui_section_label(s16 x, s16 y, const char *text);
+void gui_list_row(s16 x, s16 y, s16 width, s16 height, const char *label,
+                  const char *value, u8 last);
 
 /* ------------------------------------------------------------------ */
 /* The applications                                                    */

@@ -25,17 +25,24 @@ TIMER_DIVISOR equ 19886
 VBE_FALLBACK_MODE equ 0x0111          ; 640 x 480 x 16 RGB565
 VBE_MODE_LINEAR_BIT equ 0x4000
 VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
+
+; The phone shell is scaled by the C presenter, so any landscape mode will
+; do. Rather than demanding one exact resolution (a phone panel is nothing
+; like a 1920x1080 monitor), every direct-colour linear mode is scored and
+; the biggest sensible one is chosen. 32bpp beats 16bpp at equal size.
 %ifdef DIMOS_EMULATOR
-; This is the *physical* VBE mode for the browser package.  It must match
-; the complete display, rather than merely be a small viewport inside a
-; 1920x1080 mode: v86 exposes the unused area as the blue host background.
-; 640x480 is available on conservative VBE BIOSes and cuts the browser's
-; framebuffer traffic to less than fifteen percent of the PC profile.
-VBE_TARGET_WIDTH equ 640
-VBE_TARGET_HEIGHT equ 480
+; The browser emulator runs on phone CPUs, so it caps the physical surface
+; at roughly 1024x768: enough for a sharp 844x390 phone screen, and four
+; times less framebuffer traffic than full HD.
+VBE_MIN_WIDTH equ 640
+VBE_MIN_HEIGHT equ 400
+VBE_MAX_WIDTH equ 1024
+VBE_MAX_HEIGHT equ 768
 %else
-VBE_TARGET_WIDTH equ 1920
-VBE_TARGET_HEIGHT equ 1080
+VBE_MIN_WIDTH equ 640
+VBE_MIN_HEIGHT equ 400
+VBE_MAX_WIDTH equ 1920
+VBE_MAX_HEIGHT equ 1200
 %endif
 
 [BITS 16]
@@ -94,51 +101,126 @@ kernel_entry:
     mov fs, ax
 
 .find_hd_mode:
+    ; Score every mode in the controller's list. The best one wins.
+    a32 mov word [best_score - KERNEL_BASE], 0
+    a32 mov word [best_mode - KERNEL_BASE], 0xFFFF
+
+.scan_mode:
     mov cx, [fs:si]
     add si, 2
     cmp cx, 0xFFFF
-    je .try_vbe_fallback
+    je .scan_done
+    a32 mov [candidate - KERNEL_BASE], cx
     push fs
     push si
-    push cx
     mov ax, KERNEL_SEGMENT
     mov es, ax
     mov edi, vbe_mode_info - KERNEL_BASE
     mov ax, 0x4F01
     int 0x10
-    pop cx
     pop si
     pop fs
     cmp ax, 0x004F
-    jne .find_hd_mode
-    mov ax, [es:di + 0]
+    jne .scan_mode
+
+    mov ax, KERNEL_SEGMENT
+    mov es, ax
+    mov edi, vbe_mode_info - KERNEL_BASE
+    mov ax, [es:di + 0]             ; mode attributes
     and ax, VBE_REQUIRED_ATTRIBUTES
     cmp ax, VBE_REQUIRED_ATTRIBUTES
-    jne .find_hd_mode
-    cmp word [es:di + 18], VBE_TARGET_WIDTH
-    jne .find_hd_mode
-    cmp word [es:di + 20], VBE_TARGET_HEIGHT
-    jne .find_hd_mode
-    cmp byte [es:di + 25], 32
-    jne .find_hd_mode
+    jne .scan_mode
     cmp byte [es:di + 27], 6        ; direct-colour memory model
-    jne .find_hd_mode
-    cmp byte [es:di + 31], 8        ; XRGB8888 channel masks
-    jne .find_hd_mode
-    cmp byte [es:di + 32], 16
-    jne .find_hd_mode
-    cmp byte [es:di + 33], 8
-    jne .find_hd_mode
-    cmp byte [es:di + 34], 8
-    jne .find_hd_mode
-    cmp byte [es:di + 35], 8
-    jne .find_hd_mode
-    cmp byte [es:di + 36], 0
-    jne .find_hd_mode
-    cmp dword [es:di + 40], 0
-    je .find_hd_mode
+    jne .scan_mode
 
-    mov bx, cx
+    movzx eax, word [es:di + 18]    ; width
+    cmp eax, VBE_MIN_WIDTH
+    jb .scan_mode
+    cmp eax, VBE_MAX_WIDTH
+    ja .scan_mode
+    movzx ebx, word [es:di + 20]    ; height
+    cmp ebx, VBE_MIN_HEIGHT
+    jb .scan_mode
+    cmp ebx, VBE_MAX_HEIGHT
+    ja .scan_mode
+
+    ; Landscape only: 1.2 <= width/height <= 2.4
+    imul ecx, ebx, 12
+    imul edx, eax, 10
+    cmp edx, ecx
+    jb .scan_mode
+    imul ecx, ebx, 24
+    cmp edx, ecx
+    ja .scan_mode
+
+    movzx ecx, byte [es:di + 25]    ; bits per pixel
+    cmp ecx, 32
+    je .scan_bits_ok
+    cmp ecx, 16
+    jne .scan_mode
+.scan_bits_ok:
+    ; The colour masks have to be the standard ones for that depth.
+    cmp ecx, 32
+    jne .scan_masks16
+    cmp byte [es:di + 31], 8
+    jne .scan_mode
+    cmp byte [es:di + 32], 16
+    jne .scan_mode
+    cmp byte [es:di + 33], 8
+    jne .scan_mode
+    cmp byte [es:di + 34], 8
+    jne .scan_mode
+    cmp byte [es:di + 35], 8
+    jne .scan_mode
+    cmp byte [es:di + 36], 0
+    jne .scan_mode
+    jmp .scan_size
+.scan_masks16:
+    cmp byte [es:di + 31], 5
+    jne .scan_mode
+    cmp byte [es:di + 32], 11
+    jne .scan_mode
+    cmp byte [es:di + 33], 6
+    jne .scan_mode
+    cmp byte [es:di + 34], 5
+    jne .scan_mode
+    cmp byte [es:di + 35], 5
+    jne .scan_mode
+    cmp byte [es:di + 36], 0
+    jne .scan_mode
+.scan_size:
+    cmp dword [es:di + 40], 0       ; a real linear framebuffer address
+    je .scan_mode
+
+    mov edx, eax
+    imul edx, ebx                   ; area, the primary score
+    cmp ecx, 32
+    jne .scan_compare
+    add edx, edx                    ; 32bpp is worth twice a 16bpp mode
+.scan_compare:
+    a32 cmp edx, [best_score - KERNEL_BASE]
+    jbe .scan_mode
+    a32 mov [best_score - KERNEL_BASE], edx
+    a32 mov ax, word [candidate - KERNEL_BASE]
+    a32 mov [best_mode - KERNEL_BASE], ax
+    jmp .scan_mode
+
+.scan_done:
+    a32 mov ax, word [best_mode - KERNEL_BASE]
+    cmp ax, 0xFFFF
+    je .try_vbe_fallback
+
+    ; Ask for the mode information of the winner once more, then switch to
+    ; it with the linear framebuffer flag.
+    mov cx, ax
+    mov ax, KERNEL_SEGMENT
+    mov es, ax
+    mov edi, vbe_mode_info - KERNEL_BASE
+    mov ax, 0x4F01
+    int 0x10
+    cmp ax, 0x004F
+    jne .try_vbe_fallback
+    a32 mov bx, word [best_mode - KERNEL_BASE]
     or bx, VBE_MODE_LINEAR_BIT
     mov ax, 0x4F02
     int 0x10
@@ -434,6 +516,14 @@ video_height:
     dw 200
 video_bits_per_pixel:
     db 8
+
+align 4
+candidate:
+    dw 0
+best_mode:
+    dw 0xFFFF
+best_score:
+    dd 0
 
 align 16
 vbe_controller_info:

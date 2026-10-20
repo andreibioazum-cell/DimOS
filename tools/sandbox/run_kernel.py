@@ -133,11 +133,8 @@ class Machine:
 
         self.frames = 0
         self.wanted_frames = 0
-        self.setup_sent = False
         self.mu.hook_add(UC_HOOK_CODE, self._on_frame,
                          begin=table["gfx_show"], end=table["gfx_show"])
-        self.mu.hook_add(UC_HOOK_CODE, self._on_setup,
-                         begin=table["gui_setup"], end=table["gui_setup"])
 
         self.mu.reg_write(UC_X86_REG_ESP, 0x00090000)
         # kernel.asm would have jumped here after entering protected mode.
@@ -246,14 +243,6 @@ class Machine:
         if self.frames >= self.wanted_frames:
             mu.emu_stop()
 
-    def _on_setup(self, mu, address, size, user_data):
-        if not self.setup_sent:
-            # The real wizard waits for the user. The visual-tour sandbox
-            # chooses Computer and accepts its native full-HD default so the
-            # existing application tour starts on the first desktop frame.
-            self.send_keyboard([0x02, 0x82, 0x1C, 0x9C])
-            self.setup_sent = True
-
     def frames_run(self, count):
         self.wanted_frames = self.frames + count
         self.mu.emu_start(self.mu.reg_read(UC_X86_REG_EIP), 0,
@@ -266,11 +255,26 @@ class Machine:
         self.frames_run(2)
         backend = self.mu.mem_read(self.symbols["video_backend"], 1)[0]
         if backend == 1:
-            raw = bytes(self.mu.mem_read(VBE_FRAME_BUFFER, 1920 * 1080 * 4))
+            width = struct.unpack("<H", bytes(self.mu.mem_read(
+                self.symbols["video_width"], 2)))[0]
+            height = struct.unpack("<H", bytes(self.mu.mem_read(
+                self.symbols["video_height"], 2)))[0]
+            raw = bytes(self.mu.mem_read(VBE_FRAME_BUFFER, width * height * 4))
             # Little-endian XRGB8888 is byte-ordered B,G,R,X in memory. Pillow's
             # raw decoder avoids a two-million-element Python conversion loop.
-            image = Image.frombytes("RGB", (1920, 1080), raw, "raw", "BGRX")
-            image = image.resize((960, 540), Image.NEAREST)
+            image = Image.frombytes("RGB", (width, height), raw, "raw", "BGRX")
+            # The shell fits its 844x390 phone screen into the display and
+            # letterboxes the rest; crop straight to the phone for the tour.
+            screen_width, screen_height = 844, 390
+            scale = min(width / screen_width, height / screen_height)
+            render_width = int(screen_width * scale)
+            render_height = int(screen_height * scale)
+            left = (width - render_width) // 2
+            top = (height - render_height) // 2
+            image = image.crop((left, top, left + render_width,
+                                top + render_height))
+            image = image.resize((screen_width * 2, screen_height * 2),
+                                 Image.LANCZOS)
         else:
             raw = bytes(self.mu.mem_read(FRAME_BUFFER, 320 * 200))
             colors = self.palette()
@@ -292,21 +296,21 @@ class Machine:
 # The two files the sandbox disk offers. NOTES.TXT is longer than one 512
 # byte cluster on purpose, so opening it also exercises the FAT12 chain.
 README_TEXT = (
-    "DIMOS 2.0 - A SMALL WINDOWS-INSPIRED DESKTOP.\r\n"
-    "THE START BUTTON OPENS A TILE MENU; RIGHT CLICK\r\n"
-    "ON THE WALLPAPER OPENS IT TOO. THE ^ KEY ROLLS\r\n"
-    "A WINDOW UP; THE TASKBAR HOLDS APPS AND TASK VIEW.\r\n"
-    "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\r\n"
+    "DIMOS 14 - A SMALL PHONE SHELL FOR A PC.\\r\\n"
+    "TAP AN ICON TO OPEN AN APP; THE BAR AT THE BOTTOM\\r\\n"
+    "IS THE HOME GESTURE. THE STATUS BAR OPENS CONTROL\\r\\n"
+    "CENTRE, WITH TOGGLES, SLIDERS AND THE LOCK BUTTON.\\r\\n"
+    "CHEESY SERVES CHEESE BALLS WITH KETCHUP. NYAM!\\r\\n"
 )
 NOTES_TEXT = (
-    "DIMOS BOOTS FROM A 512 BYTE SECTOR THAT LOADS KERNEL.BIN.\r\n"
-    "C DRAWS THE DESKTOP; ASSEMBLY HANDLES BIOS AND PIT IRQ0.\r\n"
-    "THE 320 BY 200 LOGICAL SCREEN FITS THE OUTPUT ASPECT RATIO.\r\n"
-    "TTF TEXT IS ANTIALIASED; BIOS FONT IS A COMPATIBILITY FALLBACK.\r\n"
-    "THIS FILE IS LONGER THAN ONE 512 BYTE CLUSTER, SO READING IT\r\n"
-    "FOLLOWS A TWO LINK FAT12 CHAIN: CLUSTER 42 THEN CLUSTER 43.\r\n"
-    "DELETE HIDES A FILE UNTIL REBOOT; KERNEL.BIN IS PROTECTED.\r\n"
-    "THE RAM DISK AT 0X500000 HOLDS FOUR MEGABYTES OF SCRATCH SPACE.\r\n"
+    "DIMOS BOOTS FROM A 512 BYTE SECTOR THAT LOADS KERNEL.BIN.\\r\\n"
+    "C DRAWS THE SHELL; ASSEMBLY HANDLES BIOS AND PIT IRQ0.\\r\\n"
+    "THE 844 BY 390 CANVAS IS AN IPHONE LANDSCAPE SCREEN,\\r\\n"
+    "SCALED INTO ANY VBE MODE WITHOUT STRETCHING IT.\\r\\n"
+    "TTF TEXT IS ANTIALIASED AT EVERY SIZE THE SHELL ASKS FOR.\\r\\n"
+    "THIS FILE IS LONGER THAN ONE 512 BYTE CLUSTER, SO READING\\r\\n"
+    "IT FOLLOWS A TWO LINK FAT12 CHAIN: CLUSTER 42 THEN 43.\\r\\n"
+    "DELETE HIDES A FILE UNTIL REBOOT; KERNEL.BIN IS PROTECTED.\\r\\n"
 )
 
 
@@ -389,42 +393,40 @@ def plant_boot_disk(machine, flat):
     machine.mu.mem_write(0x0413, (640).to_bytes(2, "little"))
 
 
-CLOSE_BOX = (304, 5)       # red close button in the application title bar
-SHADE_BOX = (280, 5)       # roll-up control beside the minimize button
-ROLLED_SLAT = (160, 5)     # rolled-up title strip
-MENU_BUTTON = (14, 190)    # Windows-style Start button
-TASK_VIEW = (118, 190)     # task-view / show-desktop button
-POWER_BUTTON = (17, 169)   # Start menu power icon
+# ----------------------------------------------------------------------
+# Positions on screen, worked out from the layout constants in dimos.h and
+# the application sources. Everything the tour taps is computed, not
+# guessed, so a layout change makes the tour miss instead of lie.
+# ----------------------------------------------------------------------
 
-# The window's inner frame under the bottom taskbar desktop.
-WINDOW_LEFT = 9
-WINDOW_TOP = 16
-
-
-def icon_center(index):
-    # Desktop shortcuts: two columns of 60x32 cells, aligned to the top-left.
-    column = index % 2
-    row = index // 2
-    return (6 + column * 60 + 28, 5 + row * 32 + 15)
+SCREEN_WIDTH = 844
+SCREEN_HEIGHT = 390
+ICON_GRID_LEFT = (SCREEN_WIDTH - 4 * 112 - 64) // 2
 
 
-def menu_cell(index):
-    # Three 52 px columns in the left-anchored Start menu.
-    column = index % 3
-    row = index // 3
-    return (32 + column * 52, 74 + row * 35)
+def home_icon(index):
+    column = index % 5
+    row = index // 5
+    return (ICON_GRID_LEFT + column * 112 + 32, 46 + row * 108 + 32)
 
 
-def menu_class_button(index):
-    return (27 + index * 40, 169)
+def dock_icon(index):
+    return ((SCREEN_WIDTH - 348) // 2 + 26 + index * 80 + 26, 337)
 
 
 def calc_key(row, column):
-    return (WINDOW_LEFT + 4 + column * 60 + 27, WINDOW_TOP + 26 + row * 25 + 11)
+    left = (SCREEN_WIDTH - (4 * 96 + 12)) // 2
+    return (left + column * 96 + 42, 146 + row * 56 + 23)
 
 
 def term_key(row, column):
-    return (WINDOW_LEFT + 4 + column * 27 + 12, WINDOW_TOP + 82 + row * 16 + 7)
+    return (37 + column * 70 + 32, 226 + row * 34 + 15)
+
+
+HOME_BAR = (SCREEN_WIDTH // 2, 381)
+STATUS_RIGHT = (SCREEN_WIDTH - 40, 10)
+CC_WIFI = (26 + 78 + 86, 78)
+CC_LOCK = (26 + 566 + 75, 196 + 13)
 
 
 def tour():
@@ -434,141 +436,132 @@ def tour():
     machine = Machine(flat, table)
     plant_boot_disk(machine, flat)
 
-    print("\nBooting the DimOS desktop")
+    print("\nBoot: the lock screen")
     machine.frames_run(3)
-    machine.screenshot("01-desktop")
+    machine.screenshot("01-lock-screen")
 
-    print("\nFiles: open the disk listing, then read a file")
-    machine.click(*icon_center(0))
-    machine.screenshot("02-files")
-    machine.click(WINDOW_LEFT + 2 + 108, WINDOW_TOP + 2 + 14 + 7)  # README.TXT
-    machine.click(9 + 216 + 8 + 37, WINDOW_TOP + 2 + 7)            # Open
-    machine.click(243 + 30, WINDOW_TOP + 38 + 7)   # [+] a page down
-    machine.screenshot("03-file-viewer")
-    machine.click(243 + 30, WINDOW_TOP + 56 + 7)   # [-] a page back
-    machine.click(*CLOSE_BOX)
+    print("\nTap to unlock: the home screen")
+    machine.click(*HOME_BAR)
+    machine.screenshot("02-home-screen")
 
-    print("\nSnake: steer with the on-screen pad")
-    machine.click(*icon_center(1))
-    machine.screenshot("04-snake")
-    machine.click(229, 71)                   # up
-    machine.frames_run(14)
-    machine.click(199, 95)                   # left
-    machine.frames_run(14)
-    machine.screenshot("05-snake-moving")
-    machine.click(*CLOSE_BOX)
+    print("\nControl Centre from the status bar")
+    machine.click(*STATUS_RIGHT)
+    machine.screenshot("03-control-centre")
+    machine.click(*CC_WIFI)
+    machine.screenshot("04-control-centre-wifi")
+    machine.click(760, 320)
+    machine.frames_run(2)
 
-    print("\nMines: open a square")
-    machine.click(*icon_center(2))
-    machine.click(76, 97)
-    machine.screenshot("06-mines")
-    machine.right_click(13 + 8 * 14 + 7, WINDOW_TOP + 4 + 8 * 14 + 7)
-    machine.screenshot("07-mines-flag")
-    machine.click(*CLOSE_BOX)
+    print("\nFiles: the disk listing, then a text file")
+    machine.click(*home_icon(0))
+    machine.screenshot("05-files")
+    machine.click(150, 92)
+    machine.click(694, 96)
+    machine.screenshot("06-file-viewer")
+    machine.click(*HOME_BAR)
 
-    print("\nPaint: drag a line")
-    machine.click(*icon_center(3))
-    machine.drag(30, 52, 180, 122)
-    machine.screenshot("08-paint")
-    machine.click(*CLOSE_BOX)
+    print("\nMusic: a phone player with live progress")
+    machine.click(*home_icon(1))
+    machine.screenshot("07-music")
+    machine.click(404, 224)
+    machine.frames_run(30)
+    machine.screenshot("08-music-playing")
+    machine.click(*HOME_BAR)
 
     print("\nCalculator: 7 + 8 =")
-    machine.click(*icon_center(4))
-    machine.click(*calc_key(0, 0))   # 7
-    machine.click(*calc_key(3, 3))   # +
-    machine.click(*calc_key(0, 1))   # 8
-    machine.click(*calc_key(3, 2))   # =
+    machine.click(*home_icon(2))
+    machine.click(*calc_key(0, 0))
+    machine.click(*calc_key(3, 3))
+    machine.click(*calc_key(0, 1))
+    machine.click(*calc_key(3, 2))
     machine.screenshot("09-calculator")
-    machine.click(*CLOSE_BOX)
+    machine.click(*HOME_BAR)
 
-    print("\nMusic, with the black record title bar")
-    machine.click(*icon_center(5))
-    machine.click(9 + 4 + 61, WINDOW_TOP + 9)  # the Chime button
+    print("\nPaint: drag a stroke")
+    machine.click(*home_icon(3))
+    machine.drag(120, 160, 420, 280)
+    machine.drag(420, 280, 300, 120)
+    machine.screenshot("10-paint")
+    machine.click(*HOME_BAR)
+
+    print("\nSnake: steer with the on-screen pad")
+    machine.click(*home_icon(4))
+    machine.screenshot("11-snake")
+    machine.click(492, 175)
+    machine.frames_run(20)
+    machine.click(424, 233)
+    machine.frames_run(20)
+    machine.screenshot("12-snake-moving")
+    machine.click(*HOME_BAR)
+
+    print("\nMines: open a square and flag another")
+    machine.click(*home_icon(5))
+    machine.click(39, 87)
+    machine.right_click(117, 165)
+    machine.screenshot("13-mines")
+    machine.click(*HOME_BAR)
+
+    print("\nCheesy Balls: two chomps")
+    machine.click(*home_icon(6))
+    machine.click(620, 228)
+    machine.click(620, 228)
     machine.frames_run(6)
-    machine.screenshot("10-music")
-    machine.click(*CLOSE_BOX)
+    machine.screenshot("14-cheesy")
+    machine.click(*HOME_BAR)
 
-    print("\nCheesy Balls: the mouse's own kitchen")
-    machine.click(*icon_center(6))
-    machine.click(63, WINDOW_TOP + 110)    # NYAM!
-    machine.click(63, WINDOW_TOP + 110)    # NYAM!
-    machine.screenshot("11-cheesy")
-    machine.click(257, WINDOW_TOP + 110)   # Cook more for later
-    machine.click(*CLOSE_BOX)
-
-    print("\nAbout, then the green phosphor theme")
-    machine.click(*icon_center(7))
-    machine.screenshot("12-about")
-    machine.click(13 + 6 + 45, 148 + 7)    # the Theme button
-    machine.screenshot("13-about-green")
-    machine.click(13 + 6 + 45, 148 + 7)    # and back to the colour theme
-    machine.click(13 + 6 + 45, 148 + 7)
-    machine.click(13 + 6 + 45, 148 + 7)
-    machine.click(*CLOSE_BOX)
-
-    print("\nTerminal: type DIR on the on-screen keyboard")
-    machine.click(*icon_center(8))
-    machine.screenshot("14-terminal")
+    print("\nTerminal: type DIR on the iOS-style keyboard")
+    machine.click(*home_icon(7))
+    machine.screenshot("15-terminal")
     machine.click(*term_key(2, 2))   # D
     machine.click(*term_key(1, 7))   # I
     machine.click(*term_key(1, 3))   # R
     machine.click(*term_key(2, 10))  # ENT
     machine.frames_run(2)
-    machine.screenshot("15-terminal-dir")
+    machine.screenshot("16-terminal-dir")
+    machine.click(*HOME_BAR)
 
-    print("\nKeyboard only: Escape closes the window")
-    machine.send_keyboard([0x01, 0x81])   # make and break of Escape
-    machine.frames_run(2)
-    machine.screenshot("16-back-to-desktop")
-
-    print("\nKeyboard only: arrows move the focus, Enter opens")
-    machine.send_keyboard(list(ARROW_CODES["left"]))
-    machine.frames_run(1)
-    machine.send_keyboard(list(ARROW_CODES["up"]))
-    machine.frames_run(1)
-    machine.send_keyboard([0x1C, 0x9C])   # Enter opens the focused icon
-    machine.frames_run(2)
-    machine.screenshot("17-keyboard-open")
-    machine.send_keyboard([0x01, 0x81])
+    print("\nSettings, and the theme cycle")
+    machine.click(*home_icon(8))
+    machine.screenshot("17-settings")
+    machine.click(644, 136)
+    machine.screenshot("18-settings-green")
+    machine.click(644, 136)
+    machine.click(644, 136)
+    machine.click(644, 136)
+    machine.click(*HOME_BAR)
     machine.frames_run(2)
 
-    print("\nStart menu: the taskbar button, then the Games filter")
-    machine.click(*MENU_BUTTON)
-    machine.screenshot("18-start-menu")
-    machine.click(*menu_class_button(1))   # Games
-    machine.screenshot("19-start-games")
-    machine.click(*menu_cell(6))           # Cheesy Balls from the menu
-    machine.screenshot("20-start-launched")
-
-    print("\nWindow controls: roll the title bar up, then unroll it")
-    machine.click(*SHADE_BOX)
-    machine.screenshot("21-rolled-up")
-    machine.click(*ROLLED_SLAT)
-
-    print("\nDesktop shortcut: launch Calc, minimize, restore with Task View")
-    machine.click(*icon_center(4))
-    machine.screenshot("22-calc-launched")
-    machine.click(*TASK_VIEW)              # show desktop
-    machine.screenshot("23-show-desktop")
-    machine.click(*TASK_VIEW)              # and bring Calc back
-    machine.screenshot("24-restored")
-    machine.send_keyboard([0x01, 0x81])
+    print("\nLock the phone from Control Centre")
+    machine.click(*STATUS_RIGHT)
+    machine.screenshot("19-control-centre-again")
+    machine.click(*CC_LOCK)
+    machine.screenshot("20-locked")
+    machine.click(*HOME_BAR)
     machine.frames_run(2)
 
-    print("\nRight-clicking the wallpaper opens the Start menu")
-    machine.right_click(200, 60)
-    machine.screenshot("25-right-click-menu")
-    machine.click(*POWER_BUTTON)
-    machine.screenshot("26-power-options")
-    machine.click(62, 133)  # exercise the sandbox-safe Shut down action
-    machine.screenshot("27-shutdown-requested")
-    machine.send_keyboard([0x01, 0x81])  # close the power submenu
-    machine.send_keyboard([0x01, 0x81])  # close Start
+    print("\nThe dock launches Calculator again")
+    machine.click(*dock_icon(2))
+    machine.screenshot("21-dock-calculator")
+    machine.send_keyboard([0x01, 0x81])   # Escape is the home gesture
     machine.frames_run(2)
+    machine.screenshot("22-home-again")
 
     clock = machine.clock()
     print(f"\nSimulated clock after the tour: {clock} ms")
     print(f"Restart requests: {machine.restarts()}")
+
+
+def smoke(frames):
+    """Boots the kernel and only checks that it survives a few frames."""
+    flat, elf = build()
+    machine = Machine(flat, symbols(elf))
+    plant_boot_disk(machine, flat)
+    machine.frames_run(frames)
+    print(f"Smoke test: {frames} frames, clock {machine.clock()} ms, "
+          f"restarts {machine.restarts()}")
+    if machine.restarts() != 0:
+        raise SystemExit("the kernel asked the machine to restart")
+    machine.screenshot("00-smoke")
 
 
 def main():
@@ -576,7 +569,11 @@ def main():
         build()
         return
     if Uc is None:
-        raise SystemExit("visual tour needs: pip install unicorn pillow")
+        raise SystemExit("the sandbox needs: pip install unicorn pillow")
+    if "--frames" in sys.argv:
+        position = sys.argv.index("--frames")
+        smoke(int(sys.argv[position + 1]) if len(sys.argv) > position + 1 else 60)
+        return
     tour()
 
 

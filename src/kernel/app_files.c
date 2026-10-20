@@ -1,5 +1,5 @@
 /*
- * app_files.c -- the file manager.
+ * app_files.c -- the file manager, styled like the iOS Files app.
  *
  * Shows the files that really are on the boot disk, opens them as text and
  * can hide one of them for the rest of the session. KERNEL.BIN cannot be
@@ -8,13 +8,16 @@
 
 #include "dimos.h"
 
-#define ROW_HEIGHT 14
+#define ROW_HEIGHT 32
 #define VISIBLE_ROWS 8
-#define LIST_WIDTH 216
-/* 28 columns of 8 pixels plus the scroll buttons on the right just fit the
- * 302 pixel wide window interior. */
-#define TEXT_COLUMNS 28
-#define TEXT_ROWS 12
+#define LIST_X (s16)APP_LEFT
+#define LIST_Y 74
+#define LIST_WIDTH 520
+#define LIST_HEIGHT (VISIBLE_ROWS * ROW_HEIGHT + 8)
+#define SIDE_X (s16)(LIST_X + LIST_WIDTH + 16)
+#define SIDE_WIDTH (s16)(APP_RIGHT - SIDE_X)
+#define TEXT_COLUMNS 60
+#define TEXT_ROWS 20
 #define FILE_BUFFER_BYTES 2048u
 
 #define ID_FILE_FIRST 1u
@@ -32,17 +35,17 @@
 static const char *const icon[16] = {
     "................",
     "................",
-    "..XXXXXXXXX.....",
-    "..XoooooooX.....",
-    "..XoooooooXXXXXX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XooooooooooooX",
-    "..XXXXXXXXXXXXXX",
+    "................",
+    ".XXXX...........",
+    ".XooX...........",
+    ".XooXXXXXXXXXX..",
+    ".XooooooooooXX..",
+    ".XooooooooooXX..",
+    ".XooooooooooXX..",
+    ".XooooooooooXX..",
+    ".XooooooooooXX..",
+    ".XooooooooooXX..",
+    ".XXXXXXXXXXXXX..",
     "................",
     "................",
     "................",
@@ -56,15 +59,17 @@ static u16 text_top;
 static u16 text_lines;
 static char file_text[FILE_BUFFER_BYTES];
 static char line[TEXT_COLUMNS + 1u];
-static char message[40];
+static char message[48];
 
 static void build_message(void) {
     message[0] = '\0';
     if (viewing != 0u) {
-        text_append(message, "Reading a file - use the arrows", (u16)sizeof(message));
+        text_append(message, "Scroll the page with the buttons on the right",
+                    (u16)sizeof(message));
         return;
     }
-    text_append_number(message, file_system_visible_count(), (u16)sizeof(message));
+    text_append_number(message, file_system_visible_count(),
+                       (u16)sizeof(message));
     text_append(message, " files on the boot disk", (u16)sizeof(message));
 }
 
@@ -160,67 +165,74 @@ static void files_open(void) {
 static void files_draw(void) {
     u16 row;
 
+    gui_window_frame("Files");
+
     if (viewing == 0u) {
+        gui_section_label((s16)APP_LEFT, 64, "BOOT DISK");
+        gui_card(LIST_X, LIST_Y, LIST_WIDTH, LIST_HEIGHT);
+
         for (row = 0u; row < VISIBLE_ROWS; ++row) {
             const u16 slot = (u16)(page * VISIBLE_ROWS + row);
             const u16 index = file_system_visible(slot);
-            const s16 y = (s16)(WINDOW_TOP + 2 + (s16)(row * ROW_HEIGHT));
-            char label[32];
+            const s16 y = (s16)(LIST_Y + 4 + (s16)(row * ROW_HEIGHT));
+            char label[13];
+            char size[20];
+            const u8 chosen = (u8)(slot == selected_slot);
 
             if (index == FILE_NOT_FOUND) {
                 continue;
             }
             file_system_name(index, label);
-            text_pad_right(label, 13u, (u16)sizeof(label));
-            text_append_number(label, file_system_size(index), (u16)sizeof(label));
-            text_append(label, " bytes", (u16)sizeof(label));
+            size[0] = '\0';
+            text_append_number(size, file_system_size(index), (u16)sizeof(size));
+            text_append(size, " B", (u16)sizeof(size));
 
-            if (slot == selected_slot) {
-                gui_button_colored((s16)(WINDOW_LEFT + 2), y, LIST_WIDTH,
-                                   (s16)(ROW_HEIGHT - 2), label,
-                                   (u16)(ID_FILE_FIRST + row),
-                                   COLOR_SELECTION, COLOR_WHITE);
-            } else {
-                gui_button((s16)(WINDOW_LEFT + 2), y, LIST_WIDTH,
-                           (s16)(ROW_HEIGHT - 2), label,
-                           (u16)(ID_FILE_FIRST + row));
+            if (chosen != 0u) {
+                gfx_round_fill((s16)(LIST_X + 6), y, (s16)(LIST_WIDTH - 12),
+                               ROW_HEIGHT - 4, 9, COLOR_SELECTION);
             }
+            gfx_text_size((s16)(LIST_X + 22), (s16)(y + 8), label,
+                          (chosen != 0u) ? COLOR_FACE : COLOR_DEEP, 12);
+            gfx_text_size_right((s16)(LIST_X + LIST_WIDTH - 20),
+                                (s16)(y + 11), size,
+                                (chosen != 0u) ? COLOR_FACE : COLOR_DISABLED,
+                                9);
+            gui_hotspot((s16)(LIST_X + 6), y, (s16)(LIST_WIDTH - 12),
+                        ROW_HEIGHT - 4, (u16)(ID_FILE_FIRST + row));
         }
 
-        gui_button((s16)(WINDOW_LEFT + LIST_WIDTH + 8), (s16)(WINDOW_TOP + 2), 74, 14,
-                   "Open", ID_OPEN);
-        gui_button((s16)(WINDOW_LEFT + LIST_WIDTH + 8), (s16)(WINDOW_TOP + 20), 74, 14,
-                   "Delete", ID_DELETE);
-        gui_button((s16)(WINDOW_LEFT + LIST_WIDTH + 8), (s16)(WINDOW_TOP + 44), 36, 14,
-                   "Up", ID_PREVIOUS_PAGE);
-        gui_button((s16)(WINDOW_LEFT + LIST_WIDTH + 46), (s16)(WINDOW_TOP + 44), 36, 14,
-                   "Down", ID_NEXT_PAGE);
+        gui_button(SIDE_X, 74, SIDE_WIDTH, 44, "Open", ID_OPEN);
+        gui_button_colored(SIDE_X, 126, SIDE_WIDTH, 44, "Delete", ID_DELETE,
+                           COLOR_ALERT, COLOR_FACE);
+        gui_button_colored(SIDE_X, 184, SIDE_WIDTH, 40, "Previous page",
+                           ID_PREVIOUS_PAGE, COLOR_PANEL, COLOR_DEEP);
+        gui_button_colored(SIDE_X, 232, SIDE_WIDTH, 40, "Next page",
+                           ID_NEXT_PAGE, COLOR_PANEL, COLOR_DEEP);
+        gui_section_label(SIDE_X, 290, "TAP A FILE, THEN OPEN");
     } else {
+        /* A plain white text pane, narrower than the list so the scroll
+         * buttons to its right never disappear underneath it. */
+        gfx_fill(LIST_X, 74, LIST_WIDTH, 280, COLOR_FACE);
+        gfx_outline(LIST_X, 74, LIST_WIDTH, 280, COLOR_GRID);
         for (row = 0u; row < TEXT_ROWS; ++row) {
             const u16 wanted = (u16)(text_top + row);
-            const s16 y = (s16)(WINDOW_TOP + 2 + (s16)(row * 10));
+            const s16 y = (s16)(80 + (s16)row * 12);
 
             fetch_line(wanted);
-            gfx_text_filled((s16)(WINDOW_LEFT + 2), y, line, COLOR_BLACK,
-                            COLOR_TEXT_FIELD);
+            gfx_text_size((s16)(LIST_X + 16), y, line, COLOR_DEEP, 10);
         }
-        gfx_outline((s16)(WINDOW_LEFT + 2), (s16)(WINDOW_TOP + 2),
-                    (s16)(TEXT_COLUMNS * 8 + 2), (s16)(TEXT_ROWS * 10 + 2),
-                    COLOR_SHADOW);
 
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 2), 60, 14, "Up", ID_SCROLL_UP);
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 20), 60, 14, "Down", ID_SCROLL_DOWN);
-        /* The Thunar scrollbar jump: a whole page at once. */
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 38), 60, 14, "[+]", ID_SCROLL_PAGE_DOWN);
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 56), 60, 14, "[-]", ID_SCROLL_PAGE_UP);
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 74), 60, 14, "Top", ID_SCROLL_TOP);
-        gui_button((s16)(WINDOW_LEFT + TEXT_COLUMNS * 8 + 10),
-                   (s16)(WINDOW_TOP + 94), 60, 16, "Close", ID_BACK);
+        gui_button_colored(SIDE_X, 74, SIDE_WIDTH, 38, "Up", ID_SCROLL_UP,
+                           COLOR_PANEL, COLOR_DEEP);
+        gui_button_colored(SIDE_X, 118, SIDE_WIDTH, 38, "Down", ID_SCROLL_DOWN,
+                           COLOR_PANEL, COLOR_DEEP);
+        gui_button_colored(SIDE_X, 174, SIDE_WIDTH, 38, "Page down",
+                           ID_SCROLL_PAGE_DOWN, COLOR_PANEL, COLOR_DEEP);
+        gui_button_colored(SIDE_X, 218, SIDE_WIDTH, 38, "Page up",
+                           ID_SCROLL_PAGE_UP, COLOR_PANEL, COLOR_DEEP);
+        gui_button_colored(SIDE_X, 262, SIDE_WIDTH, 38, "Top", ID_SCROLL_TOP,
+                           COLOR_PANEL, COLOR_DEEP);
+        gui_button(SIDE_X, 306, SIDE_WIDTH, 38, "Close", ID_BACK);
     }
 
     gui_message_bar(message);
@@ -259,16 +271,15 @@ static void files_event(const Event *event) {
         } else if (event->key == ID_SCROLL_DOWN && text_top + 1u < text_lines) {
             ++text_top;
         } else if (event->key == ID_SCROLL_PAGE_UP) {
-            /* A page up lands exactly a screen back, like Thunar's bar. */
-            text_top = (text_top > (u16)(TEXT_ROWS - 1u))
-                           ? (u16)(text_top - (TEXT_ROWS - 1u)) : 0u;
+            text_top = (text_top > (u16)(TEXT_ROWS - 2u))
+                           ? (u16)(text_top - (TEXT_ROWS - 2u)) : 0u;
         } else if (event->key == ID_SCROLL_PAGE_DOWN) {
             u16 last = 0u;
 
             if (text_lines > (u16)TEXT_ROWS) {
                 last = (u16)(text_lines - TEXT_ROWS);
             }
-            text_top = (u16)(text_top + (TEXT_ROWS - 1u));
+            text_top = (u16)(text_top + (TEXT_ROWS - 2u));
             if (text_top > last) {
                 text_top = last;
             }
@@ -333,7 +344,7 @@ const Application application_files = {
     "Files",
     "Files",
     icon,
-    COLOR_YELLOW,
+    COLOR_SELECTION,
     files_open,
     files_draw,
     files_event,

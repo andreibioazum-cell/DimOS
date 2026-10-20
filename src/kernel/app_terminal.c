@@ -1,25 +1,31 @@
 /*
  * app_terminal.c -- the command line, for people who want it.
  *
- * DimOS never asks anybody to type, so this window brings its own keyboard:
- * four rows of keys that a finger can press. A real keyboard works too, if
- * one is plugged in.
+ * DimOS never asks anybody to type, so this page brings its own keyboard:
+ * four rows of rounded keys a finger can press, laid out like the iOS
+ * keyboard. A real keyboard works too, if one is plugged in.
  */
 
 #include "dimos.h"
 
-#define TERM_COLUMNS 37
-#define TERM_VISIBLE_ROWS 6
+#define TERM_COLUMNS 60
+#define TERM_VISIBLE_ROWS 8
 #define HISTORY_ROWS 40
-#define INPUT_LIMIT 38u
+#define INPUT_LIMIT 58u
 
 #define KEY_COLUMNS 11
 #define KEY_ROWS 4
-#define KEY_WIDTH 27
-#define KEY_HEIGHT 15
-#define KEY_STEP 16
-#define KEY_LEFT (s16)(WINDOW_LEFT + 4)
-#define KEY_TOP (s16)(WINDOW_TOP + 75)
+#define KEY_WIDTH 64
+#define KEY_HEIGHT 30
+#define KEY_X_STEP 70
+#define KEY_Y_STEP 34
+#define KEY_LEFT 37
+#define KEY_TOP 226
+
+#define TERM_CARD_X (s16)APP_LEFT
+#define TERM_CARD_Y 68
+#define TERM_CARD_WIDTH 792
+#define TERM_CARD_HEIGHT 116
 
 #define ID_KEY_FIRST 1u                    /* 1 .. 44 */
 #define ID_KEY_LAST (ID_KEY_FIRST + KEY_COLUMNS * KEY_ROWS - 1u)
@@ -31,21 +37,21 @@
 #define SPECIAL_CLEAR 5u
 
 static const char *const icon[16] = {
-    "..XXXXXXXXXXXX..",
-    "..XXXXXXXXXXXX..",
-    "..XooooooooooX..",
-    "..XooooooooooX..",
-    "..X.XX.......X..",
-    "..X..XX......X..",
-    "..X...XX.....X..",
-    "..X..XX......X..",
-    "..X.XX.......X..",
-    "..X....XXXX..X..",
-    "..XooooooooooX..",
-    "..XXXXXXXXXXXX..",
     "................",
     "................",
-    "................",
+    "..X.............",
+    "..XX............",
+    "...XX...........",
+    "....XX..........",
+    ".....XX.........",
+    "......XX........",
+    ".......XX.......",
+    "......XX........",
+    "....XX..........",
+    "...XX...........",
+    "..XX............",
+    "..X.............",
+    ".......XXXXX....",
     "................",
 };
 
@@ -54,22 +60,23 @@ static const char *const icon[16] = {
 static const char key_labels[KEY_ROWS][KEY_COLUMNS][4] = {
     { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "<-" },
     { "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "." },
-    { "A", "S", "D", "F", "G", "H", "J", "K", "L", "SP", "ENT" },
-    { "SH", "Z", "X", "C", "V", "B", "N", "M", ":", "/", "CLS" }
+    { "A", "S", "D", "F", "G", "H", "J", "K", "L", ":", "/" },
+    { "SH", "Z", "X", "C", "V", "B", "N", "M", "SP", "ENT", "CLS" }
 };
 
 static const char key_characters[KEY_ROWS][KEY_COLUMNS] = {
     { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '\0' },
     { 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '.' },
-    { 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '\0', '\0' },
-    { '\0', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ':', '/', '\0' }
+    { 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '/' },
+    { '\0', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '\0', '\0', '\0' }
 };
 
 static const u8 key_special[KEY_ROWS][KEY_COLUMNS] = {
     { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_BACKSPACE },
     { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u },
-    { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_SPACE, SPECIAL_ENTER },
-    { SPECIAL_SHIFT, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_CLEAR }
+    { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u },
+    { SPECIAL_SHIFT, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_SPACE,
+      SPECIAL_ENTER, SPECIAL_CLEAR }
 };
 
 static char history[HISTORY_ROWS][TERM_COLUMNS + 1u];
@@ -132,8 +139,8 @@ static void command_help(void) {
     terminal_print("  VER          show the version");
     terminal_print("  THEME        switch the palette");
     terminal_print("  BEEP         test the speaker");
-    terminal_print("  MENU         open the Whisker menu");
-    terminal_print("  XFCE         about this desktop");
+    terminal_print("  LOCK         lock the phone");
+    terminal_print("  HOME         back to the home screen");
     terminal_print("  CHEESY       the cheese ball kitchen");
     terminal_print("  EXIT         back to the desktop");
 }
@@ -249,6 +256,19 @@ static char *split_argument(char *command) {
     return command;
 }
 
+/* Opening by index would break the moment the home grid is reordered, so
+ * commands look the application up by its title instead. */
+static void open_by_title(const char *title) {
+    u16 index;
+
+    for (index = 0u; index < gui_application_count(); ++index) {
+        if (text_equal(gui_application(index)->title, title) != 0u) {
+            gui_open(index);
+            return;
+        }
+    }
+}
+
 static void run_command(char *command) {
     char *argument = split_argument(command);
 
@@ -283,41 +303,28 @@ static void run_command(char *command) {
         text_append_number(buffer, clock_day(), (u16)sizeof(buffer));
         terminal_print(buffer);
     } else if (text_equal_ignore_case(command, "VER") != 0u) {
-        terminal_print("DimOS 2.0 + DimXfce, i686 protected mode");
+        terminal_print("DimOS 14 + i686 protected mode");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
         terminal_print("Palette switched");
     } else if (text_equal_ignore_case(command, "BEEP") != 0u) {
         sound_play_startup();
-    } else if (text_equal_ignore_case(command, "MENU") != 0u ||
-               text_equal_ignore_case(command, "WHISKER") != 0u) {
-        /* Super key of the budget: open the mouse menu from a shell. */
-        gui_menu_toggle();
-    } else if (text_equal_ignore_case(command, "XFCE") != 0u ||
-               text_equal_ignore_case(command, "XFCE4-ABOUT") != 0u) {
-        u16 index;
-
-        terminal_print("DimXfce: Xfce in 320x200");
-        terminal_print("panel+dock+whiskers, real cheese");
-        for (index = 0u; index < gui_application_count(); ++index) {
-            if (text_equal(gui_application(index)->title, "About") != 0u) {
-                gui_open(index);
-            }
-        }
+    } else if (text_equal_ignore_case(command, "LOCK") != 0u) {
+        terminal_print("Locked");
+        gui_lock();
+    } else if (text_equal_ignore_case(command, "HOME") != 0u) {
+        gui_go_home();
+    } else if (text_equal_ignore_case(command, "ABOUT") != 0u ||
+               text_equal_ignore_case(command, "SETTINGS") != 0u) {
+        terminal_print("DimOS 14: a phone shell in protected mode");
+        open_by_title("Settings");
     } else if (text_equal_ignore_case(command, "CHEESY") != 0u ||
                text_equal_ignore_case(command, "NYAM") != 0u) {
-        u16 index;
-
-        for (index = 0u; index < gui_application_count(); ++index) {
-            if (text_equal(gui_application(index)->title,
-                           "Cheesy Balls") != 0u) {
-                gui_open(index);
-            }
-        }
+        open_by_title("Cheesy Balls");
     } else if (text_equal_ignore_case(command, "SNAKE") != 0u) {
-        gui_open(1u);
+        open_by_title("Snake");
     } else if (text_equal_ignore_case(command, "MINES") != 0u) {
-        gui_open(2u);
+        open_by_title("Mines");
     } else if (text_equal_ignore_case(command, "EXIT") != 0u) {
         gui_go_home();
     } else {
@@ -346,7 +353,7 @@ static void press_character(char character) {
 
 static void terminal_open(void) {
     if (history_count == 0u) {
-        terminal_print("DimXfce terminal");
+        terminal_print("DimOS terminal");
         terminal_print("Type HELP and press ENT");
         terminal_print("");
     }
@@ -357,14 +364,36 @@ static void terminal_open(void) {
                       : 0u;
 }
 
+static void draw_key(s16 x, s16 y, const char *label, u16 id, u8 special,
+                     u8 selected) {
+    u8 face = COLOR_FACE;
+    u8 ink = COLOR_DEEP;
+
+    if (special != 0u) {
+        face = COLOR_DISABLED;
+    }
+    if (selected != 0u) {
+        face = COLOR_SELECTION;
+        ink = COLOR_FACE;
+    }
+    if (gui_is_pressed(id) != 0u) {
+        face = gfx_shade(face, COLOR_DEEP, 3);
+    }
+    gfx_round_fill(x, y, KEY_WIDTH, KEY_HEIGHT, 7, face);
+    gfx_text_size_centered(x, (s16)(y + 8), KEY_WIDTH, label, ink, 12);
+    gui_hotspot(x, y, KEY_WIDTH, KEY_HEIGHT, id);
+}
+
 static void terminal_draw(void) {
     u16 row;
     u16 column;
-    const s16 text_top = (s16)(WINDOW_TOP + 2);
+    const s16 text_top = (s16)(TERM_CARD_Y + 6);
     char prompt[INPUT_LIMIT + 3u];
 
-    gfx_fill((s16)(WINDOW_LEFT + 2), text_top, (s16)(TERM_COLUMNS * 8 + 4),
-             (s16)(TERM_VISIBLE_ROWS * 9 + 4), COLOR_DEEP);
+    gui_window_frame_dark("Terminal", COLOR_DEEP);
+
+    gfx_round_fill(TERM_CARD_X, TERM_CARD_Y, TERM_CARD_WIDTH,
+                   TERM_CARD_HEIGHT, 14, COLOR_WIN_BG);
 
     /* Follow new output unless the user paged up into the history. */
     if ((u16)(history_top + TERM_VISIBLE_ROWS) < history_count) {
@@ -377,39 +406,28 @@ static void terminal_draw(void) {
         if (wanted >= history_count) {
             break;
         }
-        gfx_text((s16)(WINDOW_LEFT + 4), (s16)(text_top + 2 + (s16)(row * 9)),
-                 history[wanted % HISTORY_ROWS], COLOR_LIGHT_GREEN);
+        gfx_text_size((s16)(TERM_CARD_X + 16), (s16)(text_top + (s16)row * 13),
+                      history[wanted % HISTORY_ROWS], COLOR_GOOD, 10);
     }
-    gfx_outline((s16)(WINDOW_LEFT + 2), text_top, (s16)(TERM_COLUMNS * 8 + 4),
-                (s16)(TERM_VISIBLE_ROWS * 9 + 4), COLOR_SHADOW);
 
+    /* The prompt line: a dark pill, like the text field of a phone. */
+    gfx_round_fill(TERM_CARD_X, 190, TERM_CARD_WIDTH, 30, 9, COLOR_DEEP);
     prompt[0] = '\0';
-    text_append(prompt, "> ", (u16)sizeof(prompt));
+    text_append(prompt, "dim@phone:~$ ", (u16)sizeof(prompt));
     text_append(prompt, input_line, (u16)sizeof(prompt));
     text_append(prompt, "_", (u16)sizeof(prompt));
-    gfx_fill((s16)(WINDOW_LEFT + 2), (s16)(text_top + TERM_VISIBLE_ROWS * 9 + 6),
-             (s16)(TERM_COLUMNS * 8 + 4), 12, COLOR_TEXT_FIELD);
-    gfx_outline((s16)(WINDOW_LEFT + 2), (s16)(text_top + TERM_VISIBLE_ROWS * 9 + 6),
-                (s16)(TERM_COLUMNS * 8 + 4), 12, COLOR_SHADOW);
-    gfx_text((s16)(WINDOW_LEFT + 4), (s16)(text_top + TERM_VISIBLE_ROWS * 9 + 8),
-             prompt, COLOR_BLACK);
+    gfx_text_size((s16)(TERM_CARD_X + 16), 198, prompt, COLOR_GOOD, 12);
 
     for (row = 0u; row < KEY_ROWS; ++row) {
         for (column = 0u; column < KEY_COLUMNS; ++column) {
-            const s16 x = (s16)(KEY_LEFT + (s16)(column * KEY_WIDTH));
-            const s16 y = (s16)(KEY_TOP + (s16)(row * KEY_STEP));
+            const s16 x = (s16)(KEY_LEFT + (s16)(column * KEY_X_STEP));
+            const s16 y = (s16)(KEY_TOP + (s16)(row * KEY_Y_STEP));
             const u16 id = (u16)(ID_KEY_FIRST + (row * KEY_COLUMNS + column));
             const u8 selected =
                 (u8)(key_special[row][column] == SPECIAL_SHIFT && shift_on != 0u);
 
-            if (selected != 0u) {
-                gui_button_colored(x, y, (s16)(KEY_WIDTH - 2), (s16)KEY_HEIGHT,
-                                   key_labels[row][column], id,
-                                   COLOR_SELECTION, COLOR_WHITE);
-            } else {
-                gui_button(x, y, (s16)(KEY_WIDTH - 2), (s16)KEY_HEIGHT,
-                           key_labels[row][column], id);
-            }
+            draw_key(x, y, key_labels[row][column], id,
+                     key_special[row][column], selected);
         }
     }
 }
@@ -466,10 +484,10 @@ static void terminal_event(const Event *event) {
 }
 
 const Application application_terminal = {
-    "Term",
+    "Terminal",
     "Terminal",
     icon,
-    COLOR_LIGHT_GRAY,
+    COLOR_DEEP,
     terminal_open,
     terminal_draw,
     terminal_event,

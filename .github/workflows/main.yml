@@ -32,6 +32,7 @@ jobs:
             mtools \
             nasm \
             qemu-system-x86 \
+            python3-venv \
             xorriso \
             zip
 
@@ -65,7 +66,35 @@ jobs:
             -no-reboot -no-shutdown -debugcon file:qemu-debug.log || status=$?
           test "$status" -eq 124
           grep -F "DIMOS:PROTECTED" qemu-debug.log
-          grep -F "DIMOS:READY:VBE:1920x1080x32" qemu-debug.log
+          grep -F "DIMOS:READY:VBE" qemu-debug.log
+
+      # The sandbox runs the real kernel against a fake PC, so the phone
+      # shell can be exercised (and screenshotted) on a build machine.
+      - name: Phone shell smoke test
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet unicorn pillow
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --build
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --frames 90
+          test -s tools/sandbox/out/kernel.bin
+
+      - name: Assemble the browser package
+        run: |
+          make clean
+          make emulator
+          mkdir -p web/dist
+          cp web/index.html web/dist/
+          cp disk_img/dimos.img web/dist/dimos.img
+          cp disk_img/dimos.iso web/dist/dimos.iso
+
+      - name: Upload browser package
+        uses: actions/upload-artifact@v6
+        with:
+          name: DimOS-web
+          path: web/dist
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 14
 
       - name: Create DimOS zip package
         run: |

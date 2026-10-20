@@ -83,7 +83,9 @@ jobs:
           make clean
           make emulator
           mkdir -p web/dist
-          cp web/index.html web/dist/
+          cp web/index.html web/styles.css web/manifest.webmanifest \
+             web/sw.js web/pc.html web/dist/
+          cp -r web/js web/icons web/dist/
           cp disk_img/dimos.img web/dist/dimos.img
           cp disk_img/dimos.iso web/dist/dimos.iso
 

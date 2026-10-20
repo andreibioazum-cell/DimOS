@@ -1,0 +1,50 @@
+{
+  "id": "./",
+  "name": "DimOS 14",
+  "short_name": "DimOS",
+  "description": "A pocket operating system with an iOS 14 style shell. Installs on Android and runs full screen, offline, in any modern phone browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["utilities", "entertainment", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Control Centre",
+      "short_name": "Controls",
+      "url": "./#control-centre",
+      "description": "Open Control Centre"
+    },
+    {
+      "name": "Weather",
+      "short_name": "Weather",
+      "url": "./#weather",
+      "description": "Open the Weather app"
+    }
+  ]
+}

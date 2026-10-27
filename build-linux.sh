@@ -82,16 +82,21 @@ on_error() {
 }
 trap on_error ERR
 
-for argument in "$@"; do
+arguments=("$@")
+argument_count=${#arguments[@]}
+argument_index=0
+while (( argument_index < argument_count )); do
+    argument="${arguments[argument_index]}"
     case "$argument" in
         --quiet|-quiet) QUIET=1 ;;
         --no-boot-recompile|-no-boot-recomp) NO_BOOT_RECOMPILE=1 ;;
         --no-kernel-recompile|-no-kernel-recomp) NO_KERNEL_RECOMPILE=1 ;;
         --no-iso) BUILD_ISO=0 ;;
         -j|--jobs)
-            JOBS="${2:-}"
-            [[ -n "$JOBS" ]] || fail "-j wants a number"
-            shift
+            # The value is the next argument, wherever it sits in the line.
+            argument_index=$((argument_index + 1))
+            JOBS="${arguments[argument_index]:-}"
+            [[ -n "$JOBS" ]] || fail "-j/--jobs wants a number"
             ;;
         -j*) JOBS="${argument#-j}" ;;
         -h|--help)
@@ -103,6 +108,7 @@ for argument in "$@"; do
             fail "Unknown option: $argument"
             ;;
     esac
+    argument_index=$((argument_index + 1))
 done
 
 require_command() {

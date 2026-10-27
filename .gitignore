@@ -26,6 +26,9 @@ clang-tidy-fixes.patch
 
 disk_img/
 
+# Volumes the hosted runtime creates next to the binary.
+*.hdd
+
 # Other
 lpt/
 __pycache__/

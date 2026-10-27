@@ -90,11 +90,35 @@ jobs:
           /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
           test -s tools/sandbox/out/26-reboot-load.png
 
+      # The hosted runtime is the same kernel compiled as a normal program:
+      # it gives PCs, tablets and phones the phone shell in a browser, and
+      # runs Lua applications headless. Both are checked on the real code.
+      - name: Build the hosted runtime
+        run: ./build-anywhere.sh
+
+      - name: Hosted shell self-test
+        run: |
+          ./bin/dimos-anywhere --disk bin/ci.hdd --shots bin/anywhere-shots \
+            self-test
+          test -s bin/anywhere-shots/01-lock-screen.png
+          test -s bin/anywhere-shots/06-settings.png
+          file bin/anywhere-shots/01-lock-screen.png
+
+      - name: Lua applications without a GUI
+        run: |
+          ./bin/dimos-anywhere --disk bin/ci.hdd run HELLO.LUA
+          ./bin/dimos-anywhere --disk bin/ci.hdd run SYSINFO.LUA
+          ./bin/dimos-anywhere --disk bin/ci.hdd lua -e \
+            'assert(#dim.file.list() > 0); print("lua sees the volume")'
+          ./bin/dimos-anywhere --disk bin/ci.hdd apps
+
       - name: Upload sandbox screenshots
         uses: actions/upload-artifact@v6
         with:
           name: DimOS-screenshots
-          path: tools/sandbox/out/*.png
+          path: |
+            tools/sandbox/out/*.png
+            bin/anywhere-shots/*.png
           retention-days: 14
 
       - name: Create DimOS zip package

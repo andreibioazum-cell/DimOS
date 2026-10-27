@@ -7,8 +7,10 @@ Control Centre, «домашняя полоска» вместо кнопок и
 открываются пальцем. Ядро входит в плоский protected mode, работает с **VBE
 linear framebuffer** и **само пишет на диск**.
 
-Это единственная сборка DimOS: настоящая система, которая грузится на PC,
-в QEMU/VirtualBox и на железе с BIOS.
+Это настоящая система, которая грузится на PC, в QEMU/VirtualBox и на железе
+с BIOS. Кроме неё есть **DimOS Anywhere** — то же ядро, собранное как
+обычная программа для Linux, Windows и Android, с Lua 5.4 внутри
+(см. раздел ниже и `docs/ANYWHERE.md`).
 
 Логический экран телефона — **844×390** (те же пропорции, что у iPhone 12/13/14
 в альбомной ориентации: 390×844 в портрете). Он рисуется в собственный
@@ -66,6 +68,59 @@ FORMAT YES         записать свежий FAT12-том
 Палитра — 40 именованных слотов (поверхность, тень, выделение, акцент,
 предупреждение) плюс куб 6×6×6 оттенков RGB для сглаженных краёв и обоев.
 
+## DimOS Anywhere: та же ОС на ПК, планшете и телефоне, и Lua без GUI
+
+Кроме сборки для BIOS есть вторая: **тот же kernel** компилируется как обычная
+программа и работает на **Linux, Windows и Android**. Оболочка, все девять
+приложений, драйвер FAT12 и TrueType-растеризатор — те же файлы
+`src/kernel/*.c`; меняется только «железо» под ними (`src/host/platform.c`
+изображает 8042, IDE, PIT, CMOS и VBE-фреймбуфер поверх файла и часов хоста).
+
+```bash
+./build-anywhere.sh          # -> bin/dimos-anywhere (Linux / Windows / Android)
+bin/dimos-anywhere           # телефон в браузере: http://localhost:8080/
+bin/dimos-anywhere self-test # прогнать настоящую оболочку и снять скриншоты
+```
+
+Один бинарник даёт телефон на ПК, планшете и смартфоне: страница показывает
+экран DimOS, тап — палец, долгое нажатие — правый клик, колесо — прокрутка.
+На телефоне в той же Wi-Fi достаточно открыть `http://<ip-пк>:8080/`.
+`dimos.hdd`, с которым работает runtime, — настоящий FAT12-том: его можно
+смонтировать в Linux или загрузить в QEMU.
+
+**macOS не поддерживается намеренно** — цель Android и ПК, `build-anywhere.sh`
+честно отказывается собирать на Darwin.
+
+### Lua 5.4 с приложениями без GUI
+
+Внутри тот же Lua 5.4.7 (`third_party/lua`), но без `io`, `os`, `debug`:
+приложение видит систему DimOS, а не рабочий стол хоста. Вместо них — модуль
+`dim`:
+
+```lua
+local clock = dim.clock()
+dim.print("DimOS " .. dim.version .. " on " .. dim.platform)
+dim.file.write("HELLO.TXT", string.format("hi at %02d:%02d\n",
+    clock.hour, clock.minute))
+for _, file in ipairs(dim.file.list()) do
+    dim.print(file.name, file.size)
+end
+```
+
+```
+bin/dimos-anywhere run HELLO.LUA     # приложение на Lua, без GUI
+bin/dimos-anywhere apps              # какие .LUA лежат на томе
+bin/dimos-anywhere lua -e 'print(dim.platform, #dim.file.list())'
+```
+
+Есть `dim.print/write/log/sleep/millis/time/clock/info/theme/brightness/volume/
+exit`, `dim.file.list/read/write/remove/rename` (это тот же FAT12-том, что
+видит Files), `dim.require`/`dofile` читают `.LUA` с тома. Те же приложения
+запускаются из браузера в блоке «Lua console».
+
+Полное описание, кросс-сборка под Android, API и устройство:
+**[docs/ANYWHERE.md](docs/ANYWHERE.md)**.
+
 ## Приложения
 
 | Иконка | Подпись | Что делает |
@@ -118,6 +173,7 @@ CPU, а не ACPI suspend. Power → Restart в Settings перезагружа�
 make iso             # тот же PC-профиль через Make
 make emulator        # профиль с ограничением физического VBE до 1024x768
 make verify          # проверка образов: tools/image_check.c (чистый C)
+make anywhere        # DimOS Anywhere: ПК/Windows/Android + Lua (см. выше)
 make font            # предпросмотр шрифта кодом самого ядра
 ```
 
@@ -208,6 +264,11 @@ DimOS не грузится на телефонах: у них нет BIOS, VBE 
 - `tools/image_check.c` — проверка образов (размеры, `KERNEL.BIN` в каталоге,
   El Torito) на чистом C11.
 - `tools/make_disk.py` — сборка того же FAT12-тома без mtools.
+- `src/host/` — DimOS Anywhere: платформа-двойник PC (IDE-диск в файле,
+  PS/2-очереди, PIT, CMOS, фреймбуфер), веб-интерфейс с телефоном в
+  браузере, PNG-скриншоты и мост в Lua 5.4 с модулем `dim`.
+- `third_party/lua/` — Lua 5.4.7 (ядро, `lauxlib`, `base/table/string/math/
+  coroutine/utf8`), собранная в тот же бинарник.
 - `tools/sandbox/` — прогон ядра без настоящего железа: `run_kernel.py`
   собирает ядро, поднимает Unicorn, подставляет модели устройств
   (`hardware_sim.c`, включая IDE-контроллер с диском в памяти) и проходит
@@ -232,6 +293,11 @@ DimOS не грузится на телефонах: у них нет BIOS, VBE 
   панели 1.5K и сохраняет скриншот: холст масштабируется в 2640×1220 и
   центрируется, по 36 точек letterbox с каждой стороны, без растяжения.
   Тот же снимок делает дымовой тест — в CI попадает именно 1.5K-экран.
+- `./build-anywhere.sh` собирает тот же kernel как программу для хоста,
+  `bin/dimos-anywhere self-test` проводит настоящую оболочку по разблокировке,
+  Files, Terminal (`SAVE` пишет файл через IDE-драйвер), Settings и
+  Lua-скрипту, который видит девять приложений и пишет файл на тот же том;
+  скриншоты кадров остаются в `bin/anywhere-shots/`.
 - GitHub Actions собирает BIOS/FAT12/HDD/ISO-образы NASM, проверяет геометрию,
   FAT-цепочку `KERNEL.BIN`, лимит загрузчика и El Torito-каталог, грузит
   образ в QEMU с `-debugcon`, требует метки `DIMOS:PROTECTED` и

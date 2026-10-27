@@ -91,7 +91,15 @@ static void about_draw(void) {
                 break;
             case 1u:
                 label = "Chip";
+#ifdef DIMOS_HOST
+                /* The hosted build of the very same kernel: say what it is
+                 * actually running on instead of claiming to be a PC. */
+                text_copy(value, "hosted, ", (u16)sizeof(value));
+                text_append(value, host_platform_name(), (u16)sizeof(value));
+                shown = value;
+#else
                 shown = "i686 protected mode";
+#endif
                 break;
             case 2u:
                 label = "Display";
@@ -180,8 +188,14 @@ static void about_draw(void) {
     gui_button_colored((s16)(SIDE_X + 174), 298, 162, 42, "Restart",
                        ID_RESTART, COLOR_ALERT, COLOR_FACE);
 
+#ifdef DIMOS_HOST
+    gfx_text_size(ROWS_X, 348,
+                  "DimOS 14 - an iOS 14 inspired shell, hosted on this machine",
+                  COLOR_DISABLED, 9);
+#else
     gfx_text_size(ROWS_X, 348, "DimOS 14 - an iOS 14 inspired shell for i686",
                   COLOR_DISABLED, 9);
+#endif
 }
 
 static void about_event(const Event *event) {

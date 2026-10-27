@@ -32,6 +32,50 @@ typedef signed int s32;
 typedef signed long long s64;
 
 /* ------------------------------------------------------------------ */
+/* Two builds of the same kernel                                       */
+/* ------------------------------------------------------------------ */
+
+/* The canonical DimOS build boots the flat kernel at 0x20000 in a 32-bit
+ * protected-mode machine, so every address the code keeps in a u32 is a
+ * real physical address. src/host builds the very same sources as a normal
+ * program on Linux, Windows or Android, where pointers are wider: the low
+ * addresses are then ordinary host mappings and this macro adds the extra
+ * step through an unsigned long instead of truncating the value. */
+/* The other direction: an address as a number, for pointer alignment. */
+#ifdef DIMOS_HOST
+#define dimos_address(pointer) ((unsigned long)(pointer))
+#else
+#define dimos_address(pointer) ((u32)(pointer))
+#endif
+
+#ifdef DIMOS_HOST
+#define dimos_physical(type, address) ((type)(unsigned long)(address))
+/* The hosted build lets the host decide where the framebuffer lives, so it
+ * works on 64-bit x86 and on ARM64 phones alike. */
+u8 *host_framebuffer_pointer(void);
+#define dimos_framebuffer() ((volatile u8 *)host_framebuffer_pointer())
+#else
+#define dimos_physical(type, address) ((type)(u32)(address))
+#define dimos_framebuffer() dimos_physical(volatile u8 *, video_framebuffer_address)
+#endif
+
+/* Hooks the hosted build (src/host) plugs into the shell. On the metal they
+ * do not exist at all; host_present_frame() publishes a finished frame to
+ * the browser clients and host_wait_idle() serves them while the phone is
+ * waiting for the next 60 Hz slot. */
+#ifdef DIMOS_HOST
+void host_present_frame(void);
+void host_wait_idle(void);
+void host_after_mount(void);
+void host_shell_ready(void);
+void host_sleep_milliseconds(u32 milliseconds);
+void host_restart_process(void);
+void host_exit_process(int code);
+/* "linux", "windows", "android" -- shown by Settings in a hosted build. */
+const char *host_platform_name(void);
+#endif
+
+/* ------------------------------------------------------------------ */
 /* Hardware ports                                                      */
 /* ------------------------------------------------------------------ */
 

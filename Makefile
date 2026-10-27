@@ -5,7 +5,7 @@ WARNINGS := -Wall -Wextra -Wpedantic -Werror
 IMAGE_CHECKER := bin/dimos-image-check
 FONT_PREVIEW := bin/dimos-font-preview
 
-.PHONY: all iso emulator tools verify font clean
+.PHONY: all iso emulator tools verify font clean anywhere anywhere-test lua-demo
 
 all: iso
 
@@ -40,6 +40,17 @@ font: $(FONT_PREVIEW)
 
 verify: tools
 	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img disk_img/dimos.hdd disk_img/dimos.iso
+
+# The hosted runtime: the same kernel as an ordinary program for Linux,
+# Windows and Android, with a browser front end and headless Lua.
+anywhere:
+	./build-anywhere.sh
+
+anywhere-test: anywhere
+	bin/dimos-anywhere --disk bin/anywhere.hdd --shots bin/anywhere-shots self-test
+
+lua-demo: anywhere
+	bin/dimos-anywhere --disk bin/anywhere.hdd run HELLO.LUA
 
 clean:
 	rm -rf bin disk_img

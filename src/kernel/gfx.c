@@ -377,7 +377,7 @@ static void font_init(void) {
         return;
     }
     /* Otherwise: the 8x8 font of the video BIOS. */
-    font_glyphs = (const u8 *)(u32)bios_font_address;
+    font_glyphs = dimos_physical(const u8 *, bios_font_address);
     font_levels = (const u8 *)0;
     font_native_levels = (const u8 *)0;
     font_ready = font_looks_valid(font_glyphs);
@@ -524,7 +524,7 @@ static void high_text_restore(const HighText *commands, u16 count) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = dimos_framebuffer();
     for (command = 0u; command < count; ++command) {
         const HighText *item = &commands[command];
         const s32 base_y = (s32)render_top +
@@ -633,7 +633,7 @@ static void high_text_draw(void) {
     if (high_text_active() == 0u || video_framebuffer_address == 0u) {
         return;
     }
-    framebuffer = (volatile u8 *)(u32)video_framebuffer_address;
+    framebuffer = dimos_framebuffer();
     for (command = 0u; command < high_text_current_count; ++command) {
         const HighText *item = &high_text_current[command];
         const s32 base_y = (s32)render_top +
@@ -786,7 +786,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
      * viewport, which is the useful optimization for small VM profiles. */
     color = xrgb8888_color[COLOR_DESKTOP];
     if (video_bits_per_pixel == 32u) {
-        volatile u32 *framebuffer = (volatile u32 *)(u32)video_framebuffer_address;
+        volatile u32 *framebuffer = (volatile u32 *)dimos_framebuffer();
         u16 y;
 
         for (y = 0u; y < video_height; ++y) {
@@ -798,7 +798,7 @@ void gfx_set_output_resolution(u16 width, u16 height) {
             }
         }
     } else if (video_bits_per_pixel == 16u) {
-        volatile u16 *framebuffer = (volatile u16 *)(u32)video_framebuffer_address;
+        volatile u16 *framebuffer = (volatile u16 *)dimos_framebuffer();
         u16 y;
 
         for (y = 0u; y < video_height; ++y) {
@@ -926,8 +926,7 @@ static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y
 #endif
 
 static void present_vbe(void) {
-    volatile u8 *framebuffer =
-        (volatile u8 *)(u32)video_framebuffer_address;
+    volatile u8 *framebuffer = dimos_framebuffer();
     const u32 *source_words = (const u32 *)back_buffer;
     u32 *shadow_words = (u32 *)present_buffer;
     u16 y;
@@ -1004,7 +1003,7 @@ void gfx_show(void) {
 static void fill_bytes(u8 *target, u32 length, u8 color) {
     const u32 packed = (u32)color * 0x01010101u;
 
-    while (length != 0u && ((u32)target & 3u) != 0u) {
+    while (length != 0u && (dimos_address(target) & 3u) != 0u) {
         *target++ = color;
         --length;
     }

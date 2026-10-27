@@ -1196,6 +1196,11 @@ static void wait_for_next_frame(u64 *deadline) {
     while (timer_counter() < *deadline) {
         input_poll();
         timer_update();
+#ifdef DIMOS_HOST
+        /* The hosted build sleeps here and answers its web clients, so an
+         * idle phone does not spin a CPU core at 100 %. */
+        host_wait_idle();
+#endif
     }
 #endif
     *deadline += FRAME_TIMER_COUNTS;
@@ -1269,10 +1274,16 @@ void gui_run(void) {
         if (redraw != 0u) {
             draw_frame();
             gfx_show();
+#ifdef DIMOS_HOST
+            host_present_frame();
+#endif
             redraw = 0u;
         } else if (pointer_only != 0u) {
             gfx_draw_pointer(input_pointer_x(), input_pointer_y());
             gfx_show();
+#ifdef DIMOS_HOST
+            host_present_frame();
+#endif
         }
 
         wait_for_next_frame(&next_frame);

@@ -91,6 +91,8 @@ void host_input_click(s16 x, s16 y, u8 buttons);
 void host_input_wheel(s16 x, s16 y, s8 notches);
 void host_input_key(u16 key);       /* ASCII or a KEY_ constant        */
 void host_input_text(const char *text);
+/* 1 while host_input_text() still has characters to deliver. */
+u8 host_input_text_pending(void);
 
 /* ------------------------------------------------------------------ */
 /* Frame publication (ui.c)                                            */

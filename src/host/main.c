@@ -167,10 +167,16 @@ static void shell_boot(void) {
 /* The scripted tour (self-test and --shot)                            */
 /* ------------------------------------------------------------------ */
 
-#define STEP_PAUSE_MS 260u
+/* How long each scripted step waits. One frame is 17 ms and the shell
+ * drains its event queue every frame, so a step needs a few frames to be
+ * seen; 260 ms was comfortable but made the self-test feel slow. 90 ms is
+ * still a handful of frames per step. DIMOS_TEST_STEP_MS overrides it. */
+#define STEP_PAUSE_MS 90u
+
+static u32 step_pause_ms = STEP_PAUSE_MS;
 
 static void scene_schedule(void) {
-    scene_deadline = host_microseconds() + (u64)STEP_PAUSE_MS * 1000ull;
+    scene_deadline = host_microseconds() + (u64)step_pause_ms * 1000ull;
 }
 
 static void self_test_finish(void) {
@@ -295,6 +301,13 @@ void host_scene_tick(void) {
         return;
     }
     if (host_microseconds() < scene_deadline) {
+        return;
+    }
+    /* Never check a result while the runtime is still typing: the shell
+     * eats one character per frame, so a step ends when the text is out,
+     * not after a guessed delay. */
+    if (host_input_text_pending() != 0u) {
+        scene_schedule();
         return;
     }
     if (scene_mode == SCENE_SELF_TEST) {
@@ -562,6 +575,17 @@ int main(int argc, char **argv) {
 
     if (parse_options(argc, argv, &first_command) == 0) {
         return 0;
+    }
+    {
+        const char *step = getenv("DIMOS_TEST_STEP_MS");
+
+        if (step != (const char *)0) {
+            const long value = strtol(step, (char **)0, 10);
+
+            if (value >= 20 && value <= 5000) {
+                step_pause_ms = (u32)value;
+            }
+        }
     }
     if (scene_mode == SCENE_SELF_TEST) {
         ensure_directory(shot_directory);

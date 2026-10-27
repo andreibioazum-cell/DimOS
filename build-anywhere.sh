@@ -82,8 +82,18 @@ while [[ $# -gt 0 ]]; do
             JOBS="${1#-j}"
             shift
             ;;
+        --quick)
+            # Iterating on the UI does not need a tuned binary: -O0 compiles
+            # the kernel in 0.7 s instead of 2.5 s on the same machine.
+            QUICK=1
+            shift
+            ;;
+        --stats)
+            STATS=1
+            shift
+            ;;
         *)
-            fail "unknown option: $1 (try -j N or --clean)"
+            fail "unknown option: $1 (try -j N, --quick, --stats or --clean)"
             ;;
     esac
 done
@@ -95,6 +105,13 @@ require "$CC"
 require "${LD:-ld}"
 require "${OBJCOPY:-objcopy}"
 
+# ccache turns a rebuild after "rm -rf bin" or a branch switch into a copy
+# from its cache. It is optional: without it nothing changes except speed.
+compiler=("$CC")
+if [[ "${USE_CCACHE:-1}" != "0" ]] && command -v ccache >/dev/null 2>&1; then
+    compiler=(ccache "$CC")
+fi
+
 mkdir -p "$BUILD/objects"
 KIND="$(target_kind)"
 BINARY="$HERE/bin/$NAME"
@@ -103,7 +120,14 @@ BINARY="$HERE/bin/$NAME"
 # The kernel sources are freestanding C11 with no libc at all; on a host they
 # still compile as they are. DIMOS_SANDBOX removes the interrupt and firmware
 # paths, DIMOS_HOST switches the fixed physical addresses to host memory.
-readonly COMMON=(-std=c11 -O2 -DNDEBUG -DDIMOS_HOST -DDIMOS_SANDBOX
+# The kernel's frame loop is real work, so it keeps -O2. Lua runs headless
+# applications, never the compositor, and is by far the most expensive part
+# to optimize (27 files, ~4.7 s at -O2 against ~2.8 s at -O1), so it gets
+# -O1 unless asked otherwise. --quick turns both down for quick iterations.
+[[ "${QUICK:-0}" == "1" ]] && export OPT_KERNEL="-O0" OPT_LUA="-O0"
+readonly OPT_KERNEL="${OPT_KERNEL:--O2}"
+readonly OPT_LUA="${OPT_LUA:--O1}"
+readonly COMMON=(-std=c11 "$OPT_KERNEL" -DNDEBUG -DDIMOS_HOST -DDIMOS_SANDBOX
                  -I"$KERNEL" -I"$HOST" -I"$LUA")
 POSIX_DEFINE=()
 [[ "$(target_kind)" == "linux" ]] && POSIX_DEFINE=(-D_POSIX_C_SOURCE=200809L)
@@ -114,7 +138,7 @@ HOST_POSIX=("${POSIX_DEFINE[@]}")
 # with the ~6 KiB of HTML below.
 HOST_FLAGS=("${COMMON[@]}" "${WARNINGS[@]}" -Wno-overlength-strings
             "${HOST_POSIX[@]}")
-LUA_FLAGS=(-std=c99 -O2 -DNDEBUG -I"$LUA" -w)
+LUA_FLAGS=(-std=c99 "$OPT_LUA" -DNDEBUG -I"$LUA" -w)
 
 # --- the compilation queue -------------------------------------------
 #
@@ -136,15 +160,31 @@ fi
 
 declare -a job_source=() job_kind=() job_extra=() job_object=() objects=()
 
-headers_newer_than() {
-    find "$KERNEL" "$HOST" "$LUA" -maxdepth 1 -name '*.h' -newer "$1" \
-        -print -quit 2>/dev/null
+# The newest header in the three include directories, found once. Comparing
+# every object against it is a plain -nt test instead of a find per file,
+# which matters on phones and on slow file systems.
+newest_header=""
+for header in "$KERNEL"/*.h "$HOST"/*.h "$LUA"/*.h; do
+    [[ -f "$header" ]] || continue
+    if [[ -z "$newest_header" || "$header" -nt "$newest_header" ]]; then
+        newest_header="$header"
+    fi
+done
+
+is_current() {
+    local object="$1" source="$2"
+
+    [[ -f "$object" && "$object" -nt "$source" ]] || return 1
+    if [[ -n "$newest_header" && "$newest_header" -nt "$object" ]]; then
+        return 1
+    fi
+    return 0
 }
 
 # A change of compiler or of flags invalidates every object: an object
 # built with a different -D or C standard cannot be trusted.
 stamp_file="$BUILD/flags.stamp"
-stamp_now="$("$CC" --version 2>/dev/null | head -1) | ${COMMON[*]} | ${WARNINGS[*]} | ${POSIX_DEFINE[*]}"
+stamp_now="$("${compiler[@]}" --version 2>/dev/null | head -1) | ${COMMON[*]} | ${WARNINGS[*]} | ${POSIX_DEFINE[*]} | ${LUA_FLAGS[*]}"
 if [[ ! -f "$stamp_file" || "$(cat "$stamp_file")" != "$stamp_now" ]]; then
     rm -rf "$BUILD/objects"
     mkdir -p "$BUILD/objects"
@@ -174,7 +214,7 @@ compile_one() {
     if [[ -n "$extra" ]]; then
         flags+=("$extra")
     fi
-    "$CC" "${flags[@]}" -c "$source" -o "$object"
+    "${compiler[@]}" "${flags[@]}" -c "$source" -o "$object"
 }
 
 log "compiling the DimOS kernel sources for the host"
@@ -219,7 +259,7 @@ for index in "${!job_source[@]}"; do
     pending_object+=("$object")
 done
 
-started=$(date +%s)
+started_ns=$(date +%s%N)
 if (( ${#pending_source[@]} == 0 )); then
     ok "all ${#objects[@]} files are up to date, nothing to compile"
 else
@@ -240,11 +280,20 @@ else
         running=$((running - 1))
     done
     (( failed == 0 )) || fail "compilation failed"
-    elapsed=$(( $(date +%s) - started ))
+    elapsed=$(( ($(date +%s%N) - started_ns) / 1000000 ))
     if (( ${#pending_source[@]} == 1 )); then
-        ok "compiled 1 file in ${elapsed}s ($reused reused)"
+        ok "compiled 1 file in ${elapsed}ms ($reused reused)"
     else
-        ok "compiled ${#pending_source[@]} files in ${elapsed}s ($reused reused)"
+        ok "compiled ${#pending_source[@]} files in ${elapsed}ms ($reused reused)"
+    fi
+    if [[ "${STATS:-0}" == "1" ]]; then
+        for group in kernel host lua; do
+            count=0
+            for index in "${!pending_kind[@]}"; do
+                [[ "${pending_kind[index]}" == "$group" ]] && count=$((count + 1))
+            done
+            printf '         %-7s %2d files to build\n' "$group" "$count"
+        done
     fi
 fi
 ok "${#kernel_sources[@]} kernel files, including the shell and nine apps"

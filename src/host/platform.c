@@ -640,6 +640,10 @@ void host_input_text(const char *text) {
     pending_next_microseconds = host_microseconds();
 }
 
+u8 host_input_text_pending(void) {
+    return (u8)(pending_position < pending_length);
+}
+
 static void pending_text_feed(void) {
     if (pending_position >= pending_length) {
         return;

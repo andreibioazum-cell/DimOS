@@ -174,7 +174,7 @@ make iso             # тот же PC-профиль через Make
 make emulator        # профиль с ограничением физического VBE до 1024x768
 make verify          # проверка образов: tools/image_check.c (чистый C)
 make anywhere        # DimOS Anywhere: ПК/Windows/Android + Lua (см. выше)
-                     # сборка инкрементальная: ./build-anywhere.sh -j N
+                     # инкрементально: ./build-anywhere.sh [-j N | --quick]
 make font            # предпросмотр шрифта кодом самого ядра
 ```
 

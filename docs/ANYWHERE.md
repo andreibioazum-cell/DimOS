@@ -221,7 +221,7 @@ bin/dimos-anywhere --disk bin/ci.hdd --display 2712x1220 \
 | `src/host/lua_engine.c` | Lua 5.4.7 и модуль `dim` |
 | `src/host/main.c` | командная строка, `run`/`lua`/`info`/`apps`/`self-test`, сценарии скриншотов |
 | `src/host/dimos_host.h` | единственный заголовок, который знает про хост |
-| `build-anywhere.sh` | сборка (и отказ на macOS) |
+| `build-anywhere.sh` | сборка (и отказ на macOS); инкрементальная, `-j N`, `--quick` |
 
 В ядре появилось ровно несколько `#ifdef DIMOS_HOST`:
 

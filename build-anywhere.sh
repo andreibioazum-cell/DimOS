@@ -157,6 +157,10 @@ if [[ "$jobs" == "0" ]]; then
     jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 fi
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || fail "jobs must be a positive number"
+# `wait -n` needs bash 4.3; older shells fall back to one job at a time.
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+    jobs=1
+fi
 
 declare -a job_source=() job_kind=() job_extra=() job_object=() objects=()
 
@@ -266,19 +270,27 @@ else
     log "compiling ${#pending_source[@]} of ${#objects[@]} files with $jobs job(s)"
     running=0
     failed=0
-    for index in "${!pending_source[@]}"; do
-        ( compile_one "${pending_source[index]}" "${pending_kind[index]}" \
-                      "${pending_extra[index]}" "${pending_object[index]}" ) &
-        running=$((running + 1))
-        if (( running >= jobs )); then
+    if (( jobs == 1 )); then
+        for index in "${!pending_source[@]}"; do
+            compile_one "${pending_source[index]}" "${pending_kind[index]}" \
+                        "${pending_extra[index]}" "${pending_object[index]}" ||
+                failed=1
+        done
+    else
+        for index in "${!pending_source[@]}"; do
+            ( compile_one "${pending_source[index]}" "${pending_kind[index]}" \
+                          "${pending_extra[index]}" "${pending_object[index]}" ) &
+            running=$((running + 1))
+            if (( running >= jobs )); then
+                wait -n || failed=1
+                running=$((running - 1))
+            fi
+        done
+        while (( running > 0 )); do
             wait -n || failed=1
             running=$((running - 1))
-        fi
-    done
-    while (( running > 0 )); do
-        wait -n || failed=1
-        running=$((running - 1))
-    done
+        done
+    fi
     (( failed == 0 )) || fail "compilation failed"
     elapsed=$(( ($(date +%s%N) - started_ns) / 1000000 ))
     if (( ${#pending_source[@]} == 1 )); then

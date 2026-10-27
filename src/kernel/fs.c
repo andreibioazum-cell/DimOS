@@ -31,15 +31,24 @@
 #define RAM_DISK_SECTOR_BYTES 512u
 #define RAM_DISK_SECTORS 8192u /* 8192 * 512 = 4 MiB */
 
+/* The scratch disk. On the metal it is the four megabytes that begin at
+ * 0x500000; the hosted build hands out the same buffer as ordinary host
+ * memory, because a 64-bit process cannot simply use that address. */
+#ifdef DIMOS_HOST
+extern u8 *host_ram_disk;
+#define RAM_DISK_BASE host_ram_disk
+#else
+#define RAM_DISK_BASE dimos_physical(u8 *, RAM_DISK_ADDRESS)
+#endif
+
 /* A raw pointer to the scratch disk. Paint keeps its picture there, so a
  * 136 KiB bitmap does not have to sit in the kernel's 1 MiB BSS window. */
 u8 *ram_disk_buffer(void) {
-    return (u8 *)(u32)RAM_DISK_ADDRESS;
+    return RAM_DISK_BASE;
 }
 
 void ram_disk_init(void) {
-    memory_zero((void *)(u32)RAM_DISK_ADDRESS,
-                RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);
+    memory_zero(RAM_DISK_BASE, RAM_DISK_SECTORS * RAM_DISK_SECTOR_BYTES);
 }
 
 u32 ram_disk_sectors(void) {
@@ -52,8 +61,7 @@ u8 ram_disk_read(u32 sector, void *buffer, u32 sector_count) {
         return 0u;
     }
     memory_copy(buffer,
-                (const void *)(u32)(RAM_DISK_ADDRESS +
-                                    sector * RAM_DISK_SECTOR_BYTES),
+                RAM_DISK_BASE + (u32)sector * RAM_DISK_SECTOR_BYTES,
                 sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
 }
@@ -63,8 +71,7 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
         sector_count > (RAM_DISK_SECTORS - sector)) {
         return 0u;
     }
-    memory_copy((void *)(u32)(RAM_DISK_ADDRESS +
-                               sector * RAM_DISK_SECTOR_BYTES),
+    memory_copy(RAM_DISK_BASE + (u32)sector * RAM_DISK_SECTOR_BYTES,
                 buffer, sector_count * RAM_DISK_SECTOR_BYTES);
     return 1u;
 }
@@ -73,10 +80,25 @@ u8 ram_disk_write(u32 sector, const void *buffer, u32 sector_count) {
 /* The FAT12 boot volume                                               */
 /* ------------------------------------------------------------------ */
 
+#ifdef DIMOS_HOST
+/* The hosted build cannot claim the low megabyte below 0x10000 the way the
+ * bootloader does, so platform.c copies the same four windows out of the
+ * volume image into ordinary memory before the kernel starts. Everything
+ * above this point reads them exactly as the metal build does. */
+extern const u8 *host_boot_window;
+extern const u8 *host_fat_window;
+extern const u8 *host_root_window;
+extern const u8 *host_data_window;
+#define BOOT_SECTOR_WINDOW host_boot_window
+#define FAT_WINDOW host_fat_window
+#define ROOT_WINDOW host_root_window
+#define DATA_WINDOW host_data_window
+#else
 #define BOOT_SECTOR_WINDOW ((const u8 *)0x00007C00u)
 #define FAT_WINDOW ((const u8 *)0x00007E00u)
 #define ROOT_WINDOW ((const u8 *)0x00010000u)
 #define DATA_WINDOW ((const u8 *)0x00030000u)
+#endif
 
 /* Offsets inside a 32 byte directory entry. */
 #define ENTRY_NAME 0u

@@ -8,15 +8,15 @@ set -Eeuo pipefail
 IMAGE="disk_img/dimos.hdd"
 FALLBACK_IMAGE="disk_img/dimos.img"
 
-# DimOS targets a 1.5K phone panel: 2712 x 1220, which renders the 844 x 390
-# canvas at 3.2x. QEMU's standard VGA adapter reports whatever resolution it
+# DimOS targets a 1.5K phone panel in portrait: 1220 x 2712, which renders the
+# 390 x 844 canvas at 3.1x. QEMU's standard VGA adapter reports whatever resolution it
 # was created with as its preferred VBE mode, so ask for exactly that panel.
 # Override with DIMOS_DISPLAY=1920x1080 for a smaller window.
-DISPLAY_RESOLUTION="${DIMOS_DISPLAY:-2712x1220}"
+DISPLAY_RESOLUTION="${DIMOS_DISPLAY:-1220x2712}"
 PANEL_WIDTH="${DISPLAY_RESOLUTION%x*}"
 PANEL_HEIGHT="${DISPLAY_RESOLUTION#*x}"
 
-# 2712 x 1220 x 4 bytes is 13.2 MiB, so the adapter needs a 32 MiB VRAM
+# 1220 x 2712 x 4 bytes is 12.6 MiB, so the adapter needs a 32 MiB VRAM
 # window; the QEMU default of 16 MiB cannot hold it.
 PANEL_VRAM_MB=$(( (PANEL_WIDTH * PANEL_HEIGHT * 4 + 1024 * 1024 - 1) / 1024 / 1024 ))
 if (( PANEL_VRAM_MB < 16 )); then

@@ -41,9 +41,16 @@ void memory_zero(void *destination, u32 length) {
  * the memory size word at 0x413. The address is a parameter so the compiler
  * cannot fold the access away. */
 u16 bios_read_word(u32 address) {
-    const volatile u16 *place = (const volatile u16 *)(u32)address;
+#ifdef DIMOS_HOST
+    /* A hosted build has no BIOS and no low-memory data area. Report the
+     * classic 640 KiB of conventional memory that Settings shows. */
+    (void)address;
+    return 640u;
+#else
+    const volatile u16 *place = dimos_physical(const volatile u16 *, address);
 
     return *place;
+#endif
 }
 
 u8 memory_equal(const void *a, const void *b, u32 length) {
@@ -188,7 +195,13 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 #define TIMER_INPUT_FREQUENCY 1193182u
 #define TIMER_TICK_COUNTS 11932u
 #define TIMER_LATCH_CHANNEL_0 0x00u
-#ifndef DIMOS_SANDBOX
+#ifdef DIMOS_HOST
+/* The hosted build has no PIT and no interrupts: the clock is the host's
+ * monotonic timer, converted to the same input counts a PIT would give. */
+#define TIMER_DIVISOR 19886u
+u64 host_timer_counts(void);
+static u64 timer_last_counts;
+#elif !defined(DIMOS_SANDBOX)
 /* One IRQ per display interval. HLT sleeps between frames instead of
  * spinning on the PIT, while maintaining the compositor's 60 Hz cadence. */
 #define TIMER_DIVISOR 19886u
@@ -207,7 +220,7 @@ static u64 timer_leftover_counts;
 static u32 elapsed_milliseconds;
 static u16 ticks_waiting;
 
-#ifdef DIMOS_SANDBOX
+#if defined(DIMOS_SANDBOX) && !defined(DIMOS_HOST)
 static u16 timer_read_counter(void) {
     u8 low;
     u8 high;
@@ -220,7 +233,9 @@ static u16 timer_read_counter(void) {
 #endif
 
 void timer_init(void) {
-#ifdef DIMOS_SANDBOX
+#ifdef DIMOS_HOST
+    timer_last_counts = host_timer_counts();
+#elif defined(DIMOS_SANDBOX)
     /* Channel 0, rate generator, both bytes, binary counting. */
     port_write_byte(PORT_PIT_COMMAND, 0x34u);
     port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR & 0xFFu));
@@ -243,7 +258,12 @@ void timer_init(void) {
 }
 
 void timer_update(void) {
-#ifdef DIMOS_SANDBOX
+#ifdef DIMOS_HOST
+    const u64 current = host_timer_counts();
+
+    timer_leftover_counts += current - timer_last_counts;
+    timer_last_counts = current;
+#elif defined(DIMOS_SANDBOX)
     const u16 current = timer_read_counter();
     u16 elapsed;
 
@@ -277,7 +297,9 @@ u32 time_milliseconds(void) {
 
 /* Raw PIT input clocks retain sub-millisecond precision for frame pacing. */
 u64 timer_counter(void) {
-#ifdef DIMOS_SANDBOX
+#ifdef DIMOS_HOST
+    return host_timer_counts();
+#elif defined(DIMOS_SANDBOX)
     return elapsed_input_counts;
 #else
     u32 low_before;
@@ -300,6 +322,11 @@ u16 timer_take_ticks(void) {
 }
 
 void time_wait(u32 milliseconds) {
+#ifdef DIMOS_HOST
+    /* Sleep for real instead of spinning a whole CPU core on a phone. */
+    host_sleep_milliseconds(milliseconds);
+    timer_update();
+#else
     const u32 start = elapsed_milliseconds;
 
     while ((elapsed_milliseconds - start) < milliseconds) {
@@ -309,6 +336,7 @@ void time_wait(u32 milliseconds) {
         cpu_halt();
 #endif
     }
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -425,6 +453,11 @@ void system_restart(void) {
     u32 guard;
 
     sound_stop();
+#ifdef DIMOS_HOST
+    /* Restart in a hosted build means "start me again", which the host
+     * reports to whoever launched the runtime. */
+    host_restart_process();
+#endif
 
     /* The keyboard controller can reset the whole machine. Wait until it is
      * ready for a command, then ask for the reset pulse. */
@@ -456,7 +489,10 @@ static void debug_marker(const char *text) {
 
 u8 system_shutdown(void) {
     sound_stop();
-#ifdef DIMOS_SANDBOX
+#ifdef DIMOS_HOST
+    host_exit_process(0);
+    return 1u;
+#elif defined(DIMOS_SANDBOX)
     debug_marker("DIMOS:SHUTDOWN\n");
     return 0u; /* the simulator has no ACPI power controller */
 #else
@@ -471,7 +507,11 @@ u8 system_shutdown(void) {
 }
 
 void kernel_main(void) {
+#ifndef DIMOS_HOST
+    /* The flat binary carries no BSS, so the kernel clears it by hand. The
+     * hosted build is an ordinary program and its loader already did. */
     memory_zero(__bss_start, (u32)(__bss_end - __bss_start));
+#endif
     debug_marker("DIMOS:PROTECTED\n");
 
     timer_init();
@@ -491,6 +531,13 @@ void kernel_main(void) {
         debug_marker("DIMOS:DISK:NONE\n");
     }
 
+#ifdef DIMOS_HOST
+    /* Give the hosted runtime its chance to seed a fresh volume (a README
+     * and the bundled Lua applications) and to refresh the windows fs.c
+     * reads, before the font and the file manager look at them. */
+    host_after_mount();
+#endif
+
     gfx_init();
     settings_apply();
     input_init();
@@ -500,6 +547,11 @@ void kernel_main(void) {
     } else {
         debug_marker("DIMOS:READY:VGA\n");
     }
+#ifdef DIMOS_HOST
+    /* The disk is mounted, the font is rasterized and the first frame can be
+     * drawn: a good moment for the hosted runtime to say hello. */
+    host_shell_ready();
+#endif
 
     gui_run();
 

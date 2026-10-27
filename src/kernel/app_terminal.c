@@ -8,27 +8,36 @@
 
 #include "dimos.h"
 
-#define TERM_COLUMNS 60
-#define TERM_VISIBLE_ROWS 8
-#define HISTORY_ROWS 40
-#define INPUT_LIMIT 58u
+/* The console fills the width of the phone, in the narrow column a pocket
+ * screen can afford: 42 characters is still a comfortable command line. */
+#define TERM_COLUMNS 42
+#define TERM_VISIBLE_ROWS 18
+#define HISTORY_ROWS 60
+#define INPUT_LIMIT 40u
 
-#define KEY_COLUMNS 11
+/* Ten columns of letter keys, then a row of wide control keys: Shift,
+ * space, backspace, Enter and Clear. */
+#define KEY_COLUMNS 10
 #define KEY_ROWS 4
-#define KEY_WIDTH 64
-#define KEY_HEIGHT 30
-#define KEY_X_STEP 70
-#define KEY_Y_STEP 34
-#define KEY_LEFT 37
-#define KEY_TOP 226
+#define KEY_WIDTH (s16)((APP_WIDTH - 9 * 4) / 10)
+#define KEY_HEIGHT 38
+#define KEY_X_STEP (KEY_WIDTH + 4)
+#define KEY_Y_STEP (KEY_HEIGHT + 6)
+#define KEY_LEFT (s16)APP_LEFT
+#define KEY_TOP (s16)(TERM_CARD_Y + TERM_CARD_HEIGHT + 14)
+
+#define CONTROL_COUNT 5u
+#define CONTROL_WIDTH (s16)((APP_WIDTH - 4 * 6) / 5)
+#define CONTROL_Y (s16)(KEY_TOP + KEY_ROWS * KEY_Y_STEP + 6)
 
 #define TERM_CARD_X (s16)APP_LEFT
-#define TERM_CARD_Y 68
-#define TERM_CARD_WIDTH 792
-#define TERM_CARD_HEIGHT 116
+#define TERM_CARD_Y 70
+#define TERM_CARD_WIDTH (s16)APP_WIDTH
+#define TERM_CARD_HEIGHT 400
 
-#define ID_KEY_FIRST 1u                    /* 1 .. 44 */
+#define ID_KEY_FIRST 1u                    /* 1 .. 40 */
 #define ID_KEY_LAST (ID_KEY_FIRST + KEY_COLUMNS * KEY_ROWS - 1u)
+#define ID_CONTROL_FIRST 60u               /* 60 .. 64 */
 
 #define SPECIAL_BACKSPACE 1u
 #define SPECIAL_SPACE 2u
@@ -58,25 +67,26 @@ static const char *const icon[16] = {
 /* What each key prints, row by row. A zero means the key does something
  * instead of printing a character. */
 static const char key_labels[KEY_ROWS][KEY_COLUMNS][4] = {
-    { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "<-" },
-    { "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "." },
-    { "A", "S", "D", "F", "G", "H", "J", "K", "L", ":", "/" },
-    { "SH", "Z", "X", "C", "V", "B", "N", "M", "SP", "ENT", "CLS" }
+    { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" },
+    { "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P" },
+    { "A", "S", "D", "F", "G", "H", "J", "K", "L", ":" },
+    { "Z", "X", "C", "V", "B", "N", "M", ".", "/", "-" }
 };
 
 static const char key_characters[KEY_ROWS][KEY_COLUMNS] = {
-    { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '\0' },
-    { 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '.' },
-    { 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '/' },
-    { '\0', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '\0', '\0', '\0' }
+    { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0' },
+    { 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P' },
+    { 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':' },
+    { 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '.', '/', '-' }
 };
 
-static const u8 key_special[KEY_ROWS][KEY_COLUMNS] = {
-    { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_BACKSPACE },
-    { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u },
-    { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u },
-    { SPECIAL_SHIFT, 0u, 0u, 0u, 0u, 0u, 0u, 0u, SPECIAL_SPACE,
-      SPECIAL_ENTER, SPECIAL_CLEAR }
+/* The wide keys under the letters, in the order they are drawn. */
+static const char *const control_labels[CONTROL_COUNT] = {
+    "SH", "SP", "<-", "ENT", "CLS"
+};
+static const u8 control_special[CONTROL_COUNT] = {
+    SPECIAL_SHIFT, SPECIAL_SPACE, SPECIAL_BACKSPACE, SPECIAL_ENTER,
+    SPECIAL_CLEAR
 };
 
 static char history[HISTORY_ROWS][TERM_COLUMNS + 1u];
@@ -520,34 +530,43 @@ static void terminal_draw(void) {
     }
 
     /* The prompt line: a dark pill, like the text field of a phone. */
-    gfx_round_fill(TERM_CARD_X, 190, TERM_CARD_WIDTH, 30, 9, COLOR_DEEP);
-    prompt[0] = '\0';
-    text_append(prompt, "dim@phone:~$ ", (u16)sizeof(prompt));
-    text_append(prompt, input_line, (u16)sizeof(prompt));
-    text_append(prompt, "_", (u16)sizeof(prompt));
-    gfx_text_size((s16)(TERM_CARD_X + 16), 198, prompt, COLOR_GOOD, 12);
+    {
+        const s16 prompt_y = (s16)(TERM_CARD_Y + TERM_CARD_HEIGHT - 44);
+
+        gfx_round_fill(TERM_CARD_X, prompt_y, TERM_CARD_WIDTH, 34, 10,
+                       COLOR_DEEP);
+        prompt[0] = '\0';
+        text_append(prompt, "dim@phone:~$ ", (u16)sizeof(prompt));
+        text_append(prompt, input_line, (u16)sizeof(prompt));
+        text_append(prompt, "_", (u16)sizeof(prompt));
+        gfx_text_size((s16)(TERM_CARD_X + 12), (s16)(prompt_y + 9), prompt,
+                      COLOR_GOOD, 12);
+    }
 
     for (row = 0u; row < KEY_ROWS; ++row) {
         for (column = 0u; column < KEY_COLUMNS; ++column) {
             const s16 x = (s16)(KEY_LEFT + (s16)(column * KEY_X_STEP));
             const s16 y = (s16)(KEY_TOP + (s16)(row * KEY_Y_STEP));
             const u16 id = (u16)(ID_KEY_FIRST + (row * KEY_COLUMNS + column));
-            const u8 selected =
-                (u8)(key_special[row][column] == SPECIAL_SHIFT && shift_on != 0u);
 
-            draw_key(x, y, key_labels[row][column], id,
-                     key_special[row][column], selected);
+            draw_key(x, y, key_labels[row][column], id, 0u, 0u);
         }
+    }
+
+    for (column = 0u; column < CONTROL_COUNT; ++column) {
+        const s16 x = (s16)(KEY_LEFT + (s16)(column * (CONTROL_WIDTH + 6)));
+        const u8 special = control_special[column];
+
+        draw_key(x, CONTROL_Y, control_labels[column],
+                 (u16)(ID_CONTROL_FIRST + column), special,
+                 (u8)(special == SPECIAL_SHIFT && shift_on != 0u));
     }
 }
 
 static void terminal_event(const Event *event) {
-    if (event->type == EVENT_CLICK && event->key >= ID_KEY_FIRST &&
-        event->key <= ID_KEY_LAST) {
-        const u16 index = (u16)(event->key - ID_KEY_FIRST);
-        const u16 row = (u16)(index / KEY_COLUMNS);
-        const u16 column = (u16)(index % KEY_COLUMNS);
-        const u8 special = key_special[row][column];
+    if (event->type == EVENT_CLICK && event->key >= ID_CONTROL_FIRST &&
+        event->key < (u16)(ID_CONTROL_FIRST + CONTROL_COUNT)) {
+        const u8 special = control_special[event->key - ID_CONTROL_FIRST];
 
         if (special == SPECIAL_BACKSPACE) {
             const u16 length = text_length(input_line);
@@ -564,9 +583,18 @@ static void terminal_event(const Event *event) {
         } else if (special == SPECIAL_CLEAR) {
             history_count = 0u;
             history_top = 0u;
-        } else {
-            press_character(key_characters[row][column]);
         }
+        sound_beep();
+        return;
+    }
+
+    if (event->type == EVENT_CLICK && event->key >= ID_KEY_FIRST &&
+        event->key <= ID_KEY_LAST) {
+        const u16 index = (u16)(event->key - ID_KEY_FIRST);
+        const u16 row = (u16)(index / KEY_COLUMNS);
+        const u16 column = (u16)(index % KEY_COLUMNS);
+
+        press_character(key_characters[row][column]);
         sound_beep();
         return;
     }

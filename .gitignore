@@ -15,6 +15,10 @@ bin/
 # Common build directories
 build*/
 
+# The per-machine download folders tools/release.sh assembles (and the zip
+# the CI uploads); they are outputs, not sources.
+release/
+
 # Visual Studio Code
 .vscode/
 .cache/
@@ -25,6 +29,9 @@ out/
 clang-tidy-fixes.patch
 
 disk_img/
+
+# Volumes the hosted runtime creates next to the binary.
+*.hdd
 
 # Other
 lpt/

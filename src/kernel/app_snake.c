@@ -9,14 +9,20 @@
 
 #include "dimos.h"
 
-#define CELL 8
-#define FIELD_COLUMNS 42
-#define FIELD_ROWS 25
+/* A portrait field: a tall board fills the width of the phone, and the
+ * direction pad lives underneath it where a thumb rests. */
+#define CELL 9
+#define FIELD_COLUMNS 37
+#define FIELD_ROWS 30
 #define FIELD_WIDTH (FIELD_COLUMNS * CELL)
 #define FIELD_HEIGHT (FIELD_ROWS * CELL)
 #define FIELD_X (s16)APP_LEFT
 #define FIELD_Y 74
-#define SIDE_X (s16)(FIELD_X + FIELD_WIDTH + 36)
+#define SIDE_X (s16)APP_LEFT
+#define PAD_Y (s16)(FIELD_Y + FIELD_HEIGHT + 34)
+#define PAD_SIZE 76
+#define PAD_GAP 10
+#define PAD_LEFT (s16)(APP_LEFT + (APP_WIDTH - (3 * PAD_SIZE + 2 * PAD_GAP)) / 2)
 #define SNAKE_LIMIT 300u
 #define STEP_MILLISECONDS 140u
 
@@ -197,11 +203,12 @@ static void snake_update(u16 elapsed) {
 static void dpad_key(s16 x, s16 y, const char *label, u16 id) {
     const u8 pressed = gui_is_pressed(id);
 
-    gfx_round_fill(x, y, 56, 50, 14,
+    gfx_round_fill(x, y, (s16)PAD_SIZE, (s16)PAD_SIZE, 20,
                    (pressed != 0u) ? COLOR_SELECTION : COLOR_FACE);
-    gfx_text_size_centered(x, (s16)(y + 17), 56, label,
-                           (pressed != 0u) ? COLOR_FACE : COLOR_DEEP, 13);
-    gui_hotspot(x, y, 56, 50, id);
+    gfx_text_size_centered(x, (s16)(y + (s16)((PAD_SIZE - 18) / 2)), PAD_SIZE,
+                           label, (pressed != 0u) ? COLOR_FACE : COLOR_DEEP,
+                           18);
+    gui_hotspot(x, y, (s16)PAD_SIZE, (s16)PAD_SIZE, id);
 }
 
 static void snake_draw(void) {
@@ -245,33 +252,46 @@ static void snake_draw(void) {
                        CELL - 2, CELL - 2, (CELL - 2) / 2, color);
     }
 
-    /* Score and length, as big phone-game numbers. */
-    gfx_text_size(SIDE_X, 70, "SCORE", COLOR_DISABLED, 9);
-    buffer[0] = '\0';
-    text_append_number(buffer, score, (u16)sizeof(buffer));
-    gfx_text_size(SIDE_X, 82, buffer, COLOR_DEEP, 34);
+    /* Score and length, as big phone-game numbers, above the pad. */
+    {
+        const s16 numbers_y = (s16)(PAD_Y - 8);
 
-    gfx_text_size((s16)(SIDE_X + 140), 70, "LENGTH", COLOR_DISABLED, 9);
-    buffer[0] = '\0';
-    text_append_number(buffer, length, (u16)sizeof(buffer));
-    gfx_text_size((s16)(SIDE_X + 140), 82, buffer, COLOR_DEEP, 34);
+        gfx_text_size((s16)(SIDE_X + 20), numbers_y, "SCORE", COLOR_DISABLED,
+                      9);
+        buffer[0] = '\0';
+        text_append_number(buffer, score, (u16)sizeof(buffer));
+        gfx_text_size((s16)(SIDE_X + 20), (s16)(numbers_y + 10), buffer,
+                      COLOR_DEEP, 26);
 
-    /* A proper direction pad. */
-    dpad_key((s16)(SIDE_X + 66), 150, "^", ID_UP);
-    dpad_key(SIDE_X, 208, "<", ID_LEFT);
-    dpad_key((s16)(SIDE_X + 66), 208, "v", ID_DOWN);
-    dpad_key((s16)(SIDE_X + 132), 208, ">", ID_RIGHT);
+        gfx_text_size((s16)(SIDE_X + 170), numbers_y, "LENGTH", COLOR_DISABLED,
+                      9);
+        buffer[0] = '\0';
+        text_append_number(buffer, length, (u16)sizeof(buffer));
+        gfx_text_size((s16)(SIDE_X + 170), (s16)(numbers_y + 10), buffer,
+                      COLOR_DEEP, 26);
+    }
 
-    gui_button((s16)(SIDE_X + 66), 288, 122, 44, "New game", ID_NEW_GAME);
+    /* A proper direction pad, under the board. */
+    dpad_key((s16)(PAD_LEFT + PAD_SIZE + PAD_GAP), PAD_Y, "^", ID_UP);
+    dpad_key(PAD_LEFT, (s16)(PAD_Y + PAD_SIZE + PAD_GAP), "<", ID_LEFT);
+    dpad_key((s16)(PAD_LEFT + PAD_SIZE + PAD_GAP),
+             (s16)(PAD_Y + PAD_SIZE + PAD_GAP), "v", ID_DOWN);
+    dpad_key((s16)(PAD_LEFT + 2 * (PAD_SIZE + PAD_GAP)),
+             (s16)(PAD_Y + PAD_SIZE + PAD_GAP), ">", ID_RIGHT);
+
+    gui_button(SIDE_X, (s16)(PAD_Y + 2 * PAD_SIZE + 2 * PAD_GAP + 4),
+               (s16)APP_WIDTH, 46, "New game", ID_NEW_GAME);
 
     gui_hotspot(FIELD_X, FIELD_Y, (s16)FIELD_WIDTH, (s16)FIELD_HEIGHT, ID_FIELD);
 
     if (alive == 0u) {
-        gfx_round_fill((s16)(FIELD_X + 68), (s16)(FIELD_Y + 66), 200, 68, 16,
-                       COLOR_FACE);
-        gfx_text_size_centered((s16)(FIELD_X + 68), (s16)(FIELD_Y + 76), 200,
-                               "GAME OVER", COLOR_ALERT, 18);
-        gfx_text_size_centered((s16)(FIELD_X + 68), (s16)(FIELD_Y + 104), 200,
+        const s16 panel_x = (s16)(FIELD_X + (FIELD_WIDTH - 220) / 2);
+        const s16 panel_y = (s16)(FIELD_Y + (FIELD_HEIGHT - 78) / 2);
+
+        gfx_round_fill(panel_x, panel_y, 220, 78, 16, COLOR_FACE);
+        gfx_text_size_centered(panel_x, (s16)(panel_y + 14), 220, "GAME OVER",
+                               COLOR_ALERT, 18);
+        gfx_text_size_centered(panel_x, (s16)(panel_y + 44), 220,
                                "Tap New game to retry", COLOR_DISABLED, 9);
     } else {
         gui_message_bar("Arrows, the direction pad, or tap the field");

@@ -41,15 +41,18 @@
 #define HOTSPOT_CC_THEME 0x8223u
 #define HOTSPOT_CC_MUSIC 0x8224u
 
-/* Home screen geometry from dimos.h: five columns, two rows, and a dock
+/* Home screen geometry from dimos.h: four columns, three rows, and a dock
  * with four of the applications repeated, exactly like a phone. */
 #define ICON_LABEL_HEIGHT 10u
 
-/* Control Centre panel. */
-#define CC_PANEL_X 26
-#define CC_PANEL_Y (-24)
-#define CC_PANEL_WIDTH ((s16)(SCREEN_WIDTH - 2 * 26))
-#define CC_PANEL_HEIGHT 262
+/* Control Centre panel: a sheet that hangs from the top edge and is wide
+ * enough to read on a phone, with everything stacked vertically. */
+#define CC_PANEL_X 14
+#define CC_PANEL_Y (-18)
+#define CC_PANEL_WIDTH ((s16)(SCREEN_WIDTH - 2 * 14))
+#define CC_PANEL_HEIGHT 520
+#define CC_MARGIN 24
+#define CC_INNER_WIDTH ((s16)(CC_PANEL_WIDTH - 2 * CC_MARGIN))
 
 typedef struct {
     s16 x;
@@ -609,26 +612,30 @@ static void draw_home_screen(void) {
 
     draw_wallpaper();
 
-    for (index = 0u; index < application_count && index < 10u; ++index) {
+    for (index = 0u; index < application_count &&
+                    index < ICON_COLUMNS * ICON_ROWS; ++index) {
         home_icon((s16)(index % ICON_COLUMNS), (s16)(index / ICON_COLUMNS),
                   index);
     }
 
     /* Page dots, as every phone home screen has. */
-    gfx_round_fill((s16)(SCREEN_WIDTH / 2 - 22), 259, 6, 6, 3, COLOR_FACE);
-    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2), 259, 6, 6, 3, COLOR_FACE, 6u);
-    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2 + 22), 259, 6, 6, 3,
+    gfx_round_fill((s16)(SCREEN_WIDTH / 2 - 22), (s16)PAGE_DOTS_Y, 6, 6, 3,
+                   COLOR_FACE);
+    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2), (s16)PAGE_DOTS_Y, 6, 6, 3,
                          COLOR_FACE, 6u);
+    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2 + 22), (s16)PAGE_DOTS_Y, 6, 6,
+                         3, COLOR_FACE, 6u);
 
-    /* The translucent dock. */
-    gfx_round_fill_alpha((s16)((SCREEN_WIDTH - 348) / 2), (s16)DOCK_Y, 348,
+    /* The translucent dock, sized from the icons it holds. */
+    gfx_round_fill_alpha((s16)DOCK_X, (s16)DOCK_Y, (s16)DOCK_WIDTH,
                          (s16)DOCK_HEIGHT, 24, COLOR_FACE, 4u);
     for (index = 0u; index < DOCK_SLOTS; ++index) {
         const u16 app = dock_apps[index];
-        const s16 x = (s16)((SCREEN_WIDTH - 348) / 2 + 26 + index * 80);
+        const s16 x = (s16)(DOCK_X + DOCK_PADDING +
+                            index * (DOCK_ICON_SIZE + DOCK_GAP));
 
-        app_icon(x, (s16)(DOCK_Y + (DOCK_HEIGHT - DOCK_ICON_SIZE) / 2),
-                 application_list[app], (s16)DOCK_ICON_SIZE, 2);
+        app_icon(x, (s16)(DOCK_Y + DOCK_PADDING), application_list[app],
+                 (s16)DOCK_ICON_SIZE, 2);
         gui_hotspot((s16)(x - 6), (s16)(DOCK_Y + 6),
                     (s16)(DOCK_ICON_SIZE + 12), (s16)(DOCK_HEIGHT - 12),
                     (u16)(HOTSPOT_DOCK_BASE + index));
@@ -707,16 +714,18 @@ static void draw_lock_screen(void) {
     }
 
     draw_status_bar(1u);
-    draw_lock_icon((s16)(SCREEN_WIDTH / 2), 38);
+    draw_lock_icon((s16)(SCREEN_WIDTH / 2), 74);
 
+    /* The clock sits where a phone puts it: high on the screen, with the
+     * date right underneath, and the hint down by the home indicator. */
     clock_text(time_line, (u16)sizeof(time_line), 0u);
-    gfx_text_size_centered(0, 86, (s16)SCREEN_WIDTH, time_line, COLOR_FACE, 76);
+    gfx_text_size_centered(0, 120, (s16)SCREEN_WIDTH, time_line, COLOR_FACE, 76);
     draw_date_line(date_line, (u16)sizeof(date_line));
-    gfx_text_size_centered(0, 176, (s16)SCREEN_WIDTH, date_line, COLOR_FACE, 14);
+    gfx_text_size_centered(0, 214, (s16)SCREEN_WIDTH, date_line, COLOR_FACE, 15);
 
-    gfx_text_size_centered(0, 292, (s16)SCREEN_WIDTH, "Tap or swipe up to open",
-                           COLOR_FACE, 11);
-    gfx_text_size_centered(0, 308, (s16)SCREEN_WIDTH,
+    gfx_text_size_centered(0, (s16)(SCREEN_HEIGHT - 96), (s16)SCREEN_WIDTH,
+                           "Tap or swipe up to open", COLOR_FACE, 11);
+    gfx_text_size_centered(0, (s16)(SCREEN_HEIGHT - 76), (s16)SCREEN_WIDTH,
                            "DimOS 14 - a small phone in your PC", COLOR_FACE,
                            9);
     draw_home_indicator(1u);
@@ -777,10 +786,11 @@ static void draw_slider(s16 x, s16 y, s16 width, u8 level, const char *name,
 }
 
 static void draw_control_centre(void) {
-    s16 panel_x = CC_PANEL_X;
-    s16 panel_y = CC_PANEL_Y;
-    s16 panel_width = CC_PANEL_WIDTH;
-    s16 panel_height = CC_PANEL_HEIGHT;
+    const s16 panel_x = CC_PANEL_X;
+    const s16 panel_y = CC_PANEL_Y;
+    const s16 panel_width = CC_PANEL_WIDTH;
+    const s16 panel_height = CC_PANEL_HEIGHT;
+    const s16 left = (s16)(panel_x + CC_MARGIN);
     u8 index;
 
     /* A full-screen hotspot underneath the sheet: a tap anywhere outside
@@ -790,51 +800,53 @@ static void draw_control_centre(void) {
 
     gfx_round_fill_alpha(panel_x, panel_y, panel_width, panel_height, 30,
                          COLOR_FACE, 13u);
-    gfx_text_size((s16)(panel_x + 28), 14, "Control Centre", COLOR_DEEP, 11);
-    gfx_text_size_right((s16)(panel_x + panel_width - 28), 17,
+    gfx_text_size(left, 30, "Control Centre", COLOR_DEEP, 11);
+    gfx_text_size_right((s16)(panel_x + panel_width - CC_MARGIN), 33,
                         "DimOS 14", COLOR_DISABLED, 9);
 
-    /* Connectivity: four round switches in a 2x2 block. */
+    /* Connectivity: four round switches in a 2x2 block, the shape a phone
+     * shows them in. */
     for (index = 0u; index < 4u; ++index) {
-        draw_cc_toggle((s16)(panel_x + 78 + (s16)(index % 2u) * 86),
-                       (s16)(78 + (s16)(index / 2u) * 82), index);
+        draw_cc_toggle((s16)(left + 48 + (s16)(index % 2u) * 96),
+                       (s16)(96 + (s16)(index / 2u) * 86), index);
     }
 
-    /* Brightness and volume. */
-    draw_slider((s16)(panel_x + 266), 52, 250, brightness, "Brightness",
+    /* Brightness and volume, one above the other on a narrow screen. */
+    draw_slider(left, 212, CC_INNER_WIDTH, brightness, "Brightness",
                 HOTSPOT_CC_BRIGHTNESS);
-    draw_slider((s16)(panel_x + 266), 126, 250, volume, "Volume",
+    draw_slider(left, 282, CC_INNER_WIDTH, volume, "Volume",
                 HOTSPOT_CC_VOLUME);
 
-    /* Now playing, lock and appearance. */
-    gfx_text_size((s16)(panel_x + 566), 52, "Now playing", COLOR_DEEP, 9);
-    gfx_text_size((s16)(panel_x + 566), 68, "Chime", COLOR_DEEP, 13);
-    gfx_text_size((s16)(panel_x + 566), 88,
+    /* Now playing. */
+    gfx_text_size(left, 346, "Now playing", COLOR_DEEP, 9);
+    gfx_text_size(left, 362, "Chime", COLOR_DEEP, 13);
+    gfx_text_size(left, 382,
                   (sound_is_playing() != 0u) ? "Touch to stop" : "Touch to play",
                   COLOR_DISABLED, 9);
-    gfx_circle((s16)(panel_x + 576), 118, 16, COLOR_SELECTION, 1u);
+    gfx_circle((s16)(left + 12), 418, 16, COLOR_SELECTION, 1u);
     if (sound_is_playing() != 0u) {
-        gfx_fill((s16)(panel_x + 570), 112, 12, 12, COLOR_FACE);
+        gfx_fill((s16)(left + 6), 412, 12, 12, COLOR_FACE);
     } else {
         u8 step;
 
         for (step = 0u; step < 12u; ++step) {
             const u8 half = (step < 6u) ? step : (u8)(11u - step);
 
-            gfx_vertical_line((s16)(panel_x + 572 + step),
-                              (s16)(112 + 6 - half), (s16)(half * 2 + 1),
+            gfx_vertical_line((s16)(left + 8 + step),
+                              (s16)(412 + 6 - half), (s16)(half * 2 + 1),
                               COLOR_FACE);
         }
     }
-    gui_hotspot((s16)(panel_x + 560), 100, 160, 40, HOTSPOT_CC_MUSIC);
+    gui_hotspot((s16)(left - 12), 396, 180, 44, HOTSPOT_CC_MUSIC);
 
-    gfx_text_size((s16)(panel_x + 566), 146, "Appearance", COLOR_DEEP, 9);
-    gui_button_colored((s16)(panel_x + 566), 162, 150, 26, "Change theme",
-                       HOTSPOT_CC_THEME, COLOR_PANEL, COLOR_DEEP);
-    gui_button_colored((s16)(panel_x + 566), 196, 150, 26, "Lock screen",
+    /* Appearance. */
+    gfx_text_size(left, 452, "Appearance", COLOR_DEEP, 9);
+    gui_button_colored(left, 468, 156, 28, "Change theme", HOTSPOT_CC_THEME,
+                       COLOR_PANEL, COLOR_DEEP);
+    gui_button_colored((s16)(left + 168), 468, 146, 28, "Lock screen",
                        HOTSPOT_CC_LOCK, COLOR_DEEP, COLOR_FACE);
 
-    gfx_text_size((s16)(panel_x + 28), 210,
+    gfx_text_size(left, (s16)(panel_height - 12),
                   "Tap the wallpaper to go back", COLOR_DISABLED, 9);
 }
 
@@ -1196,6 +1208,11 @@ static void wait_for_next_frame(u64 *deadline) {
     while (timer_counter() < *deadline) {
         input_poll();
         timer_update();
+#ifdef DIMOS_HOST
+        /* The hosted build sleeps here and answers its web clients, so an
+         * idle phone does not spin a CPU core at 100 %. */
+        host_wait_idle();
+#endif
     }
 #endif
     *deadline += FRAME_TIMER_COUNTS;
@@ -1269,10 +1286,16 @@ void gui_run(void) {
         if (redraw != 0u) {
             draw_frame();
             gfx_show();
+#ifdef DIMOS_HOST
+            host_present_frame();
+#endif
             redraw = 0u;
         } else if (pointer_only != 0u) {
             gfx_draw_pointer(input_pointer_x(), input_pointer_y());
             gfx_show();
+#ifdef DIMOS_HOST
+            host_present_frame();
+#endif
         }
 
         wait_for_next_frame(&next_frame);

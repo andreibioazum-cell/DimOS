@@ -40,8 +40,7 @@ jobs:
         run: |
           make clean
           make iso
-          mkdir -p release/PC
-          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/PC/
+          tools/release.sh pc
 
       - name: Validate PC profile
         run: make verify
@@ -50,8 +49,7 @@ jobs:
         run: |
           make clean
           make emulator
-          mkdir -p release/Emulator
-          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/Emulator/
+          tools/release.sh emulator
 
       - name: Validate emulator profile
         run: make verify
@@ -90,16 +88,54 @@ jobs:
           /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
           test -s tools/sandbox/out/26-reboot-load.png
 
+      # The hosted runtime is the same kernel compiled as a normal program:
+      # it gives PCs, tablets and phones the phone shell in a browser, and
+      # runs Lua applications headless. Both are checked on the real code.
+      - name: Build the hosted runtime
+        run: ./build-anywhere.sh
+
+      - name: Hosted shell self-test
+        run: |
+          ./bin/dimos-anywhere --disk bin/ci.hdd --shots bin/anywhere-shots \
+            self-test
+          test -s bin/anywhere-shots/01-lock-screen.png
+          test -s bin/anywhere-shots/06-settings.png
+          file bin/anywhere-shots/01-lock-screen.png
+
+      - name: Lua applications without a GUI
+        run: |
+          ./bin/dimos-anywhere --disk bin/ci.hdd run HELLO.LUA
+          ./bin/dimos-anywhere --disk bin/ci.hdd run SYSINFO.LUA
+          ./bin/dimos-anywhere --disk bin/ci.hdd lua -e \
+            'assert(#dim.file.list() > 0); print("lua sees the volume")'
+          ./bin/dimos-anywhere --disk bin/ci.hdd apps
+
+      # The phone folder is the same runtime cross compiled for AArch64 and
+      # linked statically, so an ARM64 Android phone can start it as is.
+      - name: Build the phone runtime (AArch64)
+        run: |
+          python3 -m venv /tmp/zig-venv
+          /tmp/zig-venv/bin/pip install --quiet ziglang
+          export PATH="/tmp/zig-venv/bin:$PATH"
+          python-zig version
+          ./build-anywhere.sh --target aarch64-linux-musl
+          tools/release.sh phone
+          test -s release/Phone/dimos-anywhere
+          test -s release/Phone/dimos.hdd
+          test -s release/Phone/fonts/font.ttf
+
       - name: Upload sandbox screenshots
         uses: actions/upload-artifact@v6
         with:
           name: DimOS-screenshots
-          path: tools/sandbox/out/*.png
+          path: |
+            tools/sandbox/out/*.png
+            bin/anywhere-shots/*.png
           retention-days: 14
 
       - name: Create DimOS zip package
         run: |
-          (cd release && zip -qr "../DimOS-${{ github.sha }}.zip" PC Emulator)
+          (cd release && zip -qr "../DimOS-${{ github.sha }}.zip" PC Emulator Phone)
 
       - name: Upload DimOS package
         uses: actions/upload-artifact@v6

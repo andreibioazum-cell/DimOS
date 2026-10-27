@@ -16,20 +16,30 @@
 #define BURP_AT 12u                /* balls between two mighty burps     */
 #define DOUGH_LIMIT 240u           /* the kitchen is not infinite        */
 #define DROP_COUNT 12u
-#define BALL_TOP_Y 118
-#define BALL_RADIUS 20
-#define BOWL_CENTER_X 256
-#define PANEL_X (s16)(APP_LEFT + 470)
 
+/* A portrait kitchen: the card with the bowl fills the top of the page and
+ * the controls are stacked underneath it, one thumb away. */
+#define CARD_X (s16)APP_LEFT
+#define CARD_Y 74
+#define CARD_WIDTH (s16)APP_WIDTH
+#define CARD_HEIGHT 330
+#define BALL_RADIUS 18
+#define BALL_TOP_Y 150
+#define BOWL_CENTER_X (s16)(SCREEN_WIDTH / 2)
+#define BALL_CENTER_X BOWL_CENTER_X
+#define PANEL_Y (s16)(CARD_Y + CARD_HEIGHT + 16)
+#define PANEL_X (s16)APP_LEFT
+
+/* Rows of four, three and two, centred on the bowl. */
 static const s16 ball_x[BALLS_ON_PLATE] = {
-    196, 236, 276, 316,
-    216, 256, 296,
-    236, 276
+    -60, -20, 20, 60,
+    -40, 0, 40,
+    -20, 20
 };
 static const s16 ball_y[BALLS_ON_PLATE] = {
-    206, 206, 206, 206,
-    168, 168, 168,
-    132, 132
+    236, 236, 236, 236,
+    200, 200, 200,
+    164, 164
 };
 
 static const char *const icon[16] = {
@@ -71,8 +81,8 @@ static u32 chew_until;       /* the nom-nom face shows until this time */
 static u32 shake_until;      /* the burp shakes the bowl until then    */
 static u16 phrase_index;
 static u32 random_state;
-static u8 drops_x[DROP_COUNT];
-static u8 drops_y[DROP_COUNT];
+static s16 drops_x[DROP_COUNT];
+static s16 drops_y[DROP_COUNT];
 static u8 drops_speed[DROP_COUNT];
 
 static u32 next_random(void) {
@@ -101,8 +111,9 @@ static void ketchup_splash(void) {
     for (index = 0u; index < DROP_COUNT; ++index) {
         /* Drops start just above the bowl, so they never cross the caption
          * that sits along the top of the card. */
-        drops_x[index] = (u8)(200u + (next_random() % 110u));
-        drops_y[index] = (u8)(164u + (next_random() % 20u));
+        drops_x[index] = (s16)(BALL_CENTER_X - 55 +
+                               (s16)(next_random() % 110u));
+        drops_y[index] = (s16)(150 + (s16)(next_random() % 16u));
         drops_speed[index] = (u8)(1u + (next_random() % 3u));
     }
 }
@@ -113,9 +124,9 @@ static void cheesy_update(u16 elapsed_ms) {
 
     for (index = 0u; index < DROP_COUNT; ++index) {
         if (drops_speed[index] != 0u) {
-            u16 y = (u16)(drops_y[index] + fall * drops_speed[index]);
+            s16 y = (s16)(drops_y[index] + (s16)(fall * drops_speed[index]));
 
-            if (y > (u16)(BALL_TOP_Y + 8u)) {
+            if (y > (s16)(BALL_TOP_Y + 8)) {
                 drops_speed[index] = 0u; /* a drop that lands in the bowl */
             } else {
                 drops_y[index] = (u8)y;
@@ -154,46 +165,49 @@ static void cheesy_draw(void) {
     gui_window_frame("Cheesy Balls");
 
     /* The counter: a warm rounded card, a bowl, and the pile of balls. */
-    gfx_round_fill((s16)APP_LEFT, 74, 470, 274, 22, COLOR_PANEL);
-    gfx_text_size((s16)(APP_LEFT + 24), 88,
+    gfx_round_fill(CARD_X, CARD_Y, CARD_WIDTH, CARD_HEIGHT, 22, COLOR_PANEL);
+    gfx_text_size((s16)(CARD_X + 20), (s16)(CARD_Y + 14),
                   "Fresh cheese balls with ketchup", COLOR_DEEP, 12);
 
     /* The burp-o-meter: twelve lamps above the bowl. */
     for (index = 0u; index < BURP_AT; ++index) {
-        gfx_circle((s16)(APP_LEFT + 30 + (s16)index * 18), 114, 5,
+        gfx_circle((s16)(CARD_X + 26 + (s16)index * 24),
+                   (s16)(CARD_Y + 44), 6,
                    (index < streak) ? COLOR_ACCENT : COLOR_GRID, 1u);
     }
 
     if (now < shake_until) {
         shake = ((now / 50u) % 2u == 0u) ? 1 : -1;
-        gfx_text_size_right((s16)(APP_LEFT + 446), 110, "BURRRP!",
-                            COLOR_ALERT, 13);
+        gfx_text_size_right((s16)(CARD_X + CARD_WIDTH - 20),
+                            (s16)(CARD_Y + 38), "BURRRP!", COLOR_ALERT, 13);
     }
 
     /* The cast iron bowl. */
-    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), 250, 196, 62, COLOR_DEEP);
-    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), 242, 190, 52,
+    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), (s16)(CARD_Y + 250), 150, 54,
+                     COLOR_DEEP);
+    gfx_ellipse_fill((s16)(BOWL_CENTER_X + shake), (s16)(CARD_Y + 242), 144, 44,
                      gfx_shade(COLOR_DEEP, COLOR_FACE, 3));
 
     if (plate == 0u) {
-        gfx_text_size_centered((s16)(BOWL_CENTER_X - 150), 170, 300,
-                               "the bowl is empty...", COLOR_DISABLED, 14);
-        gfx_text_size_centered((s16)(BOWL_CENTER_X - 150), 198, 300,
-                               "press Cook more", COLOR_DEEP, 12);
+        gfx_text_size_centered((s16)CARD_X, (s16)(CARD_Y + 190),
+                               CARD_WIDTH, "the bowl is empty...",
+                               COLOR_DISABLED, 14);
+        gfx_text_size_centered((s16)CARD_X, (s16)(CARD_Y + 214),
+                               CARD_WIDTH, "press Cook more", COLOR_DEEP, 12);
     } else {
         for (index = 0u; index < plate; ++index) {
             const u16 phase = (u16)(((now / 170u) + (u32)index * 2u) % 6u);
             const s16 bob = (phase < 3u) ? (s16)phase : (s16)(5u - phase);
 
-            draw_ball((s16)(ball_x[index] + shake),
-                      (s16)(ball_y[index] - bob),
+            draw_ball((s16)(BALL_CENTER_X + ball_x[index] + shake),
+                      (s16)(CARD_Y + ball_y[index] - bob),
                       (u8)(index + 1u == plate));
         }
         /* The ketchup drip running down the top ball. */
-        gfx_fill((s16)(ball_x[plate - 1u] + 2 + shake),
-                 (s16)(ball_y[plate - 1u] - 10), 5, 9, COLOR_ALERT);
-        gfx_circle((s16)(ball_x[plate - 1u] + 4 + shake),
-                   (s16)(ball_y[plate - 1u] + 4), 4, COLOR_ALERT, 1u);
+        gfx_fill((s16)(BALL_CENTER_X + ball_x[plate - 1u] + 2 + shake),
+                 (s16)(CARD_Y + ball_y[plate - 1u] - 10), 5, 9, COLOR_ALERT);
+        gfx_circle((s16)(BALL_CENTER_X + ball_x[plate - 1u] + 4 + shake),
+                   (s16)(CARD_Y + ball_y[plate - 1u] + 4), 4, COLOR_ALERT, 1u);
     }
 
     for (index = 0u; index < DROP_COUNT; ++index) {
@@ -204,30 +218,35 @@ static void cheesy_draw(void) {
     }
 
     if (now < chew_until) {
-        gfx_text_size_right((s16)(APP_LEFT + 446), 132, "OM NOM!",
-                            COLOR_ALERT, 13);
+        gfx_text_size_right((s16)(CARD_X + CARD_WIDTH - 20),
+                            (s16)(CARD_Y + 62), "OM NOM!", COLOR_ALERT, 13);
     } else {
-        gfx_text_size((s16)(APP_LEFT + 24), 132,
+        gfx_text_size((s16)(CARD_X + 20), (s16)(CARD_Y + 62),
                       yum_phrases[phrase_index % 8u], COLOR_ACCENT, 10);
     }
 
-    /* The right-hand side: the big hungry controls. */
-    gfx_text_size(PANEL_X, 74, "CHEESY BALLS", COLOR_DISABLED, 9);
-    gfx_text_size(PANEL_X, 88, "Kitchen", COLOR_DEEP, 24);
-
-    gfx_text_size(PANEL_X, 140, "BALLS IN BOWL", COLOR_DISABLED, 9);
+    /* Under the card: the numbers, then the big hungry controls. */
+    gfx_text_size(PANEL_X, PANEL_Y, "BALLS IN BOWL", COLOR_DISABLED, 9);
     buffer[0] = '\0';
     text_append_number(buffer, plate, (u16)sizeof(buffer));
-    gfx_text_size(PANEL_X, 152, buffer, COLOR_DEEP, 30);
+    gfx_text_size(PANEL_X, (s16)(PANEL_Y + 10), buffer, COLOR_DEEP, 28);
 
-    gfx_text_size((s16)(PANEL_X + 120), 140, "BURPS", COLOR_DISABLED, 9);
+    gfx_text_size((s16)(PANEL_X + 110), PANEL_Y, "BURPS", COLOR_DISABLED, 9);
     buffer[0] = '\0';
     text_append_number(buffer, burps, (u16)sizeof(buffer));
-    gfx_text_size((s16)(PANEL_X + 120), 152, buffer, COLOR_DEEP, 30);
+    gfx_text_size((s16)(PANEL_X + 110), (s16)(PANEL_Y + 10), buffer,
+                  COLOR_DEEP, 28);
 
-    gui_button(PANEL_X, 200, 250, 56, "NYAM!", ID_NOM);
-    gui_button_colored(PANEL_X, 266, 250, 44, "Cook more", ID_COOK,
-                       COLOR_PANEL, COLOR_DEEP);
+    gfx_text_size((s16)(PANEL_X + 220), PANEL_Y, "EATEN", COLOR_DISABLED, 9);
+    buffer[0] = '\0';
+    text_append_number(buffer, eaten_total, (u16)sizeof(buffer));
+    gfx_text_size((s16)(PANEL_X + 220), (s16)(PANEL_Y + 10), buffer,
+                  COLOR_DEEP, 28);
+
+    gui_button(PANEL_X, (s16)(PANEL_Y + 56), (s16)APP_WIDTH, 64, "NYAM!",
+               ID_NOM);
+    gui_button_colored(PANEL_X, (s16)(PANEL_Y + 132), (s16)APP_WIDTH, 50,
+                       "Cook more", ID_COOK, COLOR_FACE, COLOR_DEEP);
 
     gui_message_bar("Hold on: every chomp splashes ketchup");
 

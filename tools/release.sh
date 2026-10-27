@@ -168,6 +168,23 @@ release_phone() {
     mkdir -p "$OUT/Phone/fonts"
     cp "$binary" "$OUT/Phone/dimos-anywhere"
     chmod +x "$OUT/Phone/dimos-anywhere"
+
+    # The folder promises an AArch64 binary: a 64-bit ELF whose machine
+    # field says AArch64 (183). Check it instead of trusting the file name.
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$OUT/Phone/dimos-anywhere" <<'PY' || fail "phone: not an AArch64 ELF"
+import struct
+import sys
+
+with open(sys.argv[1], "rb") as handle:
+    header = handle.read(20)
+assert header[:4] == b"\x7fELF", "not an ELF file"
+assert header[4] == 2, "not a 64-bit binary"
+machine = struct.unpack("<H", header[18:20])[0]
+assert machine == 183, f"machine {machine}, expected 183 (AArch64)"
+print("         AArch64, 64-bit ELF")
+PY
+    fi
     if [[ -s "$HERE/fonts/font.ttf" ]]; then
         cp "$HERE/fonts/font.ttf" "$OUT/Phone/fonts/font.ttf"
     else

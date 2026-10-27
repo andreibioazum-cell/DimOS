@@ -114,10 +114,10 @@ jobs:
       # linked statically, so an ARM64 Android phone can start it as is.
       - name: Build the phone runtime (AArch64)
         run: |
-          python3 -m pip install --quiet --user --break-system-packages ziglang
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-          zig version
+          python3 -m venv /tmp/zig-venv
+          /tmp/zig-venv/bin/pip install --quiet ziglang
+          export PATH="/tmp/zig-venv/bin:$PATH"
+          python-zig version
           ./build-anywhere.sh --target aarch64-linux-musl
           tools/release.sh phone
           test -s release/Phone/dimos-anywhere

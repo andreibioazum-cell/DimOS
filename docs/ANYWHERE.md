@@ -74,10 +74,14 @@ clang, lld и заголовки libc для нужной платформы, п
 не нужен:
 
 ```bash
-pip install ziglang                     # кладёт zig в ~/.local/bin
+pip install ziglang                     # ставит пакет ziglang и обёртку python-zig
 ./build-anywhere.sh --target aarch64-linux-musl    # -> bin/dimos-anywhere-aarch64-linux-musl
 ./build-anywhere.sh --target x86_64-windows-gnu    # -> exe для Windows
 ```
+
+Скрипт сам находит компилятор: `zig` в `PATH`, иначе `python-zig`, иначе
+бинарник внутри пакета `ziglang` — поэтому `pip install ziglang` достаточно,
+ничего дописывать в `PATH` не нужно.
 
 Для `aarch64-linux-musl` бинарник получается **статическим** (около 740 КБ),
 поэтому он запускается на любом 64-битном Android и Linux без подбора версии

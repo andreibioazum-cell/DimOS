@@ -118,12 +118,37 @@ require() { command -v "$1" >/dev/null 2>&1 || fail "required tool missing: $1";
 
 # Cross builds go through zig, which carries clang, lld and the libc headers
 # for every target it supports. No ccache: the cache would key on host paths.
+#
+# `pip install ziglang` is the easiest way to get zig, but it puts no `zig`
+# on PATH: the wheel keeps the compiler inside the package and adds a
+# `python-zig` wrapper besides. So look in three places before giving up.
+find_zig() {
+    if command -v zig >/dev/null 2>&1; then
+        printf '%s\n' "zig"
+        return 0
+    fi
+    if command -v python-zig >/dev/null 2>&1; then
+        printf '%s\n' "python-zig"
+        return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import os, sys
+try:
+    import ziglang
+except Exception:
+    sys.exit(1)
+path = os.path.join(os.path.dirname(ziglang.__file__), "zig")
+sys.stdout.write(path if os.access(path, os.X_OK) else "")' 2>/dev/null || true
+    fi
+}
+
 if [[ -n "${TARGET:-}" ]]; then
-    require zig
-    CC=zig
-    COMPILE_WORDS=(zig cc --target="$TARGET")
+    ZIG="$(find_zig)"
+    [[ -n "$ZIG" ]] || fail "no zig found: pip install ziglang, or put zig on PATH"
+    CC="$ZIG"
+    COMPILE_WORDS=("$ZIG" cc --target="$TARGET")
     # -s: a phone has no use for a symbol table in a 4 MB download.
-    LINK_WORDS=(zig cc --target="$TARGET" -s)
+    LINK_WORDS=("$ZIG" cc --target="$TARGET" -s)
     KIND="${TARGET#*-}"
     KIND="${KIND%%-*}"
     BUILD="$BUILD/$TARGET"

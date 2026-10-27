@@ -14,7 +14,8 @@
 # working.
 #
 # Usage:
-#   ./build-anywhere.sh            # build bin/dimos-anywhere
+#   ./build-anywhere.sh            # build, reusing what did not change
+#   ./build-anywhere.sh -j 4       # four compiler jobs (default: one per core)
 #   ./build-anywhere.sh --clean    # remove bin/anywhere first
 #   CC=clang ./build-anywhere.sh   # pick a compiler
 #   NATIVE_FLAGS="-march=native" ./build-anywhere.sh
@@ -65,11 +66,27 @@ target_kind() {
     esac
 }
 
-if [[ "${1:-}" == "--clean" ]]; then
-    rm -rf "$BUILD"
-    ok "removed $BUILD"
-    exit 0
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --clean)
+            rm -rf "$BUILD"
+            ok "removed $BUILD"
+            exit 0
+            ;;
+        -j|--jobs)
+            [[ $# -ge 2 ]] || fail "-j wants a number"
+            JOBS="$2"
+            shift 2
+            ;;
+        -j*)
+            JOBS="${1#-j}"
+            shift
+            ;;
+        *)
+            fail "unknown option: $1 (try -j N or --clean)"
+            ;;
+    esac
+done
 
 refuse_macos
 pick_compiler
@@ -99,21 +116,65 @@ HOST_FLAGS=("${COMMON[@]}" "${WARNINGS[@]}" -Wno-overlength-strings
             "${HOST_POSIX[@]}")
 LUA_FLAGS=(-std=c99 -O2 -DNDEBUG -I"$LUA" -w)
 
-objects=()
+# --- the compilation queue -------------------------------------------
+#
+# 52 translation units at -O2 take about eight seconds one after another,
+# which is slow every time you touch one line. So the script keeps the
+# objects between runs and only rebuilds what actually changed: a source
+# file, any header it may include, or the compiler and its flags. The rest
+# is compiled in parallel, one job per core by default.
+#
+#   ./build-anywhere.sh -j 4       four jobs
+#   JOBS=1 ./build-anywhere.sh     one job, readable compiler errors
+#   ./build-anywhere.sh --clean    forget everything
 
-compile() {
-    local source="$1" flags_name="$2" extra="${3:-}"
+jobs="${JOBS:-0}"
+if [[ "$jobs" == "0" ]]; then
+    jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+fi
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || fail "jobs must be a positive number"
+
+declare -a job_source=() job_kind=() job_extra=() job_object=() objects=()
+
+headers_newer_than() {
+    find "$KERNEL" "$HOST" "$LUA" -maxdepth 1 -name '*.h' -newer "$1" \
+        -print -quit 2>/dev/null
+}
+
+# A change of compiler or of flags invalidates every object: an object
+# built with a different -D or C standard cannot be trusted.
+stamp_file="$BUILD/flags.stamp"
+stamp_now="$("$CC" --version 2>/dev/null | head -1) | ${COMMON[*]} | ${WARNINGS[*]} | ${POSIX_DEFINE[*]}"
+if [[ ! -f "$stamp_file" || "$(cat "$stamp_file")" != "$stamp_now" ]]; then
+    rm -rf "$BUILD/objects"
+    mkdir -p "$BUILD/objects"
+    printf '%s\n' "$stamp_now" > "$stamp_file"
+fi
+
+queue() {
+    local source="$1" kind="$2" extra="${3:-}"
     local object="$BUILD/objects/$(basename "${source%.c}").o"
+
+    job_source+=("$source")
+    job_kind+=("$kind")
+    job_extra+=("$extra")
+    job_object+=("$object")
+    objects+=("$object")
+}
+
+compile_one() {
+    local source="$1" kind="$2" extra="$3" object="$4"
     local -a flags
 
-    case "$flags_name" in
+    case "$kind" in
         kernel) flags=("${KERNEL_FLAGS[@]}") ;;
         host) flags=("${HOST_FLAGS[@]}") ;;
         lua) flags=("${LUA_FLAGS[@]}") ;;
     esac
-    # shellcheck disable=SC2086
-    "$CC" "${flags[@]}" $extra -c "$source" -o "$object"
-    objects+=("$object")
+    if [[ -n "$extra" ]]; then
+        flags+=("$extra")
+    fi
+    "$CC" "${flags[@]}" -c "$source" -o "$object"
 }
 
 log "compiling the DimOS kernel sources for the host"
@@ -126,23 +187,68 @@ for source in "$KERNEL"/*.c; do
         # platform.c supplies the work area and the FONT.TTF file.
         extra="-DDIMOS_HOST_TEST"
     fi
-    compile "$source" kernel "$extra"
+    queue "$source" kernel "$extra"
     kernel_sources+=("$name")
 done
-ok "${#kernel_sources[@]} kernel files, including the shell and nine apps"
 
 log "compiling the hosted runtime and the web front end"
 for source in "$HOST"/*.c; do
-    compile "$source" host
+    queue "$source" host
 done
-ok "platform, framebuffer, PNG, HTTP and the Lua bridge"
 
 log "compiling Lua 5.4.7 (core, lauxlib and six standard libraries)"
 lua_count=0
 for source in "$LUA"/*.c; do
-    compile "$source" lua
+    queue "$source" lua
     lua_count=$((lua_count + 1))
 done
+
+# Everything that is not up to date goes into the pool.
+pending_source=() pending_kind=() pending_extra=() pending_object=()
+reused=0
+for index in "${!job_source[@]}"; do
+    object="${job_object[index]}"
+    if [[ -f "$object" && "$object" -nt "${job_source[index]}" &&
+          -z "$(headers_newer_than "$object")" ]]; then
+        reused=$((reused + 1))
+        continue
+    fi
+    pending_source+=("${job_source[index]}")
+    pending_kind+=("${job_kind[index]}")
+    pending_extra+=("${job_extra[index]}")
+    pending_object+=("$object")
+done
+
+started=$(date +%s)
+if (( ${#pending_source[@]} == 0 )); then
+    ok "all ${#objects[@]} files are up to date, nothing to compile"
+else
+    log "compiling ${#pending_source[@]} of ${#objects[@]} files with $jobs job(s)"
+    running=0
+    failed=0
+    for index in "${!pending_source[@]}"; do
+        ( compile_one "${pending_source[index]}" "${pending_kind[index]}" \
+                      "${pending_extra[index]}" "${pending_object[index]}" ) &
+        running=$((running + 1))
+        if (( running >= jobs )); then
+            wait -n || failed=1
+            running=$((running - 1))
+        fi
+    done
+    while (( running > 0 )); do
+        wait -n || failed=1
+        running=$((running - 1))
+    done
+    (( failed == 0 )) || fail "compilation failed"
+    elapsed=$(( $(date +%s) - started ))
+    if (( ${#pending_source[@]} == 1 )); then
+        ok "compiled 1 file in ${elapsed}s ($reused reused)"
+    else
+        ok "compiled ${#pending_source[@]} files in ${elapsed}s ($reused reused)"
+    fi
+fi
+ok "${#kernel_sources[@]} kernel files, including the shell and nine apps"
+ok "platform, framebuffer, PNG, HTTP and the Lua bridge"
 ok "$lua_count Lua files (io, os, debug and the package loader are left out)"
 
 log "linking $BINARY"

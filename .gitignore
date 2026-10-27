@@ -15,6 +15,10 @@ bin/
 # Common build directories
 build*/
 
+# The per-machine download folders tools/release.sh assembles (and the zip
+# the CI uploads); they are outputs, not sources.
+release/
+
 # Visual Studio Code
 .vscode/
 .cache/

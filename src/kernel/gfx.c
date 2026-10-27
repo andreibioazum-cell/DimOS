@@ -925,44 +925,53 @@ static void present_vbe_edge_neighborhood(volatile u8 *framebuffer, u16 x, u16 y
 }
 #endif
 
+/* Four pixels of a row as one word, copied rather than cast: the row pitch
+ * (SCREEN_WIDTH) is not necessarily a multiple of four, so a row does not
+ * have to start on a four-byte boundary and a plain u32 load could be
+ * misaligned. memory_copy() compiles to a single move on both x86 and
+ * ARM64 and is correct everywhere else. */
+static u32 row_word(const u8 *source) {
+    u32 word;
+
+    memory_copy(&word, source, 4u);
+    return word;
+}
+
 static void present_vbe(void) {
     volatile u8 *framebuffer = dimos_framebuffer();
-    const u32 *source_words = (const u32 *)back_buffer;
-    u32 *shadow_words = (u32 *)present_buffer;
     u16 y;
 
     if (vbe_map_ready == 0u) {
         prepare_vbe_map();
     }
     for (y = 0u; y < SCREEN_HEIGHT; ++y) {
-        const u32 word_base = (u32)y * (SCREEN_WIDTH / 4u);
         const u8 *source = screen + (u32)y * SCREEN_WIDTH;
         u8 *shadow = presented + (u32)y * SCREEN_WIDTH;
-        u16 group;
+        u16 x = 0u;
 
-        for (group = 0u; group < SCREEN_WIDTH / 4u; ++group) {
-            const u32 word = source_words[word_base + group];
-            u16 within;
-            if (first_present == 0u && shadow_words[word_base + group] == word) {
+        /* Four untouched pixels cost one comparison; a group that changed
+         * is handed to the presenter one pixel at a time, so the Scale2x
+         * edge pass still sees exactly what changed. The loop never
+         * assumes that SCREEN_WIDTH is a multiple of four. */
+        while (x < SCREEN_WIDTH) {
+            if (first_present == 0u && (u16)(x + 4u) <= SCREEN_WIDTH &&
+                row_word(source + x) == row_word(shadow + x)) {
+                x = (u16)(x + 4u);
                 continue;
             }
-            for (within = 0u; within < 4u; ++within) {
-                const u16 x = (u16)(group * 4u + within);
-                const u8 color = source[x];
-                if (first_present != 0u || shadow[x] != color) {
+            if (first_present != 0u || shadow[x] != source[x]) {
 #ifdef DIMOS_EMULATOR
-                    if (first_present == 0u) {
-                        present_vbe_edge_neighborhood(framebuffer, x, y);
-                    } else {
-                        present_vbe_pixel(framebuffer, x, y, color);
-                    }
-#else
-                    present_vbe_pixel(framebuffer, x, y, color);
-#endif
-                    shadow[x] = color;
+                if (first_present == 0u) {
+                    present_vbe_edge_neighborhood(framebuffer, x, y);
+                } else {
+                    present_vbe_pixel(framebuffer, x, y, source[x]);
                 }
+#else
+                present_vbe_pixel(framebuffer, x, y, source[x]);
+#endif
+                shadow[x] = source[x];
             }
-            shadow_words[word_base + group] = word;
+            ++x;
         }
     }
 }

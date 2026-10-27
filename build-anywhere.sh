@@ -18,13 +18,15 @@
 #   ./build-anywhere.sh -j 4       # four compiler jobs (default: one per core)
 #   ./build-anywhere.sh --clean    # remove bin/anywhere first
 #   CC=clang ./build-anywhere.sh   # pick a compiler
+#   ./build-anywhere.sh --target aarch64-linux-gnu   # cross build (zig cc)
+#   ./build-anywhere.sh --target x86_64-windows-gnu
 #   NATIVE_FLAGS="-march=native" ./build-anywhere.sh
 
 set -Eeuo pipefail
 
 readonly NAME="dimos-anywhere"
 readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly BUILD="$HERE/bin/anywhere"
+BUILD="$HERE/bin/anywhere"
 readonly KERNEL="$HERE/src/kernel"
 readonly HOST="$HERE/src/host"
 readonly LUA="$HERE/third_party/lua"
@@ -92,6 +94,19 @@ while [[ $# -gt 0 ]]; do
             STATS=1
             shift
             ;;
+        --target|--target=*)
+            # A cross build of the very same sources: AArch64 for phones,
+            # x86-64 for PCs. zig ships the C library headers too, so a
+            # machine without an ARM toolchain can still produce the binary.
+            if [[ "$1" == --target=* ]]; then
+                TARGET="${1#--target=}"
+                shift
+            else
+                [[ $# -ge 2 ]] || fail "--target wants a triple, e.g. aarch64-linux-gnu"
+                TARGET="$2"
+                shift 2
+            fi
+            ;;
         *)
             fail "unknown option: $1 (try -j N, --quick, --stats or --clean)"
             ;;
@@ -99,23 +114,43 @@ while [[ $# -gt 0 ]]; do
 done
 
 refuse_macos
-pick_compiler
 require() { command -v "$1" >/dev/null 2>&1 || fail "required tool missing: $1"; }
-require "$CC"
-require "${LD:-ld}"
-require "${OBJCOPY:-objcopy}"
 
-# ccache turns a rebuild after "rm -rf bin" or a branch switch into a copy
-# from its cache. It is optional: without it nothing changes except speed.
-compiler=("$CC")
-if [[ "${USE_CCACHE:-1}" != "0" ]] && command -v ccache >/dev/null 2>&1; then
-    compiler=(ccache "$CC")
+# Cross builds go through zig, which carries clang, lld and the libc headers
+# for every target it supports. No ccache: the cache would key on host paths.
+if [[ -n "${TARGET:-}" ]]; then
+    require zig
+    CC=zig
+    COMPILE_WORDS=(zig cc --target="$TARGET")
+    # -s: a phone has no use for a symbol table in a 4 MB download.
+    LINK_WORDS=(zig cc --target="$TARGET" -s)
+    KIND="${TARGET#*-}"
+    KIND="${KIND%%-*}"
+    BUILD="$BUILD/$TARGET"
+    CROSS=1
+else
+    pick_compiler
+    require "$CC"
+    # ccache turns a rebuild after "rm -rf bin" or a branch switch into a
+    # copy from its cache. It is optional: without it nothing changes.
+    COMPILE_WORDS=("$CC")
+    if [[ "${USE_CCACHE:-1}" != "0" ]] && command -v ccache >/dev/null 2>&1; then
+        COMPILE_WORDS=(ccache "$CC")
+    fi
+    LINK_WORDS=("${COMPILE_WORDS[@]}")
+    KIND="$(target_kind)"
+    CROSS=0
 fi
+compiler=("${COMPILE_WORDS[@]}")
 
 mkdir -p "$BUILD/objects"
-KIND="$(target_kind)"
 BINARY="$HERE/bin/$NAME"
-[[ "$KIND" != "windows" ]] || BINARY="$BINARY.exe"
+if [[ "$KIND" == "windows" ]]; then
+    BINARY="$BINARY.exe"
+fi
+if [[ "$CROSS" == "1" ]]; then
+    BINARY="$BINARY-${TARGET}"
+fi
 
 # The kernel sources are freestanding C11 with no libc at all; on a host they
 # still compile as they are. DIMOS_SANDBOX removes the interrupt and firmware
@@ -319,11 +354,17 @@ if [[ "$KIND" == "linux" ]]; then
 elif [[ "$KIND" == "windows" ]]; then
     link_flags+=(-lws2_32)
 fi
-"$CC" "${objects[@]}" "${link_flags[@]}"
+"${LINK_WORDS[@]}" "${objects[@]}" "${link_flags[@]}"
 ok "built $(basename "$BINARY") ($(wc -c < "$BINARY" | tr -d '[:space:]') bytes)"
 
-"$BINARY" --version >/dev/null || fail "the binary does not start"
-ok "$("$BINARY" --version)"
+if [[ "$CROSS" == "1" ]]; then
+    # A foreign binary cannot be started here, so the build proves itself
+    # by what it is: ELF for the target (or a PE image for Windows).
+    ok "cross build for ${TARGET}"
+else
+    "$BINARY" --version >/dev/null || fail "the binary does not start"
+    ok "$("$BINARY" --version)"
+fi
 
 cat <<EOF
 

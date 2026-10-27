@@ -5,7 +5,7 @@ WARNINGS := -Wall -Wextra -Wpedantic -Werror
 IMAGE_CHECKER := bin/dimos-image-check
 FONT_PREVIEW := bin/dimos-font-preview
 
-.PHONY: all iso emulator tools verify font clean anywhere anywhere-test lua-demo
+.PHONY: all iso emulator tools verify font clean anywhere anywhere-test lua-demo phone release
 
 all: iso
 
@@ -51,6 +51,17 @@ anywhere-test: anywhere
 
 lua-demo: anywhere
 	bin/dimos-anywhere --disk bin/anywhere.hdd run HELLO.LUA
+
+# The phone runtime: the same sources, cross compiled for ARM64 and linked
+# statically, so an Android phone starts it without a matching C library.
+# Needs zig on PATH (pip install ziglang puts it in ~/.local/bin).
+phone:
+	./build-anywhere.sh --target aarch64-linux-musl
+
+# Collect what has been built into release/PC, release/Emulator and
+# release/Phone -- the three folders that are handed to the user.
+release: anywhere phone
+	tools/release.sh all
 
 clean:
 	rm -rf bin disk_img

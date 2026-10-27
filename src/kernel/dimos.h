@@ -4,10 +4,10 @@
  * DimOS is a freestanding i686 protected-mode kernel with a mobile shell:
  * a lock screen, a home screen with rounded app icons, a translucent dock,
  * a status bar and a Control Centre, in the spirit of iOS 14. The logical
- * screen is an iPhone-sized 844x390 landscape canvas that is scaled to
- * whatever VBE display the machine offers, so the phone layout is the
- * primary one while PC monitors and emulators show it letterboxed and
- * perfectly usable with a mouse. The shell needs no keyboard: everything
+ * screen is a phone in portrait: 390x844 points, the canvas of an iPhone 12,
+ * 13 or 14, which is also the shape of a typical Android phone. It is
+ * scaled to whatever VBE display the machine offers, so a PC monitor or an
+ * emulator shows the phone letterboxed and perfectly usable with a mouse. The shell needs no keyboard: everything
  * is a touch target, and the terminal brings its own keyboard.
  *
  * Coding rules for this directory:
@@ -111,8 +111,8 @@ u16 bios_read_word(u32 address);   /* a word the BIOS left in low memory */
 /* Screen layout                                                       */
 /* ------------------------------------------------------------------ */
 
-#define SCREEN_WIDTH 844u
-#define SCREEN_HEIGHT 390u
+#define SCREEN_WIDTH 390u
+#define SCREEN_HEIGHT 844u
 #define SCREEN_BYTES (SCREEN_WIDTH * SCREEN_HEIGHT)
 
 /* The visible VGA frame buffer. The indexed canvas and its shadow live in
@@ -160,21 +160,31 @@ extern u8 video_bits_per_pixel;
 #define HOME_INDICATOR_Y (SCREEN_HEIGHT - 9u)
 #define HOME_INDICATOR_WIDTH 128u
 
-/* Home screen grid: five columns of rounded icons on two rows, with the
- * dock underneath. Coordinates are derived so the whole grid stays
- * centred on any width the canvas may take. */
-#define ICON_COLUMNS 5u
-#define ICON_ROWS 2u
+/* Home screen grid: four columns of rounded icons on three rows, the way a
+ * phone arranges them, with the dock underneath. Coordinates are derived so
+ * the whole grid stays centred on any width the canvas may take, and so a
+ * change of SCREEN_WIDTH re-centres it instead of leaving it off-centre. */
+#define ICON_COLUMNS 4u
+#define ICON_ROWS 3u
 #define ICON_SIZE 64u
-#define ICON_COLUMN_STEP 112u
-#define ICON_ROW_STEP 108u
-#define ICON_GRID_TOP 46u
+#define ICON_COLUMN_STEP 84u
+#define ICON_ROW_STEP 104u
+#define ICON_GRID_TOP 88u
 #define ICON_GRID_LEFT ((s16)((SCREEN_WIDTH - (s16)(ICON_COLUMNS - 1u) * ICON_COLUMN_STEP - (s16)ICON_SIZE) / 2))
 #define ICON_LABEL_GAP 8u
-#define DOCK_HEIGHT 70u
-#define DOCK_Y (SCREEN_HEIGHT - DOCK_HEIGHT - 18u)
-#define DOCK_ICON_SIZE 52u
+/* Page dots sit just under the last row of icons. */
+#define PAGE_DOTS_Y (ICON_GRID_TOP + (s16)(ICON_ROWS - 1u) * (s16)ICON_ROW_STEP + (s16)ICON_SIZE + 30)
+
+/* The dock is a translucent capsule of four icons. Its width follows from
+ * the icons and their gaps, so the same numbers work in any orientation. */
+#define DOCK_ICON_SIZE 56u
 #define DOCK_SLOTS 4u
+#define DOCK_GAP 16u
+#define DOCK_PADDING 18u
+#define DOCK_WIDTH ((s16)(DOCK_SLOTS * DOCK_ICON_SIZE + (DOCK_SLOTS - 1u) * DOCK_GAP + 2u * DOCK_PADDING))
+#define DOCK_HEIGHT (DOCK_ICON_SIZE + 2u * DOCK_PADDING)
+#define DOCK_X ((s16)((SCREEN_WIDTH - (u16)DOCK_WIDTH) / 2))
+#define DOCK_Y (SCREEN_HEIGHT - DOCK_HEIGHT - 26u)
 
 /* ------------------------------------------------------------------ */
 /* Colours                                                             */

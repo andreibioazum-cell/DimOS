@@ -29,6 +29,7 @@ Control Centre и **всеми девятью приложениями**, дра
 | Linux x86-64 / ARM64 | да | gcc или clang, `./build-anywhere.sh` |
 | Windows x86-64 | да | MinGW-w64 (gcc) или clang, `build-anywhere.sh` из MSYS2/Termux-подобной оболочки |
 | Android (ARM64, x86-64) | да | Termux `clang` или NDK, `CC=<triple>-clang ./build-anywhere.sh` |
+| ARM64 кросс-сборка без тулчейна | да | `./build-anywhere.sh --target aarch64-linux-musl` (через `zig`, см. ниже) |
 | **macOS** | **нет, намеренно** | `build-anywhere.sh` отказывается собирать на Darwin |
 
 ## Сборка
@@ -66,6 +67,24 @@ JOBS=1 ./build-anywhere.sh   # по одной, чтобы читать ошиб
 3. `third_party/lua/*.c` — **Lua 5.4.7** (ядро, `lauxlib` и библиотеки
    `base`, `table`, `string`, `math`, `coroutine`, `utf8`).
 
+### ARM64 одной командой: `--target`
+
+`--target TRIPLE` собирает те же исходники через `zig cc` — у него внутри
+clang, lld и заголовки libc для нужной платформы, поэтому отдельный тулчейн
+не нужен:
+
+```bash
+pip install ziglang                     # кладёт zig в ~/.local/bin
+./build-anywhere.sh --target aarch64-linux-musl    # -> bin/dimos-anywhere-aarch64-linux-musl
+./build-anywhere.sh --target x86_64-windows-gnu    # -> exe для Windows
+```
+
+Для `aarch64-linux-musl` бинарник получается **статическим** (около 740 КБ),
+поэтому он запускается на любом 64-битном Android и Linux без подбора версии
+системной библиотеки: Android-ядро умеет запускать статические ELF-файлы, а
+musl внутри файла ни от чего не зависит. Готовый файл вместе со шрифтом и
+томом лежит в `release/Phone` (см. `tools/release.sh`).
+
 Кросс-сборка под Android через NDK:
 
 ```bash
@@ -77,6 +96,29 @@ CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang 
 
 В Termux всё проще — там обычный clang, и `./build-anywhere.sh` работает как
 на Linux.
+
+## Три папки для скачивания: PC, Emulator, Phone
+
+`tools/release.sh` (или `make release`) раскладывает собранное по трём
+папкам:
+
+| Папка | Содержимое | Кому |
+| --- | --- | --- |
+| `release/PC` | `dimos.iso`, `dimos.img`, `dimos.hdd`, `README.txt` | настоящему ПК: флешка или CD-R, загрузка через BIOS/Legacy |
+| `release/Emulator` | те же образы + свой `README.txt` с командами QEMU/VirtualBox/VMware | виртуальной машине (профиль эмулятора, область вывода 640×480) |
+| `release/Phone` | `dimos-anywhere` (ARM64, статический), `dimos.hdd` (8 МБ, с HELLO.LUA и SYSINFO.LUA), `fonts/font.ttf`, `run.sh`, `README.txt` | телефону или планшету на Android/Linux ARM64 |
+
+```bash
+./build-anywhere.sh --target aarch64-linux-musl   # рантайм для телефона
+tools/release.sh phone                            # собрать release/Phone
+tools/release.sh all                              # всё, что уже собрано
+```
+
+`tools/release.sh` ничего не компилирует: образы PC/Emulator он берёт из
+`disk_img/` (их делают `make iso` и `make emulator`), а для Phone — готовый
+AArch64-рантайм, шрифт и том, который создаёт и заполняет host-сборка того же
+ядра. Если чего-то нет, шаг честно предупреждает и пропускается, а CI
+собирает все три папки и складывает их в `DimOS-<sha>.zip`.
 
 ## Запуск: оболочка в браузере
 
@@ -103,7 +145,7 @@ Centre и все приложения. Тап по экрану — палец, 
 --port N         порт веб-интерфейса (0 — свободный)
 --bind ADDRESS   адрес прослушивания (0.0.0.0 — доступ с телефона)
 --no-http        без веб-сервера (только ядро и терминал)
---display WxH    притвориться панелью WxH (например 1920x1080 или 2712x1220)
+--display WxH    притвориться панелью WxH (например 1920x1080 или 1220x2712)
 --font PATH      запасной TrueType, если на томе нет FONT.TTF
 --shot FILE --after MS   один кадр в PNG и выход
 ```

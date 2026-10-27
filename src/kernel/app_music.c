@@ -74,8 +74,8 @@ static void music_update(u16 elapsed_ms) {
 
 static void draw_album_art(void) {
     const s16 x = 40;
-    const s16 y = 76;
-    const s16 size = 200;
+    const s16 y = 66;
+    const s16 size = 150;
 
     /* A pink-to-indigo sleeve: each band is inset inside the rounded
      * corners, so the cover stays one clean shape. */
@@ -84,7 +84,7 @@ static void draw_album_art(void) {
                          (s16)(size / 2), COLOR_IOS_PURPLE, 10u);
     gfx_round_band_alpha(x, y, size, size, 22, (s16)(size * 2 / 3),
                          (s16)(size / 2), COLOR_IOS_INDIGO, 9u);
-    gfx_glyph((s16)(x + 50), (s16)(y + 50), icon, 16u, 6, COLOR_FACE);
+    gfx_glyph((s16)(x + 38), (s16)(y + 38), icon, 16u, 5, COLOR_FACE);
 }
 
 static void music_draw(void) {
@@ -99,13 +99,15 @@ static void music_draw(void) {
 
     draw_album_art();
 
-    gfx_text_size(272, 80, "NOW PLAYING", COLOR_DISABLED, 9);
-    gfx_text_size(272, 96, track_names[track], COLOR_FACE, 26);
-    gfx_text_size(272, 128, track_notes[track], COLOR_DISABLED, 11);
+    /* The sleeve on the left, the track and the transport on the right,
+     * exactly the way a phone shows a song. */
+    gfx_text_size(210, 78, "NOW PLAYING", COLOR_DISABLED, 9);
+    gfx_text_size(210, 92, track_names[track], COLOR_FACE, 22);
+    gfx_text_size(210, 120, track_notes[track], COLOR_DISABLED, 11);
 
     /* Progress and times. */
-    gfx_round_fill(272, 158, 380, 6, 3, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 4));
-    gfx_round_fill(272, 158, (s16)(4 + (s32)progress * 372 / 24), 6, 3,
+    gfx_round_fill(210, 148, 156, 6, 3, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 4));
+    gfx_round_fill(210, 148, (s16)(4 + (s32)progress * 148 / 24), 6, 3,
                    COLOR_IOS_PINK);
 
     time_line[0] = '\0';
@@ -116,49 +118,60 @@ static void music_draw(void) {
     }
     text_append_number(time_line, progress % 60u, (u16)sizeof(time_line));
     text_copy(right_time, "-0:24", (u16)sizeof(right_time));
-    gfx_text_size(272, 170, time_line, COLOR_DISABLED, 9);
-    gfx_text_size_right((s16)(272 + 380), 170, right_time, COLOR_DISABLED, 9);
+    gfx_text_size(210, 160, time_line, COLOR_DISABLED, 9);
+    gfx_text_size_right(366, 160, right_time, COLOR_DISABLED, 9);
 
-    /* Transport controls. */
-    gfx_circle(312, 224, 22, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3), 1u);
-    gfx_text_size_centered(290, 216, 44, "<<", COLOR_FACE, 11);
-    gui_hotspot(290, 202, 44, 44, ID_PREVIOUS);
+    /* Transport controls, in a row under the progress bar. */
+    gfx_circle(230, 202, 20, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3), 1u);
+    gfx_text_size_centered(210, 195, 40, "<<", COLOR_FACE, 10);
+    gui_hotspot(210, 182, 40, 40, ID_PREVIOUS);
 
-    gfx_circle(404, 224, 32, COLOR_IOS_PINK, 1u);
+    gfx_circle(288, 202, 26, COLOR_IOS_PINK, 1u);
     if (playing != 0u) {
-        gfx_fill(396, 214, 5, 20, COLOR_FACE);
-        gfx_fill(407, 214, 5, 20, COLOR_FACE);
+        gfx_fill(282, 194, 4, 16, COLOR_FACE);
+        gfx_fill(291, 194, 4, 16, COLOR_FACE);
     } else {
-        gfx_fill(397, 213, 4, 22, COLOR_FACE);
-        gfx_fill(401, 215, 4, 18, COLOR_FACE);
-        gfx_fill(405, 217, 4, 14, COLOR_FACE);
-        gfx_fill(409, 219, 4, 10, COLOR_FACE);
-        gfx_fill(413, 221, 4, 6, COLOR_FACE);
+        gfx_fill(284, 193, 3, 18, COLOR_FACE);
+        gfx_fill(287, 195, 3, 14, COLOR_FACE);
+        gfx_fill(290, 197, 3, 10, COLOR_FACE);
+        gfx_fill(293, 199, 3, 6, COLOR_FACE);
     }
-    gui_hotspot(372, 192, 64, 64, ID_PLAY);
+    gui_hotspot(262, 176, 52, 52, ID_PLAY);
 
-    gfx_circle(496, 224, 22, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3), 1u);
-    gfx_text_size_centered(474, 216, 44, ">>", COLOR_FACE, 11);
-    gui_hotspot(474, 202, 44, 44, ID_NEXT);
+    gfx_circle(346, 202, 20, gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3), 1u);
+    gfx_text_size_centered(326, 195, 40, ">>", COLOR_FACE, 10);
+    gui_hotspot(326, 182, 40, 40, ID_NEXT);
 
-    /* The three tunes, as list rows. */
+    /* The three tunes, as full-width list rows under the sleeve. */
+    gui_section_label((s16)APP_LEFT, 250, "TUNES");
     for (index = 0u; index < TRACKS; ++index) {
-        const s16 y = (s16)(268 + (s16)index * 30);
+        const s16 y = (s16)(266 + (s16)index * 46);
         const u8 chosen = (u8)(index == track);
 
-        if (chosen != 0u) {
-            gfx_round_fill(272, y, 300, 26, 8,
-                           gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3));
-        }
-        gfx_text_size((s16)(286), (s16)(y + 7), track_names[index],
-                      (chosen != 0u) ? COLOR_FACE : COLOR_DISABLED, 11);
-        gui_hotspot(272, y, 300, 26, (u16)(ID_CHIME + index));
+        gfx_round_fill((s16)APP_LEFT, y, (s16)APP_WIDTH, 40, 12,
+                       (chosen != 0u)
+                           ? gfx_shade(COLOR_FACE, COLOR_WIN_BG, 3)
+                           : gfx_shade(COLOR_WIN_BG, COLOR_FACE, 2));
+        gfx_text_size((s16)(APP_LEFT + 16), (s16)(y + 13), track_names[index],
+                      (chosen != 0u) ? COLOR_FACE : COLOR_DISABLED, 12);
+        gui_hotspot((s16)APP_LEFT, y, (s16)APP_WIDTH, 40,
+                    (u16)(ID_CHIME + index));
     }
 
-    gui_button_colored(620, 268, 158, 30, "Stop", ID_STOP, COLOR_PANEL,
-                       COLOR_DEEP);
-    gfx_text_size(620, 308, "PC speaker only", COLOR_DISABLED, 9);
-    gfx_text_size(620, 322, "Chime, march, waltz", COLOR_DISABLED, 9);
+    {
+        const s16 button_y = (s16)(266 + (s16)TRACKS * 46 + 6);
+        const s16 half = (s16)((APP_WIDTH - 10) / 2);
+
+        gui_button_colored((s16)APP_LEFT, button_y, half, 44, "Stop", ID_STOP,
+                           COLOR_FACE, COLOR_DEEP);
+        gui_section_label((s16)(APP_LEFT + half + 10), (s16)(button_y + 12),
+                          "PC SPEAKER ONLY");
+        gfx_text_size((s16)APP_LEFT, (s16)(button_y + 58),
+                      "Chime, march and waltz are played on the PC speaker,",
+                      COLOR_DISABLED, 9);
+        gfx_text_size((s16)APP_LEFT, (s16)(button_y + 72),
+                      "the way the first computers did it.", COLOR_DISABLED, 9);
+    }
 
     gui_message_bar("Tap a tune, or use the big play button");
 }

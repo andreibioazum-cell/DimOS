@@ -8,12 +8,13 @@
 
 #include "dimos.h"
 
-#define KEY_WIDTH 84
-#define KEY_HEIGHT 46
-#define KEY_STEP_X (KEY_WIDTH + 12)
+/* Four columns of round calculator keys, as wide as the phone. */
+#define KEY_WIDTH (s16)((APP_WIDTH - 3 * 10) / 4)
+#define KEY_HEIGHT 56
+#define KEY_STEP_X (KEY_WIDTH + 10)
 #define KEY_STEP_Y (KEY_HEIGHT + 10)
-#define KEY_LEFT (s16)((SCREEN_WIDTH - (4 * KEY_STEP_X + 12)) / 2)
-#define KEY_TOP 146
+#define KEY_LEFT (s16)APP_LEFT
+#define KEY_TOP 250
 
 #define ID_DIGIT_FIRST 1u   /* 1 .. 10 for '0' .. '9' */
 #define ID_CLEAR 20u

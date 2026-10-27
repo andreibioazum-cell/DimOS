@@ -8,16 +8,24 @@
 
 #include "dimos.h"
 
+/* A portrait page stacks: the list fills the width of the phone, the
+ * buttons sit underneath it where a thumb can reach them. */
 #define ROW_HEIGHT 32
-#define VISIBLE_ROWS 8
+#define VISIBLE_ROWS 10
 #define LIST_X (s16)APP_LEFT
 #define LIST_Y 74
-#define LIST_WIDTH 520
+#define LIST_WIDTH (s16)APP_WIDTH
 #define LIST_HEIGHT (VISIBLE_ROWS * ROW_HEIGHT + 8)
-#define SIDE_X (s16)(LIST_X + LIST_WIDTH + 16)
-#define SIDE_WIDTH (s16)(APP_RIGHT - SIDE_X)
-#define TEXT_COLUMNS 60
-#define TEXT_ROWS 20
+#define BUTTON_Y (s16)(LIST_Y + LIST_HEIGHT + 12)
+#define BUTTON_HEIGHT 44
+#define SIDE_X (s16)APP_LEFT
+#define SIDE_WIDTH (s16)APP_WIDTH
+#define TEXT_COLUMNS 54
+/* 560 px of text pane at 12 px per line. */
+#define TEXT_ROWS 46
+#define TEXT_HEIGHT 560
+#define TEXT_BUTTON_Y (s16)(74 + TEXT_HEIGHT + 10)
+#define HALF_WIDTH (s16)((APP_WIDTH - 10) / 2)
 #define FILE_BUFFER_BYTES 2048u
 
 #define ID_FILE_FIRST 1u
@@ -201,38 +209,45 @@ static void files_draw(void) {
                         ROW_HEIGHT - 4, (u16)(ID_FILE_FIRST + row));
         }
 
-        gui_button(SIDE_X, 74, SIDE_WIDTH, 44, "Open", ID_OPEN);
-        gui_button_colored(SIDE_X, 126, SIDE_WIDTH, 44, "Delete", ID_DELETE,
-                           COLOR_ALERT, COLOR_FACE);
-        gui_button_colored(SIDE_X, 184, SIDE_WIDTH, 40, "Previous page",
-                           ID_PREVIOUS_PAGE, COLOR_PANEL, COLOR_DEEP);
-        gui_button_colored(SIDE_X, 232, SIDE_WIDTH, 40, "Next page",
-                           ID_NEXT_PAGE, COLOR_PANEL, COLOR_DEEP);
-        gui_section_label(SIDE_X, 290, "TAP A FILE, THEN OPEN");
+        gui_button(SIDE_X, BUTTON_Y, SIDE_WIDTH, 48, "Open", ID_OPEN);
+        gui_button_colored(SIDE_X, (s16)(BUTTON_Y + 58), (s16)((APP_WIDTH - 10) / 2),
+                           44, "Delete", ID_DELETE, COLOR_ALERT, COLOR_FACE);
+        gui_button_colored((s16)(SIDE_X + HALF_WIDTH + 10), (s16)(BUTTON_Y + 58),
+                           HALF_WIDTH, 44, "Previous", ID_PREVIOUS_PAGE,
+                           COLOR_FACE, COLOR_DEEP);
+        gui_button_colored(SIDE_X, (s16)(BUTTON_Y + 112), HALF_WIDTH, 44,
+                           "Next", ID_NEXT_PAGE, COLOR_FACE, COLOR_DEEP);
+        gui_section_label((s16)(SIDE_X + HALF_WIDTH + 10),
+                          (s16)(BUTTON_Y + 122), "TAP A FILE!");
     } else {
-        /* A plain white text pane, narrower than the list so the scroll
-         * buttons to its right never disappear underneath it. */
-        gfx_fill(LIST_X, 74, LIST_WIDTH, 280, COLOR_FACE);
-        gfx_outline(LIST_X, 74, LIST_WIDTH, 280, COLOR_GRID);
-        for (row = 0u; row < TEXT_ROWS; ++row) {
+        /* A plain white text pane over the width of the phone, with the
+         * scrolling controls in a compact grid underneath it. */
+        gfx_fill(LIST_X, 74, LIST_WIDTH, TEXT_HEIGHT, COLOR_FACE);
+        gfx_outline(LIST_X, 74, LIST_WIDTH, TEXT_HEIGHT, COLOR_GRID);
+        for (row = 0u; row < (u16)TEXT_ROWS; ++row) {
             const u16 wanted = (u16)(text_top + row);
             const s16 y = (s16)(80 + (s16)row * 12);
 
             fetch_line(wanted);
-            gfx_text_size((s16)(LIST_X + 16), y, line, COLOR_DEEP, 10);
+            gfx_text_size((s16)(LIST_X + 12), y, line, COLOR_DEEP, 10);
         }
 
-        gui_button_colored(SIDE_X, 74, SIDE_WIDTH, 38, "Up", ID_SCROLL_UP,
-                           COLOR_PANEL, COLOR_DEEP);
-        gui_button_colored(SIDE_X, 118, SIDE_WIDTH, 38, "Down", ID_SCROLL_DOWN,
-                           COLOR_PANEL, COLOR_DEEP);
-        gui_button_colored(SIDE_X, 174, SIDE_WIDTH, 38, "Page down",
-                           ID_SCROLL_PAGE_DOWN, COLOR_PANEL, COLOR_DEEP);
-        gui_button_colored(SIDE_X, 218, SIDE_WIDTH, 38, "Page up",
-                           ID_SCROLL_PAGE_UP, COLOR_PANEL, COLOR_DEEP);
-        gui_button_colored(SIDE_X, 262, SIDE_WIDTH, 38, "Top", ID_SCROLL_TOP,
-                           COLOR_PANEL, COLOR_DEEP);
-        gui_button(SIDE_X, 306, SIDE_WIDTH, 38, "Close", ID_BACK);
+        gui_button_colored(SIDE_X, TEXT_BUTTON_Y, HALF_WIDTH, 40, "Up",
+                           ID_SCROLL_UP, COLOR_FACE, COLOR_DEEP);
+        gui_button_colored((s16)(SIDE_X + HALF_WIDTH + 10), TEXT_BUTTON_Y,
+                           HALF_WIDTH, 40, "Down", ID_SCROLL_DOWN, COLOR_FACE,
+                           COLOR_DEEP);
+        gui_button_colored(SIDE_X, (s16)(TEXT_BUTTON_Y + 46), HALF_WIDTH, 36,
+                           "Page down", ID_SCROLL_PAGE_DOWN, COLOR_FACE,
+                           COLOR_DEEP);
+        gui_button_colored((s16)(SIDE_X + HALF_WIDTH + 10),
+                           (s16)(TEXT_BUTTON_Y + 46), HALF_WIDTH, 36,
+                           "Page up", ID_SCROLL_PAGE_UP, COLOR_FACE,
+                           COLOR_DEEP);
+        gui_button_colored(SIDE_X, (s16)(TEXT_BUTTON_Y + 88), HALF_WIDTH, 36,
+                           "Top", ID_SCROLL_TOP, COLOR_FACE, COLOR_DEEP);
+        gui_button((s16)(SIDE_X + HALF_WIDTH + 10), (s16)(TEXT_BUTTON_Y + 88),
+                   HALF_WIDTH, 36, "Close", ID_BACK);
     }
 
     gui_message_bar(message);

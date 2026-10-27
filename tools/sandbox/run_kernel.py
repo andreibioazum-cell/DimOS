@@ -361,9 +361,9 @@ class Machine:
             image = Image.frombytes("RGB", (pitch // 4, height), raw, "raw", "BGRX")
             if pitch // 4 != width:
                 image = image.crop((0, 0, width, height))
-            # The shell fits its 844x390 phone screen into the display and
+            # The shell fits its 390x844 phone screen into the display and
             # letterboxes the rest; crop straight to the phone for the tour.
-            screen_width, screen_height = 844, 390
+            screen_width, screen_height = 390, 844
             scale = min(width / screen_width, height / screen_height)
             render_width = int(screen_width * scale)
             render_height = int(screen_height * scale)
@@ -403,7 +403,7 @@ README_TEXT = (
 NOTES_TEXT = (
     "DIMOS BOOTS FROM A 512 BYTE SECTOR THAT LOADS KERNEL.BIN.\\r\\n"
     "C DRAWS THE SHELL; ASSEMBLY HANDLES BIOS AND PIT IRQ0.\\r\\n"
-    "THE 844 BY 390 CANVAS IS AN IPHONE LANDSCAPE SCREEN,\\r\\n"
+    "THE 390 BY 844 CANVAS IS AN IPHONE PORTRAIT SCREEN,\\r\\n"
     "SCALED INTO ANY VBE MODE WITHOUT STRETCHING IT.\\r\\n"
     "TTF TEXT IS ANTIALIASED AT EVERY SIZE THE SHELL ASKS FOR.\\r\\n"
     "THIS FILE IS LONGER THAN ONE 512 BYTE CLUSTER, SO READING\\r\\n"
@@ -598,34 +598,71 @@ def config_record(theme, brightness, volume):
 # guessed, so a layout change makes the tour miss instead of lie.
 # ----------------------------------------------------------------------
 
-SCREEN_WIDTH = 844
-SCREEN_HEIGHT = 390
-ICON_GRID_LEFT = (SCREEN_WIDTH - 4 * 112 - 64) // 2
+# The phone canvas, in the portrait orientation DimOS 14 uses. Every number
+# below is derived from the layout constants in dimos.h and the application
+# sources, so a layout change makes the tour miss instead of lie.
+SCREEN_WIDTH = 390
+SCREEN_HEIGHT = 844
+APP_LEFT = 26
+APP_WIDTH = SCREEN_WIDTH - 2 * APP_LEFT
+ICON_SIZE = 64
+ICON_COLUMN_STEP = 84
+ICON_ROW_STEP = 104
+ICON_GRID_TOP = 88
+ICON_COLUMNS = 4
+ICON_GRID_LEFT = (SCREEN_WIDTH - (ICON_COLUMNS - 1) * ICON_COLUMN_STEP -
+                  ICON_SIZE) // 2
+DOCK_ICON_SIZE = 56
+DOCK_GAP = 16
+DOCK_PADDING = 18
+DOCK_WIDTH = 4 * DOCK_ICON_SIZE + 3 * DOCK_GAP + 2 * DOCK_PADDING
+DOCK_X = (SCREEN_WIDTH - DOCK_WIDTH) // 2
+DOCK_Y = SCREEN_HEIGHT - (DOCK_ICON_SIZE + 2 * DOCK_PADDING) - 26
 
 
 def home_icon(index):
-    column = index % 5
-    row = index // 5
-    return (ICON_GRID_LEFT + column * 112 + 32, 46 + row * 108 + 32)
+    column = index % ICON_COLUMNS
+    row = index // ICON_COLUMNS
+    return (ICON_GRID_LEFT + column * ICON_COLUMN_STEP + ICON_SIZE // 2,
+            ICON_GRID_TOP + row * ICON_ROW_STEP + ICON_SIZE // 2)
 
 
 def dock_icon(index):
-    return ((SCREEN_WIDTH - 348) // 2 + 26 + index * 80 + 26, 337)
+    return (DOCK_X + DOCK_PADDING + index * (DOCK_ICON_SIZE + DOCK_GAP) +
+            DOCK_ICON_SIZE // 2, DOCK_Y + DOCK_PADDING + DOCK_ICON_SIZE // 2)
 
 
 def calc_key(row, column):
-    left = (SCREEN_WIDTH - (4 * 96 + 12)) // 2
-    return (left + column * 96 + 42, 146 + row * 56 + 23)
+    width = (APP_WIDTH - 3 * 10) // 4
+    return (APP_LEFT + column * (width + 10) + width // 2,
+            250 + row * (56 + 10) + 28)
 
 
 def term_key(row, column):
-    return (37 + column * 70 + 32, 226 + row * 34 + 15)
+    width = (APP_WIDTH - 9 * 4) // 10
+    return (APP_LEFT + column * (width + 4) + width // 2,
+            484 + row * (38 + 6) + 19)
 
 
-HOME_BAR = (SCREEN_WIDTH // 2, 381)
+def term_control(index):
+    width = (APP_WIDTH - 4 * 6) // 5
+    return (APP_LEFT + index * (width + 6) + width // 2, 666 + 19)
+
+
+def pad_key(column, row):
+    """The snake direction pad: up is (1, 0), left is (0, 1)."""
+    size = 76
+    gap = 10
+    left = APP_LEFT + (APP_WIDTH - (3 * size + 2 * gap)) // 2
+    return (left + column * (size + gap) + size // 2,
+            378 + row * (size + gap) + size // 2)
+
+
+HOME_BAR = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 12)
 STATUS_RIGHT = (SCREEN_WIDTH - 40, 10)
-CC_WIFI = (26 + 78 + 86, 78)
-CC_LOCK = (26 + 566 + 75, 196 + 13)
+# Control Centre: the second connectivity switch, and the lock button.
+CC_WIFI = (14 + 24 + 48 + 96, 96)
+CC_LOCK = (14 + 24 + 168 + 73, 468 + 14)
 
 
 def tour():
@@ -653,21 +690,21 @@ def tour():
     machine.screenshot("03-control-centre")
     machine.click(*CC_WIFI)
     machine.screenshot("04-control-centre-wifi")
-    machine.click(760, 320)
+    machine.click(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 40)
     machine.frames_run(2)
 
     print("\nFiles: the disk listing, then a text file")
     machine.click(*home_icon(0))
     machine.screenshot("05-files")
-    machine.click(150, 92)
-    machine.click(694, 96)
+    machine.click(APP_LEFT + 60, 94)          # the first file in the list
+    machine.click(SCREEN_WIDTH // 2, 438)     # Open
     machine.screenshot("06-file-viewer")
     machine.click(*HOME_BAR)
 
     print("\nMusic: a phone player with live progress")
     machine.click(*home_icon(1))
     machine.screenshot("07-music")
-    machine.click(404, 224)
+    machine.click(288, 202)                   # the big play button
     machine.frames_run(30)
     machine.screenshot("08-music-playing")
     machine.click(*HOME_BAR)
@@ -683,32 +720,32 @@ def tour():
 
     print("\nPaint: drag a stroke")
     machine.click(*home_icon(3))
-    machine.drag(120, 160, 420, 280)
-    machine.drag(420, 280, 300, 120)
+    machine.drag(80, 140, 320, 380)
+    machine.drag(320, 380, 150, 200)
     machine.screenshot("10-paint")
     machine.click(*HOME_BAR)
 
     print("\nSnake: steer with the on-screen pad")
     machine.click(*home_icon(4))
     machine.screenshot("11-snake")
-    machine.click(492, 175)
+    machine.click(*pad_key(1, 0))             # the direction pad: up
     machine.frames_run(20)
-    machine.click(424, 233)
+    machine.click(*pad_key(0, 1))             # then left
     machine.frames_run(20)
     machine.screenshot("12-snake-moving")
     machine.click(*HOME_BAR)
 
     print("\nMines: open a square and flag another")
     machine.click(*home_icon(5))
-    machine.click(39, 87)
-    machine.right_click(117, 165)
+    machine.click(APP_LEFT + 55, 74 + 55)     # open a square
+    machine.right_click(APP_LEFT + 130, 74 + 130)
     machine.screenshot("13-mines")
     machine.click(*HOME_BAR)
 
     print("\nCheesy Balls: two chomps")
     machine.click(*home_icon(6))
-    machine.click(620, 228)
-    machine.click(620, 228)
+    machine.click(SCREEN_WIDTH // 2, 508)     # NYAM!
+    machine.click(SCREEN_WIDTH // 2, 508)
     machine.frames_run(6)
     machine.screenshot("14-cheesy")
     machine.click(*HOME_BAR)
@@ -719,7 +756,7 @@ def tour():
     machine.click(*term_key(2, 2))   # D
     machine.click(*term_key(1, 7))   # I
     machine.click(*term_key(1, 3))   # R
-    machine.click(*term_key(2, 10))  # ENT
+    machine.click(*term_control(3))  # ENT
     machine.frames_run(2)
     machine.screenshot("16-terminal-dir")
     machine.click(*HOME_BAR)
@@ -727,11 +764,11 @@ def tour():
     print("\nSettings, and the theme cycle")
     machine.click(*home_icon(8))
     machine.screenshot("17-settings")
-    machine.click(644, 136)
+    machine.click(SCREEN_WIDTH // 2, 488)     # Change theme
     machine.screenshot("18-settings-green")
-    machine.click(644, 136)
-    machine.click(644, 136)
-    machine.click(644, 136)
+    machine.click(SCREEN_WIDTH // 2, 488)
+    machine.click(SCREEN_WIDTH // 2, 488)
+    machine.click(SCREEN_WIDTH // 2, 488)
     machine.click(*HOME_BAR)
     machine.frames_run(2)
 
@@ -757,8 +794,8 @@ def tour():
 
 def terminal_history(machine):
     """Every row of the terminal's scrollback, as text."""
-    rows = 40
-    columns = 61
+    rows = 60
+    columns = 43
     raw = machine.memory_block(machine.symbols["history"], rows * columns)
     return "\n".join(raw[row * columns:(row + 1) * columns]
                      .split(b"\0")[0].decode("ascii", "replace")
@@ -858,9 +895,9 @@ def display_test(width, height):
     machine.screenshot(f"display-{width}x{height}-home")
 
     # The canvas has to be centred and letterboxed, never stretched.
-    margin_x = (width - min(width, height * 844 // 390)) // 2
-    print(f"  {width}x{height}: canvas scaled to "
-          f"{min(width, height * 844 // 390)} px wide, "
+    scaled = min(width, height * SCREEN_WIDTH // SCREEN_HEIGHT)
+    margin_x = (width - scaled) // 2
+    print(f"  {width}x{height}: canvas scaled to {scaled} px wide, "
           f"{margin_x} px letterbox on each side")
 
 

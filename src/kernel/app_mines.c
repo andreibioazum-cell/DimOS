@@ -9,12 +9,15 @@
 
 #define GRID 9
 #define MINES 10
-#define CELL 26
+/* The board is as wide as the phone and as tall as it needs to be; the
+ * counters and buttons sit underneath it, within thumb reach. */
+#define CELL (s16)(APP_WIDTH / GRID)
 #define BOARD_WIDTH (GRID * CELL)
 #define BOARD_HEIGHT (GRID * CELL)
-#define BOARD_X (s16)APP_LEFT
+#define BOARD_X (s16)(APP_LEFT + (APP_WIDTH - BOARD_WIDTH) / 2)
 #define BOARD_Y 74
-#define BOARD_SIDE_X (s16)(BOARD_X + BOARD_WIDTH + 36)
+#define PANEL_Y (s16)(BOARD_Y + BOARD_HEIGHT + 20)
+#define BOARD_SIDE_X (s16)APP_LEFT
 
 #define HIDDEN 0u
 #define OPENED 1u
@@ -177,12 +180,12 @@ static u8 number_color(u8 count) {
 }
 
 static void mines_overlay(const char *title, const char *note, u8 color) {
-    const s16 x = (s16)(BOARD_X + 30);
-    const s16 y = (s16)(BOARD_Y + 78);
+    const s16 x = (s16)(BOARD_X + (BOARD_WIDTH - 200) / 2);
+    const s16 y = (s16)(BOARD_Y + (BOARD_HEIGHT - 78) / 2);
 
-    gfx_round_fill(x, y, 174, 78, 16, COLOR_FACE);
-    gfx_text_size_centered(x, (s16)(y + 14), 174, title, color, 18);
-    gfx_text_size_centered(x, (s16)(y + 44), 174, note, COLOR_DISABLED, 9);
+    gfx_round_fill(x, y, 200, 78, 16, COLOR_FACE);
+    gfx_text_size_centered(x, (s16)(y + 14), 200, title, color, 18);
+    gfx_text_size_centered(x, (s16)(y + 44), 200, note, COLOR_DISABLED, 9);
 }
 
 static void mines_draw(void) {
@@ -231,16 +234,19 @@ static void mines_draw(void) {
     gui_hotspot(BOARD_X, BOARD_Y, (s16)BOARD_WIDTH, (s16)BOARD_HEIGHT,
                 ID_BOARD);
 
-    gfx_text_size(BOARD_SIDE_X, 72, "MINES LEFT", COLOR_DISABLED, 9);
+    gfx_text_size(BOARD_SIDE_X, (s16)(PANEL_Y - 4), "MINES LEFT",
+                  COLOR_DISABLED, 9);
     buffer[0] = '\0';
     text_append_number(buffer, (u32)(MINES - flags_used), (u16)sizeof(buffer));
-    gfx_text_size(BOARD_SIDE_X, 84, buffer, COLOR_DEEP, 36);
+    gfx_text_size((s16)(BOARD_SIDE_X + 90), (s16)(PANEL_Y - 12), buffer,
+                  COLOR_DEEP, 32);
 
-    gui_switch(BOARD_SIDE_X, 142, 240, 36, "Flag mode", ID_FLAG_MODE,
-               flag_mode);
-    gui_button(BOARD_SIDE_X, 190, 240, 44, "New game", ID_NEW_GAME);
-    gui_button_colored(BOARD_SIDE_X, 242, 240, 40, "How to play", ID_HELP,
-                       COLOR_PANEL, COLOR_DEEP);
+    gui_switch(BOARD_SIDE_X, (s16)(PANEL_Y + 30), (s16)APP_WIDTH, 40,
+               "Flag mode", ID_FLAG_MODE, flag_mode);
+    gui_button(BOARD_SIDE_X, (s16)(PANEL_Y + 82), (s16)APP_WIDTH, 48,
+               "New game", ID_NEW_GAME);
+    gui_button_colored(BOARD_SIDE_X, (s16)(PANEL_Y + 140), (s16)APP_WIDTH, 44,
+                       "How to play", ID_HELP, COLOR_FACE, COLOR_DEEP);
 
     if (won != 0u) {
         mines_overlay("CLEARED", "Every safe square is open", COLOR_GOOD);

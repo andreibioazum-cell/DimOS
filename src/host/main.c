@@ -76,7 +76,7 @@ static void usage(void) {
          "  --port N           web port (default 8080, 0 picks a free one)\n"
          "  --bind ADDRESS     listen address (default 0.0.0.0)\n"
          "  --no-http          do not start the web server\n"
-         "  --display WxH      pretend the panel is WxH (default 844x390)\n"
+         "  --display WxH      pretend the panel is WxH (default 390x844)\n"
          "  --font PATH        TrueType fallback (default fonts/font.ttf)\n"
          "  --shots DIR        where self-test screenshots go\n"
          "  --shot PATH        write one PNG and exit\n"
@@ -179,6 +179,24 @@ static void scene_schedule(void) {
     scene_deadline = host_microseconds() + (u64)step_pause_ms * 1000ull;
 }
 
+/* Taps the centre of a home screen icon without hard-coding the grid: the
+ * layout lives in dimos.h, so this follows it when it changes. */
+static void tap_icon(u16 index) {
+    const s16 column = (s16)(index % ICON_COLUMNS);
+    const s16 row = (s16)(index / ICON_COLUMNS);
+
+    host_input_click((s16)(ICON_GRID_LEFT + column * (s16)ICON_COLUMN_STEP +
+                           (s16)(ICON_SIZE / 2u)),
+                     (s16)(ICON_GRID_TOP + row * (s16)ICON_ROW_STEP +
+                           (s16)(ICON_SIZE / 2u)),
+                     1u);
+}
+
+/* The home indicator is the bottom edge of the screen. */
+static void tap_home_bar(void) {
+    host_input_click((s16)(SCREEN_WIDTH / 2u), (s16)(SCREEN_HEIGHT - 12u), 1u);
+}
+
 static void self_test_finish(void) {
     printf("\n%d checks, %d failed. Screenshots: %s\n", checks, failures,
            shot_directory);
@@ -208,9 +226,7 @@ static void self_test_step(void) {
             record(1, "the home screen drew after unlocking");
             break;
         case 3:
-            /* Files: first icon of the grid. */
-            host_input_click((s16)((SCREEN_WIDTH - 4u * 112u - 64u) / 2u + 32u),
-                             46 + 32, 1u);
+            tap_icon(0u); /* Files */
             break;
         case 4: {
             char text[2048];
@@ -224,10 +240,10 @@ static void self_test_step(void) {
             break;
         }
         case 5:
-            host_input_click((s16)(SCREEN_WIDTH / 2u), 381, 1u); /* home bar */
+            tap_home_bar();
             break;
         case 6:
-            host_input_click(422, 186, 1u); /* Terminal, second row */
+            tap_icon(7u); /* Terminal */
             break;
         case 7:
             host_input_text("DISK\n");
@@ -243,10 +259,10 @@ static void self_test_step(void) {
                    "the terminal wrote SELFTEST.TXT through the IDE driver");
             break;
         case 10:
-            host_input_click((s16)(SCREEN_WIDTH / 2u), 381, 1u);
+            tap_home_bar();
             break;
         case 11:
-            host_input_click(534, 186, 1u); /* Settings, second row */
+            tap_icon(8u); /* Settings */
             break;
         case 12:
             screenshot("06-settings.png");
@@ -279,7 +295,7 @@ static void self_test_step(void) {
         case 14: {
             char path[640];
 
-            host_input_click((s16)(SCREEN_WIDTH / 2u), 381, 1u);
+            tap_home_bar();
             join_path(path, sizeof(path), shot_directory, "07-lock-again.png");
             (void)host_write_png(path);
             record(1, "the shell returned to the lock screen");
@@ -524,7 +540,7 @@ static int parse_options(int argc, char **argv, int *first_command) {
         } else if (text_equal(argument, "--display") != 0u &&
                    index + 1 < argc) {
             if (parse_display(argv[++index]) == 0u) {
-                fputs("--display wants WxH, for example 844x390\n", stderr);
+                fputs("--display wants WxH, for example 390x844\n", stderr);
                 return 0;
             }
         } else if (text_equal(argument, "--after") != 0u && index + 1 < argc) {

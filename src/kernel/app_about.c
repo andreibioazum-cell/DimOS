@@ -14,12 +14,15 @@
 #define ID_TEST_SOUND 3u
 #define ID_LOCK 4u
 
+/* Everything is one column in portrait: the facts, then appearance, sound
+ * and power, each group in its own card. */
 #define ROWS_X (s16)APP_LEFT
 #define ROWS_Y 74
-#define ROWS_WIDTH 420
-#define ROW_HEIGHT 33
-#define SIDE_X 470
-#define SIDE_WIDTH 348
+#define ROWS_WIDTH (s16)APP_WIDTH
+#define ROW_HEIGHT 40
+#define SIDE_X (s16)APP_LEFT
+#define SIDE_WIDTH (s16)APP_WIDTH
+#define SIDE_TOP (s16)(ROWS_Y + ROW_HEIGHT * 8 + 28)
 
 static const char *const icon[16] = {
     "................",
@@ -165,36 +168,47 @@ static void about_draw(void) {
     }
 
     /* Appearance. */
-    gui_section_label(SIDE_X, 64, "APPEARANCE");
-    gui_card(SIDE_X, ROWS_Y, SIDE_WIDTH, 116);
-    gfx_text_size((s16)(SIDE_X + 16), 88, "Theme", COLOR_DEEP, 12);
-    gfx_text_size_right((s16)(SIDE_X + SIDE_WIDTH - 16), 89,
+    gui_section_label(SIDE_X, (s16)(SIDE_TOP - 10), "APPEARANCE");
+    gui_card(SIDE_X, SIDE_TOP, SIDE_WIDTH, 104);
+    gfx_text_size((s16)(SIDE_X + 16), (s16)(SIDE_TOP + 14), "Theme",
+                  COLOR_DEEP, 12);
+    gfx_text_size_right((s16)(SIDE_X + SIDE_WIDTH - 16),
+                        (s16)(SIDE_TOP + 15),
                         theme_names[gfx_current_theme()], COLOR_DISABLED, 11);
-    gui_button((s16)(SIDE_X + 16), 116, (s16)(SIDE_WIDTH - 32), 40,
-               "Change theme", ID_THEME);
+    gui_button((s16)(SIDE_X + 16), (s16)(SIDE_TOP + 42),
+               (s16)(SIDE_WIDTH - 32), 48, "Change theme", ID_THEME);
 
     /* Sound. */
-    gui_section_label(SIDE_X, 196, "SOUND");
-    gui_card(SIDE_X, 206, SIDE_WIDTH, 66);
-    gfx_text_size((s16)(SIDE_X + 16), 220, "PC speaker", COLOR_DEEP, 12);
-    gui_button_colored((s16)(SIDE_X + 170), 214, 162, 34, "Play chime",
-                       ID_TEST_SOUND, COLOR_PANEL, COLOR_DEEP);
+    gui_section_label(SIDE_X, (s16)(SIDE_TOP + 118), "SOUND");
+    gui_card(SIDE_X, (s16)(SIDE_TOP + 128), SIDE_WIDTH, 78);
+    gfx_text_size((s16)(SIDE_X + 16), (s16)(SIDE_TOP + 142), "PC speaker",
+                  COLOR_DEEP, 12);
+    gui_button_colored((s16)(SIDE_X + 16), (s16)(SIDE_TOP + 162),
+                       (s16)(SIDE_WIDTH - 32), 36, "Play chime",
+                       ID_TEST_SOUND, COLOR_FACE, COLOR_DEEP);
 
     /* Power. */
-    gui_section_label(SIDE_X, 280, "POWER");
-    gfx_round_fill(SIDE_X, 290, SIDE_WIDTH, 58, 13, COLOR_FACE);
-    gui_button_colored((s16)(SIDE_X + 12), 298, 150, 42, "Lock", ID_LOCK,
+    gui_section_label(SIDE_X, (s16)(SIDE_TOP + 220), "POWER");
+    gfx_round_fill(SIDE_X, (s16)(SIDE_TOP + 230), SIDE_WIDTH, 64, 13,
+                   COLOR_FACE);
+    gui_button_colored((s16)(SIDE_X + 12), (s16)(SIDE_TOP + 240),
+                       (s16)((SIDE_WIDTH - 32) / 2), 44, "Lock", ID_LOCK,
                        COLOR_PANEL, COLOR_DEEP);
-    gui_button_colored((s16)(SIDE_X + 174), 298, 162, 42, "Restart",
-                       ID_RESTART, COLOR_ALERT, COLOR_FACE);
+    gui_button_colored((s16)(SIDE_X + 20 + (SIDE_WIDTH - 32) / 2),
+                       (s16)(SIDE_TOP + 240), (s16)((SIDE_WIDTH - 32) / 2), 44,
+                       "Restart", ID_RESTART, COLOR_ALERT, COLOR_FACE);
 
 #ifdef DIMOS_HOST
-    gfx_text_size(ROWS_X, 348,
-                  "DimOS 14 - an iOS 14 inspired shell, hosted on this machine",
+    gfx_text_size(ROWS_X, (s16)(SIDE_TOP + 306),
+                  "DimOS 14 - an iOS 14 inspired shell, hosted", COLOR_DISABLED,
+                  9);
+    gfx_text_size(ROWS_X, (s16)(SIDE_TOP + 320), "on this machine.",
                   COLOR_DISABLED, 9);
 #else
-    gfx_text_size(ROWS_X, 348, "DimOS 14 - an iOS 14 inspired shell for i686",
-                  COLOR_DISABLED, 9);
+    gfx_text_size(ROWS_X, (s16)(SIDE_TOP + 306),
+                  "DimOS 14 - an iOS 14 inspired shell", COLOR_DISABLED, 9);
+    gfx_text_size(ROWS_X, (s16)(SIDE_TOP + 320), "for i686.", COLOR_DISABLED,
+                  9);
 #endif
 }
 

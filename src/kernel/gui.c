@@ -1,13 +1,15 @@
 /*
  * gui.c -- the DimOS phone shell.
  *
- * DimOS presents itself as a pocket computer: a lock screen with a big
- * clock, a home screen of rounded app icons over an iOS 14 style
- * wallpaper, a translucent dock, a status bar and a Control Centre. Pages
- * are drawn edge to edge with a navigation bar and a home indicator, the
- * way a phone application is laid out, and every control is a touch-sized
- * hotspot so the same build works on a real touch panel, in a virtual
- * machine and under a PS/2 mouse on a PC.
+ * DimOS presents itself as a pocket computer with no clutter: a lock
+ * screen with a big clock, a plain gradient desktop and one grid of app
+ * icons with their names underneath. The top strip holds only the clock,
+ * a small Google search button and the battery percentage; a black strip
+ * along the bottom holds the three navigation buttons (triangle, circle,
+ * square) and the square shows recent apps. Applications open edge to
+ * edge with no window frame; a hidden Control Centre keeps the settings.
+ * Every control is a touch-sized hotspot, so the same build works on a
+ * real touch panel, in a virtual machine and under a PS/2 mouse on a PC.
  *
  * Everything on screen is either a shape or a button, and every button
  * announces where it is while it is being drawn. A tap is then simply
@@ -21,14 +23,12 @@
 
 #include "dimos.h"
 
-/* 1,193,182 PIT clocks per second / 60, rounded up. Waiting against the raw
- * hardware counter gives a strict maximum of 60 FPS without the old 10 ms
- * clock rounding the compositor down to 50 or 25 FPS. */
-#define FRAME_TIMER_COUNTS 19886ull
+/* The frame interval comes from the selected phone panel: 60 Hz by default,
+ * 120 Hz on a ProMotion-class display. timer_frame_counts() is the PIT
+ * divisor for that refresh rate, so the compositor and IRQ0 always agree. */
 
 /* Ids the shell keeps for its own controls. Applications use small ids. */
 #define HOTSPOT_ICON_BASE 0x8000u
-#define HOTSPOT_DOCK_BASE 0x8100u
 #define HOTSPOT_BACK 0x8200u
 #define HOTSPOT_HOME_BAR 0x8201u
 #define HOTSPOT_STATUS_RIGHT 0x8202u
@@ -40,9 +40,14 @@
 #define HOTSPOT_CC_LOCK 0x8222u
 #define HOTSPOT_CC_THEME 0x8223u
 #define HOTSPOT_CC_MUSIC 0x8224u
+#define HOTSPOT_CC_PANEL 0x8225u
+#define HOTSPOT_SEARCH 0x8230u
+#define HOTSPOT_SEARCH_GO 0x8231u
+#define HOTSPOT_NAV_RECENTS 0x8232u
+#define HOTSPOT_OVERLAY_OUTSIDE 0x8233u
+#define HOTSPOT_RECENT_BASE 0x8240u /* 3 recent-app cards */
 
-/* Home screen geometry from dimos.h: five columns, two rows, and a dock
- * with four of the applications repeated, exactly like a phone. */
+/* Home screen geometry from dimos.h: five columns, two rows, nothing else. */
 #define ICON_LABEL_HEIGHT 10u
 
 /* Control Centre panel. */
@@ -74,9 +79,6 @@ const Application *const application_list[] = {
 const u16 application_count =
     (u16)(sizeof(application_list) / sizeof(application_list[0]));
 
-/* Four applications live in the dock as well. */
-static const u8 dock_apps[DOCK_SLOTS] = { 0u, 1u, 2u, 8u };
-
 static Hotspot hotspots[HOTSPOT_LIMIT];
 static u16 hotspot_count;
 static u16 focused_id = HOTSPOT_NONE;
@@ -85,7 +87,6 @@ static u16 focused_id = HOTSPOT_NONE;
 static u8 focus_ring;
 static u16 pressed_id = HOTSPOT_NONE;
 static u16 active_application = 0xFFFFu;
-static u16 selected_icon;
 static u8 arrows_reserved;
 static char status_line[48];
 
@@ -101,24 +102,14 @@ static u8 status_light;
 static u8 frame_dark;
 static u8 title_accent = COLOR_SELECTION;
 
-/* The wallpaper is generated once at four fifths of the screen size and
- * stretched over the canvas with a precomputed sample map, which keeps the
- * soft gradient cheap to repaint. Orderly dithering hides the steps of the
- * indexed palette. */
-#define WALLPAPER_WIDTH ((SCREEN_WIDTH * 4u) / 5u)
-#define WALLPAPER_HEIGHT ((SCREEN_HEIGHT * 4u) / 5u)
-static u8 wallpaper_cache[WALLPAPER_WIDTH * WALLPAPER_HEIGHT];
-static u16 wallpaper_x_map[SCREEN_WIDTH];
-static u16 wallpaper_y_map[SCREEN_HEIGHT];
-static u8 wallpaper_ready;
-
-/* A 4x4 Bayer matrix, scaled to +-24 levels before quantizing. */
-static const s8 wallpaper_dither[16] = {
-    -10, 4, -6, 8,
-    10, -4, 14, 0,
-    -8, 6, -12, 2,
-    8, -2, 12, -6
-};
+/* Shell state: a search sheet, an overview sheet and the three apps
+ * that were opened most recently. */
+static u8 search_open;
+static u8 search_submitted;
+static char search_query[32];
+static u8 recents_open;
+static u16 recent_apps[3];
+static u8 recent_count;
 
 /* ------------------------------------------------------------------ */
 /* Hotspots                                                            */
@@ -308,9 +299,12 @@ void gui_list_row(s16 x, s16 y, s16 width, s16 height, const char *label,
     }
 }
 
-/* The small caption at the bottom of an application page. */
+/* The app caption lives in the strip just under the status bar: the old
+ * bottom position would collide with the fullscreen keyboards and with the
+ * black navigation strip. */
 void gui_message_bar(const char *text) {
-    gfx_text_size(APP_LEFT, (s16)(SCREEN_HEIGHT - 24), text, COLOR_DISABLED,
+    gfx_text_size((s16)APP_LEFT, 24, text,
+                  (status_light != 0u) ? COLOR_WIN_LIGHT : COLOR_DISABLED,
                   9);
     text_copy(status_line, text, (u16)sizeof(status_line));
 }
@@ -325,194 +319,105 @@ void gui_window_title_color(u8 top_color) {
 }
 
 static void draw_status_bar(u8 light);
-static void draw_home_indicator(u8 light);
+static void draw_navigation_bar(void);
+static void app_icon(s16 x, s16 y, const Application *app, s16 size,
+                     u8 glyph_scale) {
+    gfx_round_fill(x, y, size, size, (s16)(size / 4), app->color);
+    gfx_glyph((s16)(x + (size - (s16)(16 * glyph_scale)) / 2),
+              (s16)(y + (size - (s16)(16 * glyph_scale)) / 2), app->icon, 16u,
+              glyph_scale, COLOR_FACE);
+}
 
-/* The navigation bar of an application page: a back control on the left,
- * the title in the middle and a hairline at the bottom. */
-static void app_page(const char *title, u8 background) {
+/* Applications are full-screen, not windows: no title bar, no fake back
+ * arrow, no card edges. Only a small caption in the status strip names the
+ * running app; Back lives in the triangle button below. */
+static void app_page(const char *title, u8 background, u8 caption_color) {
     gfx_fill(0, 0, (s16)SCREEN_WIDTH, (s16)SCREEN_HEIGHT, background);
-    gfx_text_size(APP_LEFT, (s16)(STATUS_BAR_HEIGHT + 11), "<", title_accent,
-                  11);
-    gfx_text_size((s16)(APP_LEFT + 12), (s16)(STATUS_BAR_HEIGHT + 12),
-                  "Home", title_accent, 11);
-    gfx_text_size_centered(0, (s16)(STATUS_BAR_HEIGHT + 9), (s16)SCREEN_WIDTH,
-                           title, COLOR_DEEP, 17);
-    gfx_horizontal_line(APP_LEFT, (s16)(APP_TOP - 4), (s16)APP_WIDTH,
-                        gfx_shade(COLOR_GRID, background, 8));
-    gui_hotspot((s16)(APP_LEFT - 8), (s16)STATUS_BAR_HEIGHT,
-                (s16)100, (s16)NAV_BAR_HEIGHT, HOTSPOT_BACK);
+    gfx_text_size((s16)(APP_LEFT + 110), 6, title, caption_color, 9);
+    (void)title_accent;
 }
 
 void gui_window_frame(const char *title) {
     frame_dark = 0u;
     status_light = 0u;
     title_accent = COLOR_SELECTION;
-    app_page(title, COLOR_PANEL);
+    app_page(title, COLOR_PANEL, COLOR_DISABLED);
 }
 
 void gui_window_frame_dark(const char *title, u8 background) {
     frame_dark = 1u;
     status_light = 1u;
     title_accent = COLOR_WIN_LIGHT;
-    app_page(title, background);
-    /* The dark page needs light navigation text. */
-    gfx_text_size_centered(0, (s16)(STATUS_BAR_HEIGHT + 9), (s16)SCREEN_WIDTH,
-                           title, COLOR_FACE, 17);
-    gfx_text_size(APP_LEFT, (s16)(STATUS_BAR_HEIGHT + 11), "<",
-                  COLOR_WIN_LIGHT, 11);
-    gfx_text_size((s16)(APP_LEFT + 12), (s16)(STATUS_BAR_HEIGHT + 12),
-                  "Home", COLOR_WIN_LIGHT, 11);
-    gfx_horizontal_line(APP_LEFT, (s16)(APP_TOP - 4), (s16)APP_WIDTH,
-                        gfx_shade(COLOR_DEEP, background, 8));
+    app_page(title, background, COLOR_WIN_LIGHT);
 }
 
 /* ------------------------------------------------------------------ */
 /* Wallpaper                                                           */
 /* ------------------------------------------------------------------ */
 
-static s16 clamp_channel(s32 value) {
-    if (value < 0) {
-        return 0;
-    }
-    if (value > 255) {
-        return 255;
-    }
-    return (s16)value;
-}
-
-static void add_blob(s32 *red, s32 *green, s32 *blue, s32 x, s32 y,
-                     s32 center_x, s32 center_y, s32 radius, s32 weight,
-                     s32 tint_red, s32 tint_green, s32 tint_blue) {
-    const s32 delta_x = x - center_x;
-    const s32 delta_y = y - center_y;
-    const s32 distance = delta_x * delta_x + delta_y * delta_y;
-    const s32 square = radius * radius;
-
-    if (distance < square) {
-        const s32 amount = ((square - distance) * weight) / square;
-
-        *red += ((tint_red - *red) * amount) / 256;
-        *green += ((tint_green - *green) * amount) / 256;
-        *blue += ((tint_blue - *blue) * amount) / 256;
-    }
-}
-
-/* A soft multi-colour gradient in the spirit of the iOS 14 wallpaper:
- * a deep indigo base with pink, cyan and violet light bleeding through
- * it, darker in the corners so white text always reads. */
-static void wallpaper_build(void) {
-    u16 y;
-
-    for (y = 0u; y < WALLPAPER_HEIGHT; ++y) {
-        const s32 py = (s32)y * 256 / (s32)(WALLPAPER_HEIGHT - 1u);
-        u16 x;
-
-        for (x = 0u; x < WALLPAPER_WIDTH; ++x) {
-            const s32 px = (s32)x * 256 / (s32)(WALLPAPER_WIDTH - 1u);
-            s32 red = 26 + (104 - 26) * py / 256;
-            s32 green = 24 + (54 - 24) * py / 256;
-            s32 blue = 84 + (168 - 84) * py / 256;
-
-            add_blob(&red, &green, &blue, px, py, 176, 26, 230, 190,
-                     255, 112, 196);
-            add_blob(&red, &green, &blue, px, py, 44, 150, 190, 150,
-                     58, 190, 255);
-            add_blob(&red, &green, &blue, px, py, 300, 214, 250, 170,
-                     136, 84, 255);
-            add_blob(&red, &green, &blue, px, py, 380, 40, 170, 150,
-                     18, 18, 74);
-            add_blob(&red, &green, &blue, px, py, 236, 256, 210, 130,
-                     38, 28, 96);
-
-            {
-                const s16 shift = wallpaper_dither[(y & 3u) * 4u + (x & 3u)];
-
-                wallpaper_cache[(u32)y * WALLPAPER_WIDTH + x] =
-                    gfx_color_from_rgb(
-                        (u8)clamp_channel(red + shift),
-                        (u8)clamp_channel(green + shift),
-                        (u8)clamp_channel(blue + shift));
-            }
-        }
-    }
-    for (y = 0u; y < SCREEN_WIDTH; ++y) {
-        wallpaper_x_map[y] =
-            (u16)(((u32)y * (WALLPAPER_WIDTH - 1u)) / (SCREEN_WIDTH - 1u));
-    }
-    for (y = 0u; y < SCREEN_HEIGHT; ++y) {
-        wallpaper_y_map[y] =
-            (u16)(((u32)y * (WALLPAPER_HEIGHT - 1u)) / (SCREEN_HEIGHT - 1u));
-    }
-    wallpaper_ready = 1u;
-}
+/* The desktop is just a vertical gradient: no blobs, no gloss, no noise.
+ * Sixteen palette bands are enough to read as a smooth ramp, and drawing
+ * them straight into the back buffer keeps the frame cheap. */
+#define WALL_TOP_RED 18u
+#define WALL_TOP_GREEN 24u
+#define WALL_TOP_BLUE 68u
+#define WALL_BOTTOM_RED 186u
+#define WALL_BOTTOM_GREEN 96u
+#define WALL_BOTTOM_BLUE 132u
 
 static void draw_wallpaper(void) {
-    u16 y;
+    const u8 top = gfx_color_from_rgb(WALL_TOP_RED, WALL_TOP_GREEN,
+                                      WALL_TOP_BLUE);
+    const u8 bottom = gfx_color_from_rgb(WALL_BOTTOM_RED,
+                                         WALL_BOTTOM_GREEN,
+                                         WALL_BOTTOM_BLUE);
+    u8 bands[FONT_ALPHA_MAX];
+    u8 band;
+    u16 row;
 
-    if (wallpaper_ready == 0u) {
-        wallpaper_build();
+    /* gfx_shade(foreground=bottom, background=top, alpha): alpha 0 is the
+     * top colour, alpha 15 is one step short of the bottom one. */
+    for (band = 0u; band < FONT_ALPHA_MAX; ++band) {
+        bands[band] = gfx_shade(bottom, top, band);
     }
-    for (y = 0u; y < SCREEN_HEIGHT; ++y) {
-        const u8 *source = wallpaper_cache +
-                           (u32)wallpaper_y_map[y] * WALLPAPER_WIDTH;
-        u8 *target = screen + (u32)y * SCREEN_WIDTH;
-        u16 x;
+    for (row = 0u; row < SCREEN_HEIGHT; ++row) {
+        const u8 color = bands[((u32)row * (FONT_ALPHA_MAX - 1u)) /
+                               (u32)(SCREEN_HEIGHT - 1u)];
+        u16 column;
 
-        for (x = 0u; x < SCREEN_WIDTH; ++x) {
-            target[x] = source[wallpaper_x_map[x]];
+        for (column = 0u; column < SCREEN_WIDTH; ++column) {
+            screen[(u32)row * SCREEN_WIDTH + column] = color;
         }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Status bar, dock and home indicator                                 */
+/* Status bar and navigation                                          */
 /* ------------------------------------------------------------------ */
 
-static void draw_signal(u8 light) {
-    const u8 color = (light != 0u) ? COLOR_FACE : COLOR_DEEP;
-    const u16 heights[4] = { 3u, 5u, 7u, 9u };
-    u8 index;
-
-    for (index = 0u; index < 4u; ++index) {
-        gfx_fill((s16)(SCREEN_WIDTH - 126 + index * 5),
-                 (s16)(16 - heights[index]), 3, (s16)heights[index], color);
-    }
+/* The right edge of the status strip stays clear of the rotated inset,
+ * exactly like the safe area of a real phone. */
+static s16 status_edge(void) {
+    return (s16)(SCREEN_WIDTH - display_safe_right());
 }
 
-static void draw_wifi(u8 light) {
-    const u8 color = (light != 0u) ? COLOR_FACE : COLOR_DEEP;
-    const s16 center_x = (s16)(SCREEN_WIDTH - 69);
-    const s16 base_y = 16;
-
-    gfx_fill((s16)(center_x - 1), (s16)(base_y - 2), 3, 3, color);
-    gfx_line((s16)(center_x - 7), (s16)(base_y - 7),
-             (s16)(center_x - 4), (s16)(base_y - 10), color);
-    gfx_line((s16)(center_x - 4), (s16)(base_y - 10),
-             (s16)center_x, (s16)(base_y - 11), color);
-    gfx_line((s16)center_x, (s16)(base_y - 11),
-             (s16)(center_x + 4), (s16)(base_y - 10), color);
-    gfx_line((s16)(center_x + 4), (s16)(base_y - 10),
-             (s16)(center_x + 7), (s16)(base_y - 7), color);
-    gfx_line((s16)(center_x - 4), (s16)(base_y - 5),
-             (s16)(center_x - 2), (s16)(base_y - 7), color);
-    gfx_line((s16)(center_x - 2), (s16)(base_y - 7),
-             (s16)center_x, (s16)(base_y - 8), color);
-    gfx_line((s16)center_x, (s16)(base_y - 8),
-             (s16)(center_x + 2), (s16)(base_y - 7), color);
-    gfx_line((s16)(center_x + 2), (s16)(base_y - 7),
-             (s16)(center_x + 4), (s16)(base_y - 5), color);
+/* A believable charge indicator: it starts full and loses one percent per
+ * simulated minute. DimOS has no battery controller, but the status strip
+ * should still read like a phone's. */
+static u8 charge_level(void) {
+    return (u8)(100u - (u8)((time_milliseconds() / 60000u) % 41u));
 }
 
 static void draw_battery(u8 light) {
     const u8 color = (light != 0u) ? COLOR_FACE : COLOR_DEEP;
-    const s16 x = (s16)(SCREEN_WIDTH - 50);
+    const s16 x = (s16)(status_edge() - 50);
     const s16 y = 6;
+    const u8 level = charge_level();
 
     gfx_round_outline(x, y, 24, 12, 4, color);
     gfx_fill((s16)(x + 25), (s16)(y + 4), 2, 4, color);
-    gfx_round_fill((s16)(x + 2), (s16)(y + 2), 14, 8, 2, light != 0u
-                                                           ? COLOR_FACE
-                                                           : COLOR_DEEP);
+    gfx_round_fill((s16)(x + 2), (s16)(y + 2),
+                   (s16)(1u + (u16)level * 17u / 100u), 8, 2, color);
 }
 
 static void clock_text(char *out, u16 capacity, u8 short_hours) {
@@ -536,48 +441,118 @@ static void clock_text(char *out, u16 capacity, u8 short_hours) {
     text_append_number(out, clock_minutes(), capacity);
 }
 
+/* Just the time and the charge: no signal bars, no "5G", no Wi-Fi arcs. */
 static void draw_status_bar(u8 light) {
     char clock_line[8];
-
-    clock_text(clock_line, (u16)sizeof(clock_line), 1u);
-    gfx_text_size(24, 5, clock_line, (light != 0u) ? COLOR_FACE : COLOR_DEEP,
-                  11);
-    gfx_text_size((s16)(SCREEN_WIDTH - 100), 6, "5G",
-                  (light != 0u) ? COLOR_FACE : COLOR_DEEP, 9);
-    draw_signal(light);
-    draw_wifi(light);
-    draw_battery(light);
-}
-
-static void draw_home_indicator(u8 light) {
+    char charge_line[6];
     const u8 color = (light != 0u) ? COLOR_FACE : COLOR_DEEP;
 
-    gfx_round_fill((s16)((SCREEN_WIDTH - HOME_INDICATOR_WIDTH) / 2),
-                   (s16)HOME_INDICATOR_Y, (s16)HOME_INDICATOR_WIDTH, 4, 2,
-                   color);
-    gui_hotspot((s16)((SCREEN_WIDTH - 220) / 2), (s16)(HOME_INDICATOR_Y - 8),
-                220, 18, HOTSPOT_HOME_BAR);
+    charge_line[0] = '\0';
+    text_append_number(charge_line, charge_level(), (u16)sizeof(charge_line));
+    text_append_character(charge_line, '%', (u16)sizeof(charge_line));
+    gfx_text_size_right((s16)(status_edge() - 56), 6, charge_line, color, 9);
+    draw_battery(light);
+
+    clock_text(clock_line, (u16)sizeof(clock_line), 1u);
+    /* The clock starts after the rotated notch inset on the left. */
+    gfx_text_size((s16)(24 + display_safe_left() / 2u), 5, clock_line,
+                  color, 11);
+}
+
+/* Three-button navigation: triangle = Back, circle = Home, square =
+ * Overview. The black strip is drawn on every page, including over apps. */
+static void draw_navigation_bar(void) {
+    const s16 y = (s16)(NAV_BAR_Y + 16);
+    const s16 centers[3] = {
+        (s16)(SCREEN_WIDTH / 4u), (s16)(SCREEN_WIDTH / 2u),
+        (s16)(3u * SCREEN_WIDTH / 4u)
+    };
+
+    gfx_fill(0, (s16)NAV_BAR_Y, (s16)SCREEN_WIDTH, 32, COLOR_BLACK);
+    /* Back: a left-pointing triangle. */
+    gfx_line((s16)(centers[0] - 7), y, (s16)(centers[0] + 7), (s16)(y - 8),
+             COLOR_FACE);
+    gfx_line((s16)(centers[0] - 7), y, (s16)(centers[0] + 7), (s16)(y + 8),
+             COLOR_FACE);
+    gfx_line((s16)(centers[0] + 7), (s16)(y - 8), (s16)(centers[0] + 7),
+             (s16)(y + 8), COLOR_FACE);
+    /* Home: a circle. */
+    gfx_circle(centers[1], y, 7, COLOR_FACE, 0u);
+    /* Overview: a square. */
+    gfx_round_outline((s16)(centers[2] - 7), (s16)(y - 7), 14, 14, 2,
+                      COLOR_FACE);
+
+    gui_hotspot((s16)(centers[0] - 60), (s16)NAV_BAR_Y, 120, 32,
+                HOTSPOT_BACK);
+    gui_hotspot((s16)(centers[1] - 60), (s16)NAV_BAR_Y, 120, 32,
+                HOTSPOT_HOME_BAR);
+    gui_hotspot((s16)(centers[2] - 60), (s16)NAV_BAR_Y, 120, 32,
+                HOTSPOT_NAV_RECENTS);
+}
+
+/* A single word in the status strip is the Google search button. No pill,
+ * no border, no icon: the desktop stays just a gradient and app icons. It
+ * sits left of centre, clear of the notch/island drawn at the top. */
+static void draw_search_link(void) {
+    const s16 x = 140;
+
+    gfx_text_size_centered(x, 6, 88, "Google", COLOR_FACE, 10);
+    gui_hotspot(x, 0, 88, (s16)STATUS_BAR_HEIGHT, HOTSPOT_SEARCH);
 }
 
 /* ------------------------------------------------------------------ */
-/* App icons                                                           */
+/* Search and overview sheets                                          */
 /* ------------------------------------------------------------------ */
 
-static void app_icon(s16 x, s16 y, const Application *app, s16 size,
-                     u8 glyph_scale) {
-    const s16 radius = (s16)(size / 4);
+static void draw_overlay_backdrop(void) {
+    gfx_gradient_vertical(0, 0, (s16)SCREEN_WIDTH, (s16)SCREEN_HEIGHT,
+                          COLOR_DEEP, COLOR_BLACK);
+}
 
-    gfx_round_fill(x, y, size, size, radius,
-                   (pressed_id != HOTSPOT_NONE &&
-                    pressed_id >= HOTSPOT_DOCK_BASE &&
-                    pressed_id < (u16)(HOTSPOT_DOCK_BASE + DOCK_SLOTS))
-                       ? gfx_shade(app->color, COLOR_BLACK, 3)
-                       : app->color);
-    /* A gentle light from above makes the flat tint read as a glass tile. */
-    gfx_round_gloss(x, y, size, size, radius);
-    gfx_glyph((s16)(x + (size - (s16)(16 * glyph_scale)) / 2),
-              (s16)(y + (size - (s16)(16 * glyph_scale)) / 2), app->icon, 16u,
-              glyph_scale, COLOR_FACE);
+/* A small search sheet: typing works with a hardware keyboard, but DimOS
+ * has no network stack, so the query only ever reaches this page. */
+static void draw_search_overlay(void) {
+    gui_hotspot(0, 0, (s16)SCREEN_WIDTH, (s16)SCREEN_HEIGHT,
+                HOTSPOT_OVERLAY_OUTSIDE);
+    draw_overlay_backdrop();
+    gfx_round_fill(90, 74, 664, 232, 22, COLOR_FACE);
+    gfx_text_size(120, 92, "Google", COLOR_DEEP, 22);
+    gfx_round_fill(120, 136, 604, 42, 21, COLOR_PANEL);
+    gfx_text_size(140, 147,
+                  (search_query[0] != '\0') ? search_query : "Search the web",
+                  (search_query[0] != '\0') ? COLOR_DEEP : COLOR_DISABLED, 14);
+    gfx_text_size(120, 190,
+                  (search_submitted != 0u)
+                      ? "No results - DimOS has no network connection"
+                      : "Type a query and press Enter",
+                  COLOR_DISABLED, 10);
+    gui_button_colored(120, 226, 180, 44, "Search", HOTSPOT_SEARCH_GO,
+                       COLOR_SELECTION, COLOR_FACE);
+}
+
+/* Overview: the last three applications, as tappable cards. */
+static void draw_recents_overlay(void) {
+    u8 index;
+
+    gui_hotspot(0, 0, (s16)SCREEN_WIDTH, (s16)SCREEN_HEIGHT,
+                HOTSPOT_OVERLAY_OUTSIDE);
+    draw_overlay_backdrop();
+    gfx_text_size_centered(0, 76, (s16)SCREEN_WIDTH, "Recent apps",
+                           COLOR_FACE, 18);
+    if (recent_count == 0u) {
+        gfx_text_size_centered(0, 180, (s16)SCREEN_WIDTH,
+                               "No apps opened yet", COLOR_FACE, 13);
+    }
+    for (index = 0u; index < recent_count; ++index) {
+        const Application *app = application_list[recent_apps[index]];
+        const s16 x = (s16)(SCREEN_WIDTH / 2 - 245 + (s16)index * 170);
+
+        gfx_round_fill(x, 116, 150, 176, 18, COLOR_FACE);
+        app_icon((s16)(x + 43), 142, app, 64, 3);
+        gfx_text_size_centered(x, 232, 150, app->short_label, COLOR_DEEP, 11);
+        gui_hotspot(x, 116, 150, 176,
+                    (u16)(HOTSPOT_RECENT_BASE + index));
+    }
 }
 
 static void home_icon(s16 column, s16 row, u16 index) {
@@ -585,21 +560,12 @@ static void home_icon(s16 column, s16 row, u16 index) {
     const s16 x = (s16)(ICON_GRID_LEFT + column * (s16)ICON_COLUMN_STEP);
     const s16 y = (s16)(ICON_GRID_TOP + row * (s16)ICON_ROW_STEP);
     const u16 id = (u16)(HOTSPOT_ICON_BASE + index);
-    const u8 selected = (u8)(selected_icon == index);
 
     app_icon(x, y, app, (s16)ICON_SIZE, 3);
-
-    /* The label sits on the wallpaper, so it gets a shadow. */
-    if (selected != 0u) {
-        gfx_round_fill((s16)(x - 6), (s16)(y + ICON_SIZE + 3),
-                       (s16)(ICON_SIZE + 12), 16, 6, COLOR_SELECTION);
-    }
-    gfx_text_size_shadowed(
-        (s16)(x + (s16)(ICON_SIZE - (s16)gfx_text_size_width(
-                                            app->short_label,
-                                            ICON_LABEL_HEIGHT)) / 2),
-        (s16)(y + ICON_SIZE + 7), app->short_label, COLOR_FACE,
-        ICON_LABEL_HEIGHT);
+    /* Plain text below the icon, with no shadow and no highlight. */
+    gfx_text_size_centered((s16)(x - 24), (s16)(y + ICON_SIZE + 7),
+                           (s16)(ICON_SIZE + 48), app->short_label,
+                           COLOR_FACE, ICON_LABEL_HEIGHT);
     gui_hotspot((s16)(x - 8), (s16)(y - 4), (s16)(ICON_SIZE + 16),
                 (s16)(ICON_SIZE + 26), id);
 }
@@ -608,34 +574,13 @@ static void draw_home_screen(void) {
     u8 index;
 
     draw_wallpaper();
-
     for (index = 0u; index < application_count && index < 10u; ++index) {
         home_icon((s16)(index % ICON_COLUMNS), (s16)(index / ICON_COLUMNS),
                   index);
     }
-
-    /* Page dots, as every phone home screen has. */
-    gfx_round_fill((s16)(SCREEN_WIDTH / 2 - 22), 259, 6, 6, 3, COLOR_FACE);
-    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2), 259, 6, 6, 3, COLOR_FACE, 6u);
-    gfx_round_fill_alpha((s16)(SCREEN_WIDTH / 2 + 22), 259, 6, 6, 3,
-                         COLOR_FACE, 6u);
-
-    /* The translucent dock. */
-    gfx_round_fill_alpha((s16)((SCREEN_WIDTH - 348) / 2), (s16)DOCK_Y, 348,
-                         (s16)DOCK_HEIGHT, 24, COLOR_FACE, 4u);
-    for (index = 0u; index < DOCK_SLOTS; ++index) {
-        const u16 app = dock_apps[index];
-        const s16 x = (s16)((SCREEN_WIDTH - 348) / 2 + 26 + index * 80);
-
-        app_icon(x, (s16)(DOCK_Y + (DOCK_HEIGHT - DOCK_ICON_SIZE) / 2),
-                 application_list[app], (s16)DOCK_ICON_SIZE, 2);
-        gui_hotspot((s16)(x - 6), (s16)(DOCK_Y + 6),
-                    (s16)(DOCK_ICON_SIZE + 12), (s16)(DOCK_HEIGHT - 12),
-                    (u16)(HOTSPOT_DOCK_BASE + index));
-    }
-
     draw_status_bar(1u);
-    draw_home_indicator(1u);
+    draw_search_link();
+    draw_navigation_bar();
 }
 
 /* ------------------------------------------------------------------ */
@@ -684,13 +629,6 @@ static void draw_date_line(char *out, u16 capacity) {
                 capacity);
 }
 
-static void draw_lock_icon(s16 center_x, s16 top) {
-    gfx_round_outline((s16)(center_x - 6), (s16)top, 12, 12, 6, COLOR_FACE);
-    gfx_round_fill((s16)(center_x - 9), (s16)(top + 8), 18, 14, 4, COLOR_FACE);
-    gfx_circle((s16)center_x, (s16)(top + 15), 2, COLOR_DEEP, 1u);
-    gfx_fill((s16)center_x, (s16)(top + 15), 1, 3, COLOR_DEEP);
-}
-
 static void draw_lock_screen(void) {
     char time_line[8];
     char date_line[48];
@@ -707,19 +645,15 @@ static void draw_lock_screen(void) {
     }
 
     draw_status_bar(1u);
-    draw_lock_icon((s16)(SCREEN_WIDTH / 2), 38);
 
     clock_text(time_line, (u16)sizeof(time_line), 0u);
     gfx_text_size_centered(0, 86, (s16)SCREEN_WIDTH, time_line, COLOR_FACE, 76);
     draw_date_line(date_line, (u16)sizeof(date_line));
     gfx_text_size_centered(0, 176, (s16)SCREEN_WIDTH, date_line, COLOR_FACE, 14);
 
-    gfx_text_size_centered(0, 292, (s16)SCREEN_WIDTH, "Tap or swipe up to open",
+    gfx_text_size_centered(0, 292, (s16)SCREEN_WIDTH, "Tap to open",
                            COLOR_FACE, 11);
-    gfx_text_size_centered(0, 308, (s16)SCREEN_WIDTH,
-                           "DimOS 14 - a small phone in your PC", COLOR_FACE,
-                           9);
-    draw_home_indicator(1u);
+    draw_navigation_bar();
 }
 
 /* ------------------------------------------------------------------ */
@@ -834,8 +768,13 @@ static void draw_control_centre(void) {
     gui_button_colored((s16)(panel_x + 566), 196, 150, 26, "Lock screen",
                        HOTSPOT_CC_LOCK, COLOR_DEEP, COLOR_FACE);
 
-    gfx_text_size((s16)(panel_x + 28), 210,
-                  "Tap the wallpaper to go back", COLOR_DISABLED, 9);
+    /* The physical mode and how the phone canvas fits into it. */
+    display_output_line(status_line, (u16)sizeof(status_line));
+    gfx_text_size((s16)(panel_x + 28), 210, status_line, COLOR_DISABLED, 9);
+    gfx_text_size((s16)(panel_x + 28), 226, "Tap the wallpaper to go back",
+                  COLOR_DISABLED, 9);
+    gui_button_colored((s16)(panel_x + 300), 204, 150, 26, "Change panel",
+                       HOTSPOT_CC_PANEL, COLOR_PANEL, COLOR_DEEP);
 }
 
 /* ------------------------------------------------------------------ */
@@ -868,7 +807,7 @@ static void draw_frame(void) {
         title_accent = COLOR_SELECTION;
         app->draw();
         draw_status_bar(status_light);
-        draw_home_indicator(status_light);
+        draw_navigation_bar();
         gui_hotspot((s16)(SCREEN_WIDTH - 190), 0, 190,
                     (s16)STATUS_BAR_HEIGHT, HOTSPOT_STATUS_RIGHT);
         if (control_open != 0u) {
@@ -876,6 +815,21 @@ static void draw_frame(void) {
         }
     }
 
+    /* Sheets sit above everything; the navigation keys remain on top so
+     * the circle always gets home and the square closes the overview. */
+    if (locked == 0u && (search_open != 0u || recents_open != 0u)) {
+        if (search_open != 0u) {
+            draw_search_overlay();
+        }
+        if (recents_open != 0u) {
+            draw_recents_overlay();
+        }
+        draw_navigation_bar();
+    }
+
+    /* Rounded corners and the camera cutout belong to the panel, not to
+     * any single page, so they are composited over the finished frame. */
+    display_draw_bezel();
     gfx_draw_pointer(input_pointer_x(), input_pointer_y());
     (void)frame_dark;
 }
@@ -899,10 +853,25 @@ const Application *gui_application(u16 index) {
     return application_list[index];
 }
 
+static void remember_app(u16 index) {
+    u8 slot;
+
+    for (slot = 3u; slot > 1u; --slot) {
+        recent_apps[slot - 1u] = recent_apps[slot - 2u];
+    }
+    recent_apps[0] = index;
+    if (recent_count < 3u) {
+        ++recent_count;
+    }
+}
+
 void gui_open(u16 index) {
     if (index >= application_count) {
         return;
     }
+    remember_app(index);
+    search_open = 0u;
+    recents_open = 0u;
     active_application = index;
     pressed_id = HOTSPOT_NONE;
     focused_id = HOTSPOT_NONE;
@@ -923,6 +892,8 @@ void gui_lock(void) {
 void gui_go_home(void) {
     active_application = 0xFFFFu;
     control_open = 0u;
+    search_open = 0u;
+    recents_open = 0u;
     pressed_id = HOTSPOT_NONE;
     focused_id = HOTSPOT_NONE;
     arrows_reserved = 0u;
@@ -997,6 +968,54 @@ static void activate(u16 id, const Event *event) {
         sound_beep();
         return;
     }
+    /* Search and overview are modal sheets: only their own controls and
+     * the three navigation keys are live while one of them is up. */
+    if (search_open != 0u) {
+        if (id == HOTSPOT_SEARCH_GO) {
+            search_submitted = 1u;
+            return;
+        }
+        if (id == HOTSPOT_NAV_RECENTS || id == HOTSPOT_BACK ||
+            id == HOTSPOT_HOME_BAR) {
+            search_open = 0u;
+            gui_go_home();
+            return;
+        }
+        if (id == HOTSPOT_OVERLAY_OUTSIDE) {
+            search_open = 0u;
+            return;
+        }
+        return;
+    }
+    if (recents_open != 0u) {
+        if (id >= HOTSPOT_RECENT_BASE &&
+            id < (u16)(HOTSPOT_RECENT_BASE + 3u)) {
+            const u8 slot = (u8)(id - HOTSPOT_RECENT_BASE);
+
+            if (slot < recent_count) {
+                gui_open(recent_apps[slot]);
+            }
+            return;
+        }
+        if (id == HOTSPOT_NAV_RECENTS || id == HOTSPOT_OVERLAY_OUTSIDE ||
+            id == HOTSPOT_BACK || id == HOTSPOT_HOME_BAR) {
+            recents_open = 0u;
+            gui_go_home();
+            return;
+        }
+        return;
+    }
+    if (id == HOTSPOT_SEARCH) {
+        search_open = 1u;
+        search_submitted = 0u;
+        search_query[0] = '\0';
+        return;
+    }
+    if (id == HOTSPOT_NAV_RECENTS) {
+        recents_open = 1u;
+        control_open = 0u;
+        return;
+    }
     if (id == HOTSPOT_CC_OUTSIDE) {
         control_open = 0u;
         return;
@@ -1018,6 +1037,12 @@ static void activate(u16 id, const Event *event) {
         }
         if (id == HOTSPOT_CC_THEME) {
             gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
+            settings_save();
+            return;
+        }
+        if (id == HOTSPOT_CC_PANEL) {
+            /* Switch to the next phone panel and remember it on the disk. */
+            display_next_profile();
             settings_save();
             return;
         }
@@ -1055,10 +1080,6 @@ static void activate(u16 id, const Event *event) {
         gui_open((u16)(id - HOTSPOT_ICON_BASE));
         return;
     }
-    if (id >= HOTSPOT_DOCK_BASE && id < (u16)(HOTSPOT_DOCK_BASE + DOCK_SLOTS)) {
-        gui_open(dock_apps[id - HOTSPOT_DOCK_BASE]);
-        return;
-    }
     if (active_application != 0xFFFFu) {
         deliver_to_application(EVENT_CLICK, id, event);
     }
@@ -1079,8 +1100,32 @@ static void handle_event(const Event *event) {
 
     switch (event->type) {
         case EVENT_KEY:
+            /* The search sheet takes the keyboard while it is open. */
+            if (search_open != 0u) {
+                if (event->key == KEY_ESCAPE) {
+                    search_open = 0u;
+                } else if (event->key == KEY_ENTER) {
+                    search_submitted = 1u;
+                } else if (event->key == KEY_BACKSPACE) {
+                    const u16 length = text_length(search_query);
+
+                    if (length != 0u) {
+                        search_query[length - 1u] = '\0';
+                    }
+                } else if (event->key >= 32u && event->key <= 126u &&
+                           text_length(search_query) <
+                               (u16)(sizeof(search_query) - 1u)) {
+                    search_submitted = 0u;
+                    text_append_character(search_query,
+                                          (char)event->key,
+                                          (u16)sizeof(search_query));
+                }
+                return;
+            }
             if (event->key == KEY_ESCAPE) {
-                if (control_open != 0u) {
+                if (recents_open != 0u) {
+                    recents_open = 0u;
+                } else if (control_open != 0u) {
                     control_open = 0u;
                 } else if (active_application != 0xFFFFu) {
                     gui_go_home();
@@ -1124,11 +1169,6 @@ static void handle_event(const Event *event) {
                 focused_id = pressed_id;
             }
             focus_ring = 0u;
-            if (active_application == 0xFFFFu &&
-                pressed_id >= HOTSPOT_ICON_BASE &&
-                pressed_id < (u16)(HOTSPOT_ICON_BASE + application_count)) {
-                selected_icon = (u16)(pressed_id - HOTSPOT_ICON_BASE);
-            }
             if (active_application != 0xFFFFu && control_open == 0u) {
                 deliver_to_application(EVENT_PRESS, pressed_id, event);
             }
@@ -1183,7 +1223,7 @@ static void wait_for_next_frame(u64 *deadline) {
     if (now >= *deadline) {
         /* Rendering missed its slot. Start a fresh interval instead of trying
          * to catch up with a burst that could exceed the 60 FPS ceiling. */
-        *deadline = now + FRAME_TIMER_COUNTS;
+        *deadline = now + timer_frame_counts();
         return;
     }
 #ifndef DIMOS_SANDBOX
@@ -1198,7 +1238,7 @@ static void wait_for_next_frame(u64 *deadline) {
         timer_update();
     }
 #endif
-    *deadline += FRAME_TIMER_COUNTS;
+    *deadline += timer_frame_counts();
 }
 
 void gui_run(void) {
@@ -1211,7 +1251,6 @@ void gui_run(void) {
     /* Fit the phone canvas into any physical display: a real panel, a PC
      * monitor, or a virtual machine's framebuffer. */
     gfx_set_output_resolution(video_width, video_height);
-    selected_icon = 0u;
     active_application = 0xFFFFu;
     locked = 1u;
     control_open = 0u;
@@ -1221,7 +1260,7 @@ void gui_run(void) {
     toggles[3] = 0u;
     sound_play_startup();
     timer_update();
-    next_frame = timer_counter() + FRAME_TIMER_COUNTS;
+    next_frame = timer_counter() + timer_frame_counts();
     shown_minute = clock_minutes();
 
     for (;;) {

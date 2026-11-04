@@ -177,9 +177,9 @@ static void paint_draw(void) {
                        (brush_size == 4u) ? COLOR_SELECTION : COLOR_FACE,
                        (brush_size == 4u) ? COLOR_FACE : COLOR_DEEP);
 
-    gui_button_colored(SWATCH_X, 336, 78, 26, "Clear", ID_CLEAR,
+    gui_button_colored(SWATCH_X, 326, 78, 26, "Clear", ID_CLEAR,
                        COLOR_PANEL, COLOR_DEEP);
-    gui_button((s16)(SWATCH_X + 86), 336, 78, 26, "Save", ID_SAVE);
+    gui_button((s16)(SWATCH_X + 86), 326, 78, 26, "Save", ID_SAVE);
 
     gui_message_bar(message);
 }

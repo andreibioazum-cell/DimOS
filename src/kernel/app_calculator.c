@@ -13,7 +13,7 @@
 #define KEY_STEP_X (KEY_WIDTH + 12)
 #define KEY_STEP_Y (KEY_HEIGHT + 10)
 #define KEY_LEFT (s16)((SCREEN_WIDTH - (4 * KEY_STEP_X + 12)) / 2)
-#define KEY_TOP 146
+#define KEY_TOP 140 /* four rows end at y=354, above the nav strip */
 
 #define ID_DIGIT_FIRST 1u   /* 1 .. 10 for '0' .. '9' */
 #define ID_CLEAR 20u

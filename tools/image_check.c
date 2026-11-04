@@ -27,8 +27,8 @@ typedef unsigned int u32;
 #define FLOPPY_SIZE 1474560u
 #define HDD_SIZE 8388608u
 /* The bootloader walks the FAT chain into 2000:0000; the preloaded data
- * window at 0x30000 caps the kernel at 126 sectors. */
-#define MAXIMUM_KERNEL_SIZE 64512u
+ * window at 0x40000 leaves 256 sectors (128 KiB) for the kernel. */
+#define MAXIMUM_KERNEL_SIZE 131072u
 #define ISO_SECTOR 2048u
 
 static const char kernel_fat_name[11] = {
@@ -127,7 +127,7 @@ static void check_kernel(size_t size) {
     printf("Kernel\n");
     require(size > 0u, "KERNEL.BIN is empty");
     require(size <= MAXIMUM_KERNEL_SIZE,
-            "KERNEL.BIN exceeds the 64512 byte loader window");
+            "KERNEL.BIN exceeds the 131072 byte loader window");
     printf("          %u bytes\n", (unsigned)size);
 }
 

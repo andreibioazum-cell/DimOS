@@ -3,8 +3,10 @@
  *
  * The numbers here are read from the machine itself: the BIOS memory count,
  * the clock chip, the boot sector of the disk DimOS started from, and the
- * state of the mouse driver. Appearance, sound, restart and lock live on
- * the right, like an iOS settings page.
+ * state of the mouse driver. The second tab reads the phone panel profile
+ * instead (native resolution, ppi, scale, aspect, refresh, safe area).
+ * Appearance, the panel picker, sound and power live on the right, like an
+ * iOS settings page.
  */
 
 #include "dimos.h"
@@ -13,6 +15,9 @@
 #define ID_RESTART 2u
 #define ID_TEST_SOUND 3u
 #define ID_LOCK 4u
+#define ID_TAB_MACHINE 5u
+#define ID_TAB_DISPLAY 6u
+#define ID_PANEL 7u
 
 #define ROWS_X (s16)APP_LEFT
 #define ROWS_Y 74
@@ -44,6 +49,8 @@ static const char *const theme_names[THEME_COUNT] = {
     "Colour", "Green", "Amber", "Mono"
 };
 
+static u8 show_display;
+
 static void two_digits(char *out, u16 capacity, u8 value) {
     if (value < 10u) {
         text_append_character(out, '0', capacity);
@@ -52,7 +59,7 @@ static void two_digits(char *out, u16 capacity, u8 value) {
 }
 
 static void about_open(void) {
-    /* Nothing to prepare; every number is read while drawing. */
+    show_display = 0u;
 }
 
 static void about_video_value(char *value, u16 capacity) {
@@ -69,13 +76,22 @@ static void about_video_value(char *value, u16 capacity) {
 }
 
 static void about_draw(void) {
-    char value[32];
+    char value[40];
     u16 row;
 
     gui_window_frame("Settings");
 
-    /* The group of machine facts. */
-    gui_section_label(ROWS_X, 64, "THIS PHONE");
+    /* Two tabs over the same grouped list: machine facts and panel facts. */
+    gui_section_label(ROWS_X, 64,
+                      (show_display != 0u) ? "DISPLAY & PANEL" : "THIS PHONE");
+    gui_button_colored((s16)(ROWS_X + ROWS_WIDTH - 172), 58, 80, 22,
+                       "Machine", ID_TAB_MACHINE,
+                       (show_display != 0u) ? COLOR_PANEL : COLOR_SELECTION,
+                       (show_display != 0u) ? COLOR_DEEP : COLOR_FACE);
+    gui_button_colored((s16)(ROWS_X + ROWS_WIDTH - 86), 58, 80, 22,
+                       "Display", ID_TAB_DISPLAY,
+                       (show_display != 0u) ? COLOR_SELECTION : COLOR_PANEL,
+                       (show_display != 0u) ? COLOR_FACE : COLOR_DEEP);
     gui_card(ROWS_X, ROWS_Y, ROWS_WIDTH,
              (s16)(ROW_HEIGHT * 8 + 4));
 
@@ -84,72 +100,79 @@ static void about_draw(void) {
         const char *shown = "";
 
         value[0] = '\0';
-        switch (row) {
-            case 0u:
-                label = "Model";
-                shown = "DimOS 14";
-                break;
-            case 1u:
-                label = "Chip";
-                shown = "i686 protected mode";
-                break;
-            case 2u:
-                label = "Display";
-                about_video_value(value, (u16)sizeof(value));
-                shown = value;
-                break;
-            case 3u:
-                label = "Disk";
-                shown = (ata_present() != 0u) ? ata_model() : "none found";
-                break;
-            case 4u:
-                label = "Volume";
-                if (volume_present() != 0u) {
-                    text_append_number(value, volume_total_bytes() / 1024u,
+        if (show_display != 0u) {
+            label = display_row_label((u8)row);
+            display_row_value((u8)row, value, (u16)sizeof(value));
+            shown = value;
+        } else {
+            switch (row) {
+                case 0u:
+                    label = "Model";
+                    shown = "DimOS 14";
+                    break;
+                case 1u:
+                    label = "Chip";
+                    shown = "i686 protected mode";
+                    break;
+                case 2u:
+                    label = "Display";
+                    about_video_value(value, (u16)sizeof(value));
+                    shown = value;
+                    break;
+                case 3u:
+                    label = "Disk";
+                    shown = (ata_present() != 0u) ? ata_model() : "none found";
+                    break;
+                case 4u:
+                    label = "Volume";
+                    if (volume_present() != 0u) {
+                        text_append_number(value, volume_total_bytes() / 1024u,
+                                           (u16)sizeof(value));
+                        text_append(value, " KiB, ", (u16)sizeof(value));
+                        text_append_number(value, volume_free_bytes() / 1024u,
+                                           (u16)sizeof(value));
+                        text_append(value, " free", (u16)sizeof(value));
+                    } else {
+                        text_append(value, "not formatted", (u16)sizeof(value));
+                    }
+                    shown = value;
+                    break;
+                case 5u:
+                    label = "Files";
+                    if (volume_present() != 0u) {
+                        text_append_number(value, volume_file_count(),
+                                           (u16)sizeof(value));
+                        text_append(value, " saved, ", (u16)sizeof(value));
+                    }
+                    text_append_number(value, file_system_visible_count(),
                                        (u16)sizeof(value));
-                    text_append(value, " KiB, ", (u16)sizeof(value));
-                    text_append_number(value, volume_free_bytes() / 1024u,
-                                       (u16)sizeof(value));
-                    text_append(value, " free", (u16)sizeof(value));
-                } else {
-                    text_append(value, "not formatted", (u16)sizeof(value));
-                }
-                shown = value;
-                break;
-            case 5u:
-                label = "Files";
-                if (volume_present() != 0u) {
-                    text_append_number(value, volume_file_count(),
-                                       (u16)sizeof(value));
-                    text_append(value, " saved, ", (u16)sizeof(value));
-                }
-                text_append_number(value, file_system_visible_count(),
-                                   (u16)sizeof(value));
-                text_append(value, " on the boot disk", (u16)sizeof(value));
-                shown = value;
-                break;
-            case 6u:
-                label = "Saved";
-                if (settings_saved() != 0u) {
-                    text_append(value, theme_names[settings_saved_theme()],
-                                (u16)sizeof(value));
-                    text_append(value, ", level ", (u16)sizeof(value));
-                    text_append_number(value, settings_saved_brightness(),
-                                       (u16)sizeof(value));
-                } else {
-                    text_append(value, "this session only", (u16)sizeof(value));
-                }
-                shown = value;
-                break;
-            default:
-                label = "Clock";
-                two_digits(value, (u16)sizeof(value), clock_hours());
-                text_append_character(value, ':', (u16)sizeof(value));
-                two_digits(value, (u16)sizeof(value), clock_minutes());
-                text_append_character(value, ':', (u16)sizeof(value));
-                two_digits(value, (u16)sizeof(value), clock_seconds());
-                shown = value;
-                break;
+                    text_append(value, " on the boot disk", (u16)sizeof(value));
+                    shown = value;
+                    break;
+                case 6u:
+                    label = "Saved";
+                    if (settings_saved() != 0u) {
+                        text_append(value, theme_names[settings_saved_theme()],
+                                    (u16)sizeof(value));
+                        text_append(value, ", level ", (u16)sizeof(value));
+                        text_append_number(value, settings_saved_brightness(),
+                                           (u16)sizeof(value));
+                    } else {
+                        text_append(value, "this session only",
+                                    (u16)sizeof(value));
+                    }
+                    shown = value;
+                    break;
+                default:
+                    label = "Clock";
+                    two_digits(value, (u16)sizeof(value), clock_hours());
+                    text_append_character(value, ':', (u16)sizeof(value));
+                    two_digits(value, (u16)sizeof(value), clock_minutes());
+                    text_append_character(value, ':', (u16)sizeof(value));
+                    two_digits(value, (u16)sizeof(value), clock_seconds());
+                    shown = value;
+                    break;
+            }
         }
         gui_list_row(ROWS_X, (s16)(ROWS_Y + 2 + (s16)row * ROW_HEIGHT),
                      ROWS_WIDTH, ROW_HEIGHT, label, shown,
@@ -158,38 +181,60 @@ static void about_draw(void) {
 
     /* Appearance. */
     gui_section_label(SIDE_X, 64, "APPEARANCE");
-    gui_card(SIDE_X, ROWS_Y, SIDE_WIDTH, 116);
-    gfx_text_size((s16)(SIDE_X + 16), 88, "Theme", COLOR_DEEP, 12);
-    gfx_text_size_right((s16)(SIDE_X + SIDE_WIDTH - 16), 89,
+    gui_card(SIDE_X, 74, SIDE_WIDTH, 86);
+    gfx_text_size((s16)(SIDE_X + 16), 86, "Theme", COLOR_DEEP, 12);
+    gfx_text_size_right((s16)(SIDE_X + SIDE_WIDTH - 16), 87,
                         theme_names[gfx_current_theme()], COLOR_DISABLED, 11);
-    gui_button((s16)(SIDE_X + 16), 116, (s16)(SIDE_WIDTH - 32), 40,
+    gui_button((s16)(SIDE_X + 16), 112, (s16)(SIDE_WIDTH - 32), 36,
                "Change theme", ID_THEME);
 
-    /* Sound. */
-    gui_section_label(SIDE_X, 196, "SOUND");
-    gui_card(SIDE_X, 206, SIDE_WIDTH, 66);
-    gfx_text_size((s16)(SIDE_X + 16), 220, "PC speaker", COLOR_DEEP, 12);
-    gui_button_colored((s16)(SIDE_X + 170), 214, 162, 34, "Play chime",
-                       ID_TEST_SOUND, COLOR_PANEL, COLOR_DEEP);
+    /* The phone panel itself, with its cutout and safe area. */
+    gui_section_label(SIDE_X, 170, "PANEL PROFILE");
+    gui_card(SIDE_X, 180, SIDE_WIDTH, 100);
+    gfx_text_size((s16)(SIDE_X + 16), 188, display_current()->name,
+                  COLOR_DEEP, 13);
+    display_output_line(value, (u16)sizeof(value));
+    gfx_text_size((s16)(SIDE_X + 16), 208, value, COLOR_DISABLED, 9);
+    value[0] = '\0';
+    text_append_number(value, display_refresh_hz(), (u16)sizeof(value));
+    text_append(value, " Hz", (u16)sizeof(value));
+    gfx_text_size((s16)(SIDE_X + 180), 232, value, COLOR_DEEP, 11);
+    gui_button_colored((s16)(SIDE_X + 16), 226, 150, 34, "Change panel",
+                       ID_PANEL, COLOR_SELECTION, COLOR_FACE);
+    display_draw_mini((s16)(SIDE_X + SIDE_WIDTH - 62), 188, 40, 76);
 
-    /* Power. */
-    gui_section_label(SIDE_X, 280, "POWER");
-    gfx_round_fill(SIDE_X, 290, SIDE_WIDTH, 58, 13, COLOR_FACE);
-    gui_button_colored((s16)(SIDE_X + 12), 298, 150, 42, "Lock", ID_LOCK,
-                       COLOR_PANEL, COLOR_DEEP);
-    gui_button_colored((s16)(SIDE_X + 174), 298, 162, 42, "Restart",
+    /* Sound and power share the last card. */
+    gui_section_label(SIDE_X, 288, "SOUND & POWER");
+    gfx_round_fill(SIDE_X, 298, SIDE_WIDTH, 52, 13, COLOR_FACE);
+    gui_button_colored((s16)(SIDE_X + 10), 304, 112, 38, "Play chime",
+                       ID_TEST_SOUND, COLOR_PANEL, COLOR_DEEP);
+    gui_button_colored((s16)(SIDE_X + 128), 304, 100, 38, "Lock",
+                       ID_LOCK, COLOR_PANEL, COLOR_DEEP);
+    gui_button_colored((s16)(SIDE_X + 234), 304, 104, 38, "Restart",
                        ID_RESTART, COLOR_ALERT, COLOR_FACE);
 
-    gfx_text_size(ROWS_X, 348, "DimOS 14 - an iOS 14 inspired shell for i686",
-                  COLOR_DISABLED, 9);
+    /* No footer: the black navigation strip owns the bottom of the page. */
 }
 
 static void about_event(const Event *event) {
     if (event->type != EVENT_CLICK) {
         return;
     }
+    if (event->key == ID_TAB_MACHINE) {
+        show_display = 0u;
+        return;
+    }
+    if (event->key == ID_TAB_DISPLAY) {
+        show_display = 1u;
+        return;
+    }
     if (event->key == ID_THEME) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
+        settings_save();
+        return;
+    }
+    if (event->key == ID_PANEL) {
+        display_next_profile();
         settings_save();
         return;
     }

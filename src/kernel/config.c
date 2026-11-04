@@ -13,13 +13,15 @@
 
 #define SETTINGS_FILE "CONFIG.CFG"
 #define SETTINGS_BYTES 16u
-#define SETTINGS_VERSION 1u
+#define SETTINGS_VERSION_1 1u
+#define SETTINGS_VERSION 2u /* v2 adds the phone panel profile at byte 8 */
 #define SETTINGS_MAGIC 0x534F4D44u /* "DMOS" */
 
 static u8 settings_valid;
 static u8 settings_theme;
 static u8 settings_brightness;
 static u8 settings_volume;
+static u8 settings_panel;
 
 static u8 record_checksum(const u8 *bytes, u16 length) {
     u8 sum = 0xA5u;
@@ -40,6 +42,7 @@ void settings_load(void) {
     settings_theme = 0u;
     settings_brightness = 13u;
     settings_volume = 10u;
+    settings_panel = 0u;
 
     if (volume_present() == 0u) {
         return;
@@ -50,7 +53,10 @@ void settings_load(void) {
 
     magic = (u32)buffer[0] | ((u32)buffer[1] << 8u) |
             ((u32)buffer[2] << 16u) | ((u32)buffer[3] << 24u);
-    if (magic != SETTINGS_MAGIC || buffer[4] != SETTINGS_VERSION) {
+    /* A version 1 record from an older DimOS has no panel byte; it simply
+     * boots with the default phone profile. */
+    if (magic != SETTINGS_MAGIC ||
+        (buffer[4] != SETTINGS_VERSION_1 && buffer[4] != SETTINGS_VERSION)) {
         return;
     }
     if (record_checksum(buffer, (u16)(SETTINGS_BYTES - 1u)) != buffer[15]) {
@@ -59,10 +65,17 @@ void settings_load(void) {
     if (buffer[5] >= THEME_COUNT || buffer[6] > 20u || buffer[7] > 20u) {
         return;
     }
+    if (buffer[4] == SETTINGS_VERSION &&
+        buffer[8] >= DISPLAY_PROFILE_COUNT) {
+        return;
+    }
 
     settings_theme = buffer[5];
     settings_brightness = buffer[6];
     settings_volume = buffer[7];
+    if (buffer[4] == SETTINGS_VERSION) {
+        settings_panel = buffer[8];
+    }
     settings_valid = 1u;
 }
 
@@ -80,6 +93,10 @@ u8 settings_saved_brightness(void) {
 
 u8 settings_saved_volume(void) {
     return settings_volume;
+}
+
+u8 settings_saved_panel(void) {
+    return settings_panel;
 }
 
 /* Reads the current values out of the shell and writes them to the disk.
@@ -107,6 +124,7 @@ u8 settings_save(void) {
     buffer[5] = settings_theme;
     buffer[6] = settings_brightness;
     buffer[7] = settings_volume;
+    buffer[8] = display_profile_index();
     buffer[15] = record_checksum(buffer, (u16)(SETTINGS_BYTES - 1u));
 
     if (volume_write_file(SETTINGS_FILE, buffer, SETTINGS_BYTES) == 0u) {
@@ -126,6 +144,7 @@ void settings_apply(void) {
     gfx_select_theme(settings_theme);
     gui_set_brightness(settings_brightness);
     gui_set_volume(settings_volume);
+    display_select_profile(settings_panel);
 }
 
 u8 settings_forget(void) {

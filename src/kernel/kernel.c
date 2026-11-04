@@ -188,14 +188,18 @@ void text_pad_right(char *destination, u16 width, u16 capacity) {
 #define TIMER_INPUT_FREQUENCY 1193182u
 #define TIMER_TICK_COUNTS 11932u
 #define TIMER_LATCH_CHANNEL_0 0x00u
+#define FRAME_COUNTS_60HZ 19886u /* 1193182 / 60, rounded up */
 #ifndef DIMOS_SANDBOX
 /* One IRQ per display interval. HLT sleeps between frames instead of
- * spinning on the PIT, while maintaining the compositor's 60 Hz cadence. */
-#define TIMER_DIVISOR 19886u
+ * spinning on the PIT, while maintaining the compositor's 60 Hz cadence.
+ * A 90/120 Hz phone panel reprograms the divisor at run time. */
+#define TIMER_DIVISOR FRAME_COUNTS_60HZ
 extern void timer_interrupts_init(void);
+extern void timer_program_pit(u32 divisor);
 volatile u32 timer_irq_low;
 volatile u32 timer_irq_high;
 static u64 timer_last_counts;
+static u32 timer_divisor_counts = FRAME_COUNTS_60HZ;
 #else
 /* The Unicorn simulator advances the PIT on reads and has no PIC/IDT. */
 #define TIMER_DIVISOR 65535u
@@ -232,14 +236,44 @@ void timer_init(void) {
     timer_irq_high = 0u;
     /* Channel 0, square-wave generator, approximately 60 interrupts/sec. */
     port_write_byte(PORT_PIT_COMMAND, 0x36u);
-    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR & 0xFFu));
-    port_write_byte(PORT_PIT_CHANNEL_0, (u8)(TIMER_DIVISOR >> 8u));
+    timer_program_pit(FRAME_COUNTS_60HZ);
     timer_interrupts_init();
     timer_last_counts = 0u;
 #endif
     timer_leftover_counts = 0u;
     elapsed_milliseconds = 0u;
     ticks_waiting = 0u;
+}
+
+/* A phone panel reports its own refresh rate (60, 90 or 120 Hz). The PIT
+ * divisor and the amount of raw clocks IRQ0 accounts for are switched
+ * together by timer_program_pit() with interrupts paused, so the software
+ * counter stays continuous: no frame deadline has to be rebuilt. */
+void timer_set_refresh_hz(u8 hertz) {
+#ifndef DIMOS_SANDBOX
+    u32 divisor;
+
+    if (hertz < 30u || hertz > 240u) {
+        hertz = 60u;
+    }
+    divisor = (TIMER_INPUT_FREQUENCY + (u32)hertz / 2u) / (u32)hertz;
+    if (divisor > 65535u) {
+        divisor = 65535u;
+    }
+    timer_divisor_counts = divisor;
+    timer_program_pit(divisor);
+#else
+    /* The simulated PIT has no IRQ0; the tour keeps its 60 Hz pacing. */
+    (void)hertz;
+#endif
+}
+
+u32 timer_frame_counts(void) {
+#ifndef DIMOS_SANDBOX
+    return timer_divisor_counts;
+#else
+    return FRAME_COUNTS_60HZ;
+#endif
 }
 
 void timer_update(void) {
@@ -475,6 +509,7 @@ void kernel_main(void) {
     debug_marker("DIMOS:PROTECTED\n");
 
     timer_init();
+    display_init();
     ram_disk_init();
     file_system_init();
     clock_init();

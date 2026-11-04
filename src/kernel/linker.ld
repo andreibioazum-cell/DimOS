@@ -5,9 +5,10 @@ ENTRY(kernel_entry)
 KERNEL_LOAD_ADDRESS = 0x00020000;
 
 /* The BIOS loader follows KERNEL.BIN's FAT chain into 2000:0000. Its loaded
- * sections must stay below the FAT12 data window at 0x30000. BSS is NOLOAD
- * and lives at 1 MiB, away from the disk cache and graphics buffers. */
-KERNEL_LOADER_LIMIT = 64512;
+ * sections must stay below the FAT12 data window at 0x40000, which leaves a
+ * full 128 KiB for the kernel. BSS is NOLOAD and lives at 1 MiB, away from
+ * the disk cache and graphics buffers. */
+KERNEL_LOADER_LIMIT = 131072;
 
 PHDRS
 {

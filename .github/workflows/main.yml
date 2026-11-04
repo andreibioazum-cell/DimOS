@@ -80,13 +80,13 @@ jobs:
           test -s tools/sandbox/out/00-smoke.png
           file tools/sandbox/out/00-smoke.png
 
-      # The 1.5K panel and the disk are the two things a build machine can
-      # prove without hardware: the canvas has to scale into 2712x1220, and
-      # files have to survive a reboot.
-      - name: 1.5K display and disk test
+      # The native phone panel and the disk are the two things a build
+      # machine can prove without hardware: the canvas has to fill 2532x1170
+      # at exactly 3x, and files plus the saved panel survive a reboot.
+      - name: Phone panel and disk test
         run: |
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --display 2712x1220
-          test -s tools/sandbox/out/display-2712x1220-home.png
+          /tmp/venv/bin/python tools/sandbox/run_kernel.py --display 2532x1170
+          test -s tools/sandbox/out/display-2532x1170-home.png
           /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
           test -s tools/sandbox/out/26-reboot-load.png
 

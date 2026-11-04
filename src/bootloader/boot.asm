@@ -43,9 +43,10 @@ ROOT_SECTS    equ 14
 FAT_LBA       equ 1
 FAT_SECTS     equ 18
 DATA_LBA      equ 33
-; 256 sectors = 128 KiB at 0x30000..0x50000: enough for KERNEL.BIN's
-; clusters plus FONT.TTF and the small user files. Must match
-; DATA_WINDOW_SECTORS in src/kernel/fs.c.
+; 256 sectors = 128 KiB at 0x40000..0x60000: enough for KERNEL.BIN's
+; clusters plus FONT.TTF and the small user files. Starting the window at
+; 0x40000 leaves 0x20000..0x40000 (128 KiB) for the kernel itself, twice
+; the old 64 KiB limit. Must match DATA_WINDOW in src/kernel/fs.c.
 DATA_PRELOAD  equ 256
 ROOT_ENTRIES  equ 224
 
@@ -121,8 +122,8 @@ main:
         mov cx, FAT_SECTS
         call ReadSectors
 
-        ; First 256 data sectors -> 3000:0000 (file manager window)
-        mov ax, 0x3000
+        ; First 256 data sectors -> 4000:0000 (file manager window)
+        mov ax, 0x4000
         mov es, ax
         xor bx, bx
         mov ax, DATA_LBA

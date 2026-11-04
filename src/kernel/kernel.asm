@@ -28,11 +28,14 @@ VBE_REQUIRED_ATTRIBUTES equ 0x0091    ; supported + graphics + linear FB
 ; The phone shell is scaled by the C presenter, so any landscape mode will
 ; do. Rather than demanding one exact resolution (a phone panel is nothing
 ; like a 1920x1080 monitor), every direct-colour linear mode is scored and
-; the biggest sensible one is chosen. 32bpp beats 16bpp at equal size.
+; the biggest sensible one is chosen. 32bpp beats 16bpp at equal size, and
+; a mode with a 19.5:9 phone aspect (the 844 x 390 canvas is 2.164:1) gets
+; a bonus over a merely bigger desktop monitor: that is how a native
+; 2532 x 1170 or 2712 x 1220 panel wins without being hard-coded anywhere.
 ;
-; The ceiling is the 1.5K panel DimOS targets: 2712 x 1220, the 3.1x render
-; scale of the 844 x 390 phone canvas. Modes above it (2560x1440, 3840x2160)
-; are still offered, and there the largest one wins as before.
+; The ceiling is a phone panel: 2712 x 1220 fits the 844 x 390 canvas at
+; about 3.1x; the default 2532 x 1170 panel is exactly 3x. Modes above it
+; (2560x1440, 3840x2160) are still offered, and the largest one wins.
 %ifdef DIMOS_EMULATOR
 ; The economy profile caps the physical surface at roughly 1024x768: enough
 ; for a sharp 844x390 phone screen, and four times less framebuffer traffic
@@ -44,9 +47,9 @@ VBE_MAX_HEIGHT equ 768
 %else
 VBE_MIN_WIDTH equ 640
 VBE_MIN_HEIGHT equ 400
-; 1.5K: a 2712 x 1220 panel renders the 844 x 390 canvas at 3.2x, which is
-; exactly what a modern phone screen is. The cap leaves headroom for wider
-; 1440p and 4K displays, so a desktop monitor still gets its own mode.
+; 2532 x 1170 renders the 844 x 390 canvas at exactly 3x; 2712 x 1220
+; (1.5K class) gives about 3.1x. The cap leaves headroom for wider 1440p
+; and 4K displays, so a desktop monitor still gets its own mode.
 VBE_MAX_WIDTH equ 3840
 VBE_MAX_HEIGHT equ 2160
 %endif
@@ -56,6 +59,7 @@ global kernel_entry
 global timer_interrupts_init
 global cpu_halt
 global cpu_wait_until
+global timer_program_pit
 extern kernel_main
 extern timer_irq_low
 extern timer_irq_high
@@ -200,6 +204,32 @@ kernel_entry:
 
     mov edx, eax
     imul edx, ebx                   ; area, the primary score
+
+    ; Phone panel bonus: 2.08 <= width/height <= 2.25 means this mode has
+    ; the 19.5:9 .. 20:9 shape of a real phone screen. Give it a quarter of
+    ; its area on top, so a slightly smaller native phone panel beats a big
+    ; 16:10 monitor. edx keeps the score, the other registers are restored.
+    push eax
+    push ebx
+    push ecx
+    mov ecx, eax
+    imul ecx, 100                   ; width * 100
+    mov eax, ebx
+    imul eax, 208                   ; height * 208
+    cmp ecx, eax
+    jb .scan_aspect_done
+    mov eax, ebx
+    imul eax, 225                   ; height * 225
+    cmp ecx, eax
+    ja .scan_aspect_done
+    mov eax, edx
+    shr eax, 2
+    add edx, eax
+.scan_aspect_done:
+    pop ecx
+    pop ebx
+    pop eax
+
     cmp ecx, 32
     jne .scan_compare
     add edx, edx                    ; 32bpp is worth twice a 16bpp mode
@@ -343,6 +373,22 @@ protected_mode_entry:
 ; Hardware port access, using the 32-bit System V cdecl calling convention.
 ; ------------------------------------------------------------------
 
+; void timer_program_pit(u32 divisor)
+; Reprogram PIT channel 0 for a phone panel's refresh rate. IRQ0 adds
+; timer_irq_increment raw input clocks to the software counter, so the
+; divisor and the accounting have to change together. pushfd/popfd keeps
+; IF as the caller left it: timer_init() calls this before the IDT exists.
+timer_program_pit:
+    pushfd
+    cli
+    mov eax, [esp + 8]
+    mov [timer_irq_increment], eax
+    out 0x40, al
+    shr eax, 8
+    out 0x40, al
+    popfd
+    ret
+
 global port_read_byte
 global port_read_word
 global port_write_word
@@ -455,7 +501,8 @@ cpu_wait_until:
 align 16
 timer_irq_handler:
     push eax
-    add dword [timer_irq_low], TIMER_DIVISOR
+    mov eax, [timer_irq_increment]
+    add [timer_irq_low], eax
     adc dword [timer_irq_high], 0
     mov al, 0x20
     out 0x20, al
@@ -522,6 +569,14 @@ video_height:
     dw 200
 video_bits_per_pixel:
     db 8
+
+; Raw PIT input clocks added to timer_irq_low/high on every IRQ0. It starts
+; at the 60 Hz divisor (1193182 / 60) and is changed by timer_program_pit()
+; when a 90/120 Hz phone panel is selected.
+align 4
+global timer_irq_increment
+timer_irq_increment:
+    dd TIMER_DIVISOR
 
 align 4
 candidate:

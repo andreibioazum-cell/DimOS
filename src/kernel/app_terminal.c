@@ -142,6 +142,7 @@ static void command_help(void) {
     terminal_print("  DATE         show the date");
     terminal_print("  VER          show the version");
     terminal_print("  THEME        switch the palette");
+    terminal_print("  PANEL name   show or pick a phone panel");
     terminal_print("  BEEP         test the speaker");
     terminal_print("  LOCK         lock the phone");
     terminal_print("  HOME         back to the home screen");
@@ -335,6 +336,30 @@ static void command_time(void) {
     terminal_print(buffer);
 }
 
+/* The phone panel factory: PANEL prints the active device class, PANEL
+ * <slug|1-4> switches it and writes the choice into CONFIG.CFG. */
+static void command_panel(const char *argument) {
+    char line[TERM_COLUMNS + 1u];
+    u8 index;
+
+    if (*argument != '\0') {
+        if (display_select_named(argument) == 0u) {
+            terminal_print("Unknown panel - try PANEL");
+            return;
+        }
+        settings_save();
+    }
+    display_panel_line(line, (u16)sizeof(line));
+    terminal_print(line);
+    line[0] = '\0';
+    text_append(line, "Slots: ", (u16)sizeof(line));
+    for (index = 0u; index < display_profile_count(); ++index) {
+        text_append(line, display_profile(index)->slug, (u16)sizeof(line));
+        text_append_character(line, ' ', (u16)sizeof(line));
+    }
+    terminal_print(line);
+}
+
 /* Splits "COMMAND argument" in place and returns the argument. */
 static char *split_argument(char *command) {
     while (*command != ' ' && *command != '\0') {
@@ -415,7 +440,11 @@ static void run_command(char *command) {
         terminal_print("DimOS 14 + i686 protected mode");
     } else if (text_equal_ignore_case(command, "THEME") != 0u) {
         gfx_select_theme((u8)((gfx_current_theme() + 1u) % THEME_COUNT));
+        settings_save();
         terminal_print("Palette switched");
+    } else if (text_equal_ignore_case(command, "PANEL") != 0u ||
+               text_equal_ignore_case(command, "DISPLAY") != 0u) {
+        command_panel(argument);
     } else if (text_equal_ignore_case(command, "BEEP") != 0u) {
         sound_play_startup();
     } else if (text_equal_ignore_case(command, "LOCK") != 0u) {

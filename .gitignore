@@ -30,3 +30,6 @@ disk_img/
 lpt/
 __pycache__/
 *.pyc
+*.log
+.venv/
+.venv/**

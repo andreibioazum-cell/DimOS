@@ -1,14 +1,15 @@
 /*
  * DimOS kernel -- declarations shared by every C file.
  *
- * DimOS is a freestanding i686 protected-mode kernel with a mobile shell:
- * a lock screen, a home screen with rounded app icons, a translucent dock,
- * a status bar and a Control Centre, in the spirit of iOS 14. The logical
- * screen is an iPhone-sized 844x390 landscape canvas that is scaled to
- * whatever VBE display the machine offers, so the phone layout is the
- * primary one while PC monitors and emulators show it letterboxed and
- * perfectly usable with a mouse. The shell needs no keyboard: everything
- * is a touch target, and the terminal brings its own keyboard.
+ * DimOS is a freestanding i686 protected-mode kernel with a deliberately
+ * plain phone shell: a gradient desktop, a grid of app icons with their
+ * names underneath, a thin status strip, three navigation buttons and a
+ * Control Centre. Applications open full screen. The logical screen is an
+ * iPhone-sized 844x390 landscape canvas that is scaled to whatever VBE
+ * display the machine offers, so phone panels are the primary target while
+ * PC monitors and emulators show it letterboxed and usable with a mouse.
+ * The shell needs no keyboard: everything is a touch target, and the
+ * terminal brings its own keyboard.
  *
  * Coding rules for this directory:
  *   - everything is plain C11, freestanding (no libc or inline assembly);
@@ -91,7 +92,8 @@ extern u16 video_height;
 extern u8 video_bits_per_pixel;
 
 /* Free RAM below one megabyte that applications may use as a bitmap. */
-#define SCRATCH_ADDRESS 0x00050000u
+/* Above the 128 KiB preloaded FAT data window at 0x40000..0x60000. */
+#define SCRATCH_ADDRESS 0x00070000u
 #define SCRATCH_BYTES 32768u
 
 /* Where the boot code copies the 8x8 font that ships in the video BIOS. */
@@ -102,35 +104,30 @@ extern u8 video_bits_per_pixel;
 /* Phone shell layout                                                  */
 /* ------------------------------------------------------------------ */
 
-/* The status bar runs across the top of every screen. In an application
- * the navigation bar sits directly below it and the content starts under
- * that; the home indicator always floats just above the bottom edge. */
+/* A thin status strip runs across the top of every screen. Applications
+ * are full screen underneath it; the bottom navigation strip floats just
+ * above the edge. */
 #define STATUS_BAR_HEIGHT 22u
 #define NAV_BAR_HEIGHT 36u
 #define APP_TOP (STATUS_BAR_HEIGHT + NAV_BAR_HEIGHT + 2u)
 #define APP_LEFT 26u
 #define APP_RIGHT (SCREEN_WIDTH - 26u)
 #define APP_WIDTH (SCREEN_WIDTH - 2u * APP_LEFT)
-#define APP_BOTTOM (SCREEN_HEIGHT - 26u)
+/* The three-button navigation bar owns the last 32 rows. */
+#define NAV_BAR_Y (SCREEN_HEIGHT - 32u)
+#define APP_BOTTOM (NAV_BAR_Y - 4u)
 #define APP_HEIGHT (APP_BOTTOM - APP_TOP)
-#define HOME_INDICATOR_Y (SCREEN_HEIGHT - 9u)
-#define HOME_INDICATOR_WIDTH 128u
 
-/* Home screen grid: five columns of rounded icons on two rows, with the
- * dock underneath. Coordinates are derived so the whole grid stays
- * centred on any width the canvas may take. */
+/* The desktop is deliberately plain: a gradient and one grid of icons
+ * with their names underneath. No dock, no page dots, no floating pills. */
 #define ICON_COLUMNS 5u
 #define ICON_ROWS 2u
 #define ICON_SIZE 64u
 #define ICON_COLUMN_STEP 112u
-#define ICON_ROW_STEP 108u
-#define ICON_GRID_TOP 46u
+#define ICON_ROW_STEP 120u
+#define ICON_GRID_TOP 96u
 #define ICON_GRID_LEFT ((s16)((SCREEN_WIDTH - (s16)(ICON_COLUMNS - 1u) * ICON_COLUMN_STEP - (s16)ICON_SIZE) / 2))
 #define ICON_LABEL_GAP 8u
-#define DOCK_HEIGHT 70u
-#define DOCK_Y (SCREEN_HEIGHT - DOCK_HEIGHT - 18u)
-#define DOCK_ICON_SIZE 52u
-#define DOCK_SLOTS 4u
 
 /* ------------------------------------------------------------------ */
 /* Colours                                                             */
@@ -171,7 +168,7 @@ enum {
     COLOR_GRID = 29u,
     COLOR_DEEP = 30u,
     COLOR_CURSOR = 31u,
-    COLOR_TASKBAR = 32u,     /* the dock's translucent white           */
+    COLOR_TASKBAR = 32u,     /* light taskbar / panel surface         */
     COLOR_WIN_BG = 33u,
     COLOR_WIN_GLOW = 34u,    /* the brighter iOS tint for pressed keys */
     COLOR_WIN_LIGHT = 35u,   /* sky blue used by a few app icons       */
@@ -265,6 +262,69 @@ void gfx_select_theme(u8 theme);
 u8 gfx_current_theme(void);
 
 /* ------------------------------------------------------------------ */
+/* display.c -- the phone panel profile                               */
+/* ------------------------------------------------------------------ */
+
+/* A phone is not just a framebuffer. These are the numbers of real device
+ * classes: native pixels, the point grid apps are laid out in, density,
+ * scale, refresh, aspect ratio, the camera cutout and the safe area. */
+enum {
+    PANEL_NONE = 0u,
+    PANEL_NOTCH = 1u,
+    PANEL_ISLAND = 2u,
+    PANEL_HOLE = 3u
+};
+
+typedef struct {
+    const char *name;
+    const char *slug;          /* DIMOS_PHONE= and PANEL <name> */
+    u16 pixels_x;              /* native portrait width in pixels */
+    u16 pixels_y;              /* native portrait height in pixels */
+    u16 points_x;              /* logical portrait width in points */
+    u16 points_y;              /* logical portrait height in points */
+    u16 ppi;
+    u16 refresh_hz;
+    u8 diagonal_10;            /* screen diagonal, tenths of an inch */
+    u8 scale_10;               /* @3.0x is stored as 30 */
+    u16 aspect_x10;            /* 19.5:9 is stored as 195 and 9 */
+    u16 aspect_y;
+    u8 cutout;                 /* PANEL_* */
+    u8 radius_pt;              /* corner radius in points */
+    u8 inset_top_pt;           /* portrait safe-area insets, points */
+    u8 inset_bottom_pt;
+    u8 inset_side_pt;
+} PhoneProfile;
+
+#define DISPLAY_PROFILE_COUNT 4u
+
+void display_init(void);
+u8 display_profile_count(void);
+u8 display_profile_index(void);
+const PhoneProfile *display_profile(u8 index);
+const PhoneProfile *display_current(void);
+u8 display_select_profile(u8 index);
+u8 display_next_profile(void);
+u8 display_select_named(const char *name);
+u16 display_ppi(void);
+u16 display_dpi(void);
+u16 display_refresh_hz(void);
+u16 display_landscape_width(void);
+u16 display_landscape_height(void);
+u8 display_safe_left(void);
+u8 display_safe_right(void);
+u8 display_safe_top(void);
+u8 display_safe_bottom(void);
+void display_fit(u16 width, u16 height, u16 *render_width,
+                 u16 *render_height, u16 *margin_x, u16 *margin_y);
+void display_panel_line(char *out, u16 capacity);
+const char *display_row_label(u8 row);
+void display_row_value(u8 row, char *out, u16 capacity);
+void display_output_line(char *out, u16 capacity);
+void display_cutout(s16 *x, s16 *y, s16 *width, s16 *height);
+void display_draw_bezel(void);
+void display_draw_mini(s16 x, s16 y, s16 width, s16 height);
+
+/* ------------------------------------------------------------------ */
 /* input.c -- PS/2 keyboard and mouse                                  */
 /* ------------------------------------------------------------------ */
 
@@ -320,6 +380,8 @@ void timer_init(void);
 void cpu_halt(void);              /* HLT until the next hardware interrupt */
 void cpu_wait_until(u64 deadline); /* atomic, interrupt-driven PIT wait   */
 void timer_update(void);          /* fold elapsed time into the clock   */
+void timer_set_refresh_hz(u8 hertz); /* phone panel refresh: 60/90/120 Hz */
+u32 timer_frame_counts(void);     /* PIT counts in one display interval */
 u32 time_milliseconds(void);
 u64 timer_counter(void);          /* raw PIT input clocks since boot    */
 u16 timer_take_ticks(void);       /* 10 ms ticks since the last call    */
@@ -418,6 +480,7 @@ u8 settings_saved(void);
 u8 settings_saved_theme(void);
 u8 settings_saved_brightness(void);
 u8 settings_saved_volume(void);
+u8 settings_saved_panel(void);
 u8 settings_forget(void);
 
 /* ------------------------------------------------------------------ */

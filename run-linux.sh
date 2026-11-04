@@ -8,16 +8,30 @@ set -Eeuo pipefail
 IMAGE="disk_img/dimos.hdd"
 FALLBACK_IMAGE="disk_img/dimos.img"
 
-# DimOS targets a 1.5K phone panel: 2712 x 1220, which renders the 844 x 390
-# canvas at 3.2x. QEMU's standard VGA adapter reports whatever resolution it
-# was created with as its preferred VBE mode, so ask for exactly that panel.
-# Override with DIMOS_DISPLAY=1920x1080 for a smaller window.
-DISPLAY_RESOLUTION="${DIMOS_DISPLAY:-2712x1220}"
+# QEMU's standard VGA adapter reports whatever resolution it was created
+# with as its preferred VBE mode, so ask for a REAL phone panel. The four
+# presets are the landscape forms of the profiles in src/kernel/display.c:
+# the default 1170x2532 panel becomes 2532x1170 -- exactly 3x the 844x390
+# logical canvas, no letterbox at all.
+#   DIMOS_PHONE=iphone14|iphone15pro|1.5k|fhd  (default: iphone14)
+#   DIMOS_DISPLAY=1920x1080                     (explicit override)
+case "${DIMOS_PHONE:-iphone14}" in
+    iphone14|IPHONE14)           PHONE_PANEL="2532x1170" ;;
+    iphone15pro|IPHONE15PRO)     PHONE_PANEL="2556x1179" ;;
+    1.5k|1.5K|phone15k)        PHONE_PANEL="2712x1220" ;;
+    fhd|FHD|phonefhd)          PHONE_PANEL="2400x1080" ;;
+    *)
+        printf 'Unknown DIMOS_PHONE=%s (iphone14|iphone15pro|1.5k|fhd)\n' \
+            "${DIMOS_PHONE}" >&2
+        exit 1
+        ;;
+esac
+DISPLAY_RESOLUTION="${DIMOS_DISPLAY:-$PHONE_PANEL}"
 PANEL_WIDTH="${DISPLAY_RESOLUTION%x*}"
 PANEL_HEIGHT="${DISPLAY_RESOLUTION#*x}"
 
-# 2712 x 1220 x 4 bytes is 13.2 MiB, so the adapter needs a 32 MiB VRAM
-# window; the QEMU default of 16 MiB cannot hold it.
+# 2712 x 1220 x 4 bytes is 13.2 MiB, so a phone panel needs a 32 MiB VRAM
+# window; the QEMU default of 16 MiB cannot hold the largest profiles.
 PANEL_VRAM_MB=$(( (PANEL_WIDTH * PANEL_HEIGHT * 4 + 1024 * 1024 - 1) / 1024 / 1024 ))
 if (( PANEL_VRAM_MB < 16 )); then
     PANEL_VRAM_MB=16
@@ -41,8 +55,8 @@ if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
     exit 1
 fi
 
-printf 'Starting DimOS from %s on a %s panel (hard disk)...\n' \
-    "$IMAGE" "$DISPLAY_RESOLUTION"
+printf 'Starting DimOS from %s on a %s phone panel (%s, hard disk)...\n' \
+    "$IMAGE" "$DISPLAY_RESOLUTION" "${DIMOS_PHONE:-iphone14}"
 exec qemu-system-x86_64 \
     -display gtk,zoom-to-fit=on \
     -vga none \

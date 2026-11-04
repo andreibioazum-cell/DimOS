@@ -98,9 +98,9 @@ def build():
 
     size = os.path.getsize(flat)
     # The loader walks the FAT chain into 0x20000; the data window at
-    # 0x30000 caps the image at 126 sectors, as everywhere else.
-    print(f"  kernel.bin: {size} bytes (loader window is 64512)")
-    if size > 64512:
+    # 0x40000 leaves a full 128 KiB for the image, as everywhere else.
+    print(f"  kernel.bin: {size} bytes (loader window is 131072)")
+    if size > 131072:
         raise SystemExit("the kernel no longer fits the bootloader's window")
     return flat, elf
 
@@ -416,7 +416,7 @@ def plant_boot_disk(machine, flat):
     """Recreates the windows boot.asm fills on real hardware.
 
     The file manager reads the FAT copies at 0x7E00, the root directory at
-    0x10000 and the first 256 data sectors at 0x30000. On real hardware the
+    0x10000 and the first 256 data sectors at 0x40000. On real hardware the
     bootloader puts the disk there; the sandbox has no disk, so this helper
     synthesizes a tiny FAT12 volume with the same layout. When the repo has
     fonts/font.ttf, it ships on the volume as FONT.TTF exactly like the real
@@ -484,7 +484,7 @@ def plant_boot_disk(machine, flat):
     data[(43 - 2) * 512:(43 - 2) * 512 + len(notes) - 512] = notes[512:]
     if font_clusters:
         data[(50 - 2) * 512:(50 - 2) * 512 + len(font)] = font
-    machine.mu.mem_write(0x30000, bytes(data))
+    machine.mu.mem_write(0x40000, bytes(data))
 
     # The BIOS keeps the conventional memory count at 0x413 in KiB; real
     # firmware writes 640 here, the sandbox has to fake it.
@@ -576,14 +576,16 @@ def disk_image(files):
     return image
 
 
-def config_record(theme, brightness, volume):
-    """CONFIG.CFG exactly as config.c writes it."""
+def config_record(theme, brightness, volume, panel=0, version=2):
+    """CONFIG.CFG exactly as config.c writes it (v2 carries the panel)."""
     record = bytearray(16)
     record[0:4] = struct.pack("<I", 0x534F4D44)
-    record[4] = 1
+    record[4] = version
     record[5] = theme
     record[6] = brightness
     record[7] = volume
+    if version >= 2:
+        record[8] = panel
     checksum = 0xA5
     for byte in record[:15]:
         checksum ^= byte
@@ -606,23 +608,21 @@ ICON_GRID_LEFT = (SCREEN_WIDTH - 4 * 112 - 64) // 2
 def home_icon(index):
     column = index % 5
     row = index // 5
-    return (ICON_GRID_LEFT + column * 112 + 32, 46 + row * 108 + 32)
-
-
-def dock_icon(index):
-    return ((SCREEN_WIDTH - 348) // 2 + 26 + index * 80 + 26, 337)
+    # The plain grid: 96 top, 120 between rows, labels underneath.
+    return (ICON_GRID_LEFT + column * 112 + 32, 96 + row * 120 + 32)
 
 
 def calc_key(row, column):
     left = (SCREEN_WIDTH - (4 * 96 + 12)) // 2
-    return (left + column * 96 + 42, 146 + row * 56 + 23)
+    return (left + column * 96 + 42, 140 + row * 56 + 23)
 
 
 def term_key(row, column):
     return (37 + column * 70 + 32, 226 + row * 34 + 15)
 
 
-HOME_BAR = (SCREEN_WIDTH // 2, 381)
+HOME_BAR = (SCREEN_WIDTH // 2, 375)  # the circle (Home) button
+SEARCH_LINK = (184, 10)  # the small "Google" text at the top left
 STATUS_RIGHT = (SCREEN_WIDTH - 40, 10)
 CC_WIFI = (26 + 78 + 86, 78)
 CC_LOCK = (26 + 566 + 75, 196 + 13)
@@ -732,6 +732,12 @@ def tour():
     machine.click(644, 136)
     machine.click(644, 136)
     machine.click(644, 136)
+
+    print("\nSettings: the phone panel tab and the panel picker")
+    machine.click(400, 68)       # the Display tab of the grouped list
+    machine.screenshot("18b-settings-display")
+    machine.click(560, 242)      # Change panel -> next device class
+    machine.screenshot("18c-settings-next-panel")
     machine.click(*HOME_BAR)
     machine.frames_run(2)
 
@@ -743,9 +749,9 @@ def tour():
     machine.click(*HOME_BAR)
     machine.frames_run(2)
 
-    print("\nThe dock launches Calculator again")
-    machine.click(*dock_icon(2))
-    machine.screenshot("21-dock-calculator")
+    print("\nThe icon grid launches Calculator again")
+    machine.click(*home_icon(2))
+    machine.screenshot("21-grid-calculator")
     machine.send_keyboard([0x01, 0x81])   # Escape is the home gesture
     machine.frames_run(2)
     machine.screenshot("22-home-again")
@@ -782,7 +788,9 @@ def disk_test():
     table = symbols(elf)
 
     print("\nDisk: a FAT12 volume written by another system")
-    planted = disk_image([("CONFIG.CFG", config_record(1, 7, 11))])
+    # v2 record: theme 1, brightness 7, volume 11, panel 1 (iPhone 15 Pro,
+    # 120 Hz). The profile has to survive the reboot together with the file.
+    planted = disk_image([("CONFIG.CFG", config_record(1, 7, 11, panel=1))])
     machine = Machine(flat, table)
     plant_boot_disk(machine, flat)
     machine.mu.mem_write(DISK_ADDRESS, bytes(planted))
@@ -794,7 +802,9 @@ def disk_test():
     assert machine.byte("settings_valid") == 1, "CONFIG.CFG was not read"
     assert machine.byte("settings_theme") == 1, "the saved theme was ignored"
     assert machine.byte("settings_brightness") == 7
-    print("  mounted the volume, applied the saved theme and brightness")
+    assert machine.byte("settings_panel") == 1, "the saved panel was ignored"
+    assert machine.byte("display_active") == 1, "the panel was not applied"
+    print("  mounted the volume, applied the saved theme, brightness and panel")
     machine.screenshot("23-disk-saved-settings")
 
     print("\nTerminal: write a file through the IDE controller")
@@ -818,6 +828,7 @@ def disk_test():
     assert second.byte("settings_valid") == 1, "settings did not survive a reboot"
     assert second.byte("settings_theme") == 1, "the theme did not survive a reboot"
     assert second.byte("settings_brightness") == 7
+    assert second.byte("display_active") == 1, "the panel did not survive a reboot"
     second.screenshot("25-reboot-lock")
     second.click(*HOME_BAR)
     second.click(*home_icon(7))
@@ -826,8 +837,12 @@ def disk_test():
     history = terminal_history(second)
     assert "HELLO.TXT" in history, history
     assert "written by dimos" in history.lower(), history
+    type_command(second, "PANEL")
+    history = terminal_history(second)
+    assert "iPhone 15 Pro" in history, history
+    assert "120 Hz" in history, history
     second.screenshot("26-reboot-load")
-    print("  the file and the settings were still there")
+    print("  the file, the settings and the 120 Hz panel were still there")
 
     print("\nFormat: a blank disk gets a volume from the kernel itself")
     blank = Machine(flat, table)
@@ -844,6 +859,74 @@ def disk_test():
     assert formatted[510:512] == b"\x55\xAA"
     blank.screenshot("27-format")
     print("  wrote a fresh BPB, both FATs and an empty root directory")
+
+    print("\nBackwards compatibility: a version 1 CONFIG.CFG")
+    legacy = Machine(flat, table)
+    plant_boot_disk(legacy, flat)
+    legacy.mu.mem_write(DISK_ADDRESS, bytes(disk_image(
+        [("CONFIG.CFG", config_record(1, 7, 11, version=1))])))
+    legacy.frames_run(3)
+    assert legacy.byte("settings_valid") == 1, "a v1 record was rejected"
+    assert legacy.byte("settings_theme") == 1, "the v1 theme was ignored"
+    assert legacy.byte("display_active") == 0, "a v1 record changed the panel"
+    print("  an older record still boots with the default phone panel")
+
+
+def ui_test():
+    """The phone shell: gradient home, Google sheet, fullscreen app, nav keys.
+
+    A focused regression run for the three-button layout. It checks the
+    kernel's own state (not just screenshots): the search sheet, the typed
+    query, the recent-app list and the fullscreen app switch.
+    """
+    flat, elf = build()
+    table = symbols(elf)
+    machine = Machine(flat, table)
+    plant_boot_disk(machine, flat)
+    machine.frames_run(3)
+
+    print("\nSimple desktop: gradient, icons and three navigation buttons")
+    machine.click(*HOME_BAR)                      # circle: unlock
+    assert machine.byte("search_open") == 0
+    assert machine.byte("recents_open") == 0
+    machine.screenshot("ui-01-home")
+
+    print("\nGoogle search from the status strip")
+    machine.click(*SEARCH_LINK)
+    assert machine.byte("search_open") == 1, "the search sheet did not open"
+    machine.screenshot("ui-02-search-sheet")
+    machine.type_text("dimos\n")
+    query = machine.memory_block(table["search_query"], 32)
+    assert query.split(b"\0")[0] == b"dimos", query
+    assert machine.byte("search_submitted") == 1, "Enter did not submit"
+    machine.screenshot("ui-03-search-result")
+    machine.send_keyboard([0x01, 0x81])           # Escape closes the sheet
+    machine.frames_run(1)
+    assert machine.byte("search_open") == 0, "Escape did not close the sheet"
+
+    print("\nFullscreen app without a window frame")
+    machine.click(*home_icon(2))                  # Calculator
+    assert struct.unpack("<H", machine.memory_block(
+        table["active_application"], 2))[0] == 2, "Calculator did not open"
+    assert machine.byte("recent_count") >= 1, "the app was not remembered"
+    machine.screenshot("ui-04-fullscreen-app")
+
+    print("\nSquare: overview of recent apps")
+    machine.click(633, 375)
+    assert machine.byte("recents_open") == 1, "overview did not open"
+    machine.screenshot("ui-05-recents")
+    machine.click(252, 200)                       # first recent card
+    assert machine.byte("recents_open") == 0, "the card did not close overview"
+    assert struct.unpack("<H", machine.memory_block(
+        table["active_application"], 2))[0] == 2, "the card did not reopen the app"
+
+    print("\nTriangle and circle: back and home")
+    machine.click(211, 375)                       # triangle: Back
+    machine.click(*HOME_BAR)                      # circle: Home
+    assert struct.unpack("<H", machine.memory_block(
+        table["active_application"], 2))[0] == 0xFFFF, "Home did not close the app"
+    machine.screenshot("ui-06-back-home")
+    print("  the gradient, icons, search, fullscreen app and nav keys work")
 
 
 def display_test(width, height):
@@ -892,6 +975,9 @@ def main():
         raise SystemExit("the sandbox needs: pip install unicorn pillow")
     if "--disk" in sys.argv:
         disk_test()
+        return
+    if "--ui" in sys.argv:
+        ui_test()
         return
     if "--display" in sys.argv and "--frames" not in sys.argv and "--disk" not in sys.argv:
         position = sys.argv.index("--display")

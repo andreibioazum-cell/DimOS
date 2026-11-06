@@ -1,3 +1,16 @@
+# Live-ISO and bootloader packages (needed by mkarchiso)
+archiso
+mkinitcpio-archiso
+syslinux
+memtest86+
+memtest86+-efi
+edk2-shell
+efibootmgr
+dosfstools
+mtools
+libisoburn
+arch-install-scripts
+
 # Base system
 base
 linux

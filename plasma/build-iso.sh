@@ -27,9 +27,13 @@ rm -rf "$WORK" "$OUT"
 mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG"/. "$PROFILE"/
 
-# Keep releng's bootloader and base packages (syslinux, memtest86+, edk2-shell,
-# ...) and append ours; the overlay goes on top of airootfs.
-cat "$HERE/archiso/packages.x86_64" >> "$PROFILE/packages.x86_64"
+# Use our own package list only: releng's list pulls in dozens of rescue tools
+# (clonezilla, ddrescue, cloud-init, ...) that make the ISO slow to build and big.
+# The overlay goes on top of airootfs.
+cp "$HERE/archiso/packages.x86_64" "$PROFILE/packages.x86_64"
+
+# Faster squashfs compression: zstd instead of xz with the x86 BCJ filter.
+sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '6' '-b' '1M')/" "$PROFILE/profiledef.sh"
 cp -r "$HERE/archiso/airootfs/." "$PROFILE/airootfs/"
 
 # Give the image its own name in the ISO metadata.

@@ -28,10 +28,23 @@ jobs:
           pacman -Sy --noconfirm archiso
 
       - name: Build ISO
+        id: build
+        working-directory: plasma
+        shell: bash
+        run: |
+          set -o pipefail
+          pacman -Sy --noconfirm
+          pacman -Si plasma-desktop | head -3
+          ./build-iso.sh 2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
         working-directory: plasma
         run: |
-          pacman -Sy --noconfirm
-          ./build-iso.sh
+          tail -40 build.log 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-3000 | sed 's/^/::error title=build tail::/'
+          echo
+          grep -iE 'error|failed|not found|unable|could not|target not found' build.log 2>/dev/null | head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
+          echo
 
       - name: Upload ISO
         uses: actions/upload-artifact@v6

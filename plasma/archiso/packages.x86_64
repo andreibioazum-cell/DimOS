@@ -14,7 +14,14 @@ arch-install-scripts
 # Base system
 base
 linux
-linux-firmware
+# Split firmware: only the vendors that cover most laptops (full linux-firmware is ~1 GB)
+linux-firmware-whence
+linux-firmware-intel
+linux-firmware-amdgpu
+linux-firmware-realtek
+linux-firmware-mediatek
+linux-firmware-atheros
+linux-firmware-broadcom
 mkinitcpio
 sudo
 networkmanager
@@ -41,9 +48,6 @@ xdg-user-dirs
 # Applications
 konsole
 dolphin
-ark
-kate
-spectacle
 firefox
 
 # Fonts
@@ -54,4 +58,3 @@ noto-fonts-emoji
 mesa
 vulkan-radeon
 vulkan-intel
-xf86-video-amdgpu

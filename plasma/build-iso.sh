@@ -33,7 +33,7 @@ cp -r "$RELENG"/. "$PROFILE"/
 cp "$HERE/archiso/packages.x86_64" "$PROFILE/packages.x86_64"
 
 # Maximum squashfs compression: xz preset 9 extreme with the x86 BCJ filter.
-sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-Xpreset' '9e' '-b' '1M' '-Xdict-size' '1M')/" "$PROFILE/profiledef.sh"
+sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '100%')/" "$PROFILE/profiledef.sh"
 cp -r "$HERE/archiso/airootfs/." "$PROFILE/airootfs/"
 
 # Give the image its own name in the ISO metadata.

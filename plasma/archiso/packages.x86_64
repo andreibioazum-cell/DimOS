@@ -55,7 +55,5 @@ archinstall
 terminus-font
 noto-fonts
 
-# Graphics drivers
+# Graphics: OpenGL only (Plasma renders with Mesa). No Vulkan.
 mesa
-vulkan-radeon
-vulkan-intel

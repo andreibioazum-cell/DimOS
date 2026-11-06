@@ -1,0 +1,42 @@
+name: Build DimOS Plasma 6.8 ISO (x86_64)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "plasma/**"
+      - ".github/workflows/plasma-iso.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  iso:
+    name: Build archiso image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install archiso
+        run: |
+          pacman -Sy --noconfirm archiso
+
+      - name: Build ISO
+        working-directory: plasma
+        run: |
+          pacman -Sy --noconfirm
+          ./build-iso.sh
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v6
+        with:
+          name: dimos-plasma-x86_64
+          path: plasma/out/*.iso
+          if-no-files-found: error
+          retention-days: 14

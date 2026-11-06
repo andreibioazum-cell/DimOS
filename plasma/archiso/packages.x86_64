@@ -50,6 +50,13 @@ konsole
 dolphin
 firefox
 
+# Installing apps: Discover store (Flatpak/Flathub + pacman), and archinstall
+# to put the system on disk so installed programs persist after reboot.
+discover
+packagekit-qt6
+flatpak
+archinstall
+
 # Fonts (console font is Terminus, as on stock Arch)
 terminus-font
 noto-fonts

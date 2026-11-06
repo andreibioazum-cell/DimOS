@@ -14,7 +14,7 @@ arch-install-scripts
 # Base system
 base
 linux
-# Split firmware: only the vendors that cover most laptops (full linux-firmware is ~1 GB)
+# Split firmware: only the vendors that cover most laptops (the full linux-firmware package is large)
 linux-firmware-whence
 linux-firmware-intel
 linux-firmware-amdgpu

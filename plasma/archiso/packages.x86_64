@@ -1,0 +1,45 @@
+# Base system
+base
+linux
+linux-firmware
+mkinitcpio
+sudo
+networkmanager
+
+# KDE Plasma 6.8 (Wayland session only)
+plasma-desktop
+plasma-workspace
+plasma-nm
+plasma-pa
+plasma-systemmonitor
+kwin
+kscreen
+powerdevil
+bluedevil
+breeze
+breeze-gtk
+kde-gtk-config
+sddm
+sddm-kcm
+xdg-desktop-portal-kde
+xdg-desktop-portal-gtk
+xdg-user-dirs
+
+# Applications
+konsole
+dolphin
+ark
+kate
+spectacle
+firefox
+
+# Fonts
+ttf-inter
+noto-fonts
+noto-fonts-emoji
+
+# Graphics drivers
+mesa
+vulkan-radeon
+vulkan-intel
+xf86-video-amdgpu

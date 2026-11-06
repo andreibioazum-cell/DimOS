@@ -1,0 +1,12 @@
+[General]
+ColorScheme=BreezeDark
+Name=Breeze Dark
+XftAntialias=true
+XftHintStyle=hintslight
+
+[Icons]
+Theme=breeze-dark
+
+[KDE]
+LookAndFeelPackage=org.kde.breezedark.desktop
+SingleClick=false

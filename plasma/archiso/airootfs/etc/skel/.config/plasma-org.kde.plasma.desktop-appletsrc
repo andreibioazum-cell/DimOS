@@ -15,6 +15,7 @@ Image=/usr/share/wallpapers/DimOS/contents/images/1920x1080.png
 SlidePaths=/usr/share/wallpapers/
 
 [Containments][2]
+floating=1
 activityId=
 formfactor=2
 immutability=1
@@ -51,4 +52,4 @@ PreloadWeight=100
 [Containments][2][Configuration][General]
 alignment=0
 length=100
-thickness=44
+thickness=52

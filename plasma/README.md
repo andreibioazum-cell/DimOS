@@ -11,7 +11,9 @@
 | --- | --- |
 | Обои | `plasma/wallpaper/dimos-wallpaper.png` — сгенерированы ИИ, 16:9 |
 | Панель | Нижняя панель в стиле Windows: слева меню «Пуск» (Kickoff), по центру — запущенные окна, справа — трей и часы |
-| Тема | Breeze, тёмная, по умолчанию; окна с плавающими тенями |
+| Тема | Breeze Dark; акцент `#00b4ff`; плавающая панель со скруглёнными углами; размытие фона (KWin blur); скругление окон |
+| Консоль | Konsole с профилем DimOS (схема Breeze, шрифт Noto Sans Mono) |
+| Шрифт | Noto Sans 10 pt |
 | Браузер | Firefox (`firefox` в `packages.x86_64`) |
 | Вход | SDDM с Wayland-сессией Plasma |
 | Файлы | Dolphin, терминал Konsole, Ark, Kate |

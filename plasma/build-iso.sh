@@ -32,8 +32,8 @@ cp -r "$RELENG"/. "$PROFILE"/
 # The overlay goes on top of airootfs.
 cp "$HERE/archiso/packages.x86_64" "$PROFILE/packages.x86_64"
 
-# Faster squashfs compression: zstd instead of xz with the x86 BCJ filter.
-sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '6' '-b' '1M')/" "$PROFILE/profiledef.sh"
+# Maximum squashfs compression: xz preset 9 extreme with the x86 BCJ filter.
+sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-Xpreset' '9e' '-b' '1M' '-Xdict-size' '1M')/" "$PROFILE/profiledef.sh"
 cp -r "$HERE/archiso/airootfs/." "$PROFILE/airootfs/"
 
 # Give the image its own name in the ISO metadata.

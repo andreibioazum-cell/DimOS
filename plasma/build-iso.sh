@@ -27,8 +27,9 @@ rm -rf "$WORK" "$OUT"
 mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG"/. "$PROFILE"/
 
-# Our package list replaces the releng one; our overlay goes on top of airootfs.
-cp "$HERE/archiso/packages.x86_64" "$PROFILE/packages.x86_64"
+# Keep releng's bootloader and base packages (syslinux, memtest86+, edk2-shell,
+# ...) and append ours; the overlay goes on top of airootfs.
+cat "$HERE/archiso/packages.x86_64" >> "$PROFILE/packages.x86_64"
 cp -r "$HERE/archiso/airootfs/." "$PROFILE/airootfs/"
 
 # Give the image its own name in the ISO metadata.

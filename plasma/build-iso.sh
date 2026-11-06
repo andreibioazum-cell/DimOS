@@ -32,8 +32,8 @@ cp -r "$RELENG"/. "$PROFILE"/
 # The overlay goes on top of airootfs.
 cp "$HERE/archiso/packages.x86_64" "$PROFILE/packages.x86_64"
 
-# squashfs compression: zstd level 15 (multithreaded). xz at max took >15 min here.
-sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '15' '-b' '1M')/" "$PROFILE/profiledef.sh"
+# squashfs compression: zstd level 19 (multithreaded), smallest size we can build in time.
+sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '19' '-b' '1M')/" "$PROFILE/profiledef.sh"
 cp -r "$HERE/archiso/airootfs/." "$PROFILE/airootfs/"
 
 # Give the image its own name in the ISO metadata.

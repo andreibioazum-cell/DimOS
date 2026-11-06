@@ -20,8 +20,6 @@ linux-firmware-intel
 linux-firmware-amdgpu
 linux-firmware-realtek
 linux-firmware-mediatek
-linux-firmware-atheros
-linux-firmware-broadcom
 mkinitcpio
 sudo
 networkmanager
@@ -31,18 +29,14 @@ plasma-desktop
 plasma-workspace
 plasma-nm
 plasma-pa
-plasma-systemmonitor
 kwin
 kscreen
 powerdevil
 bluedevil
 breeze
-breeze-gtk
-kde-gtk-config
 sddm
 sddm-kcm
 xdg-desktop-portal-kde
-xdg-desktop-portal-gtk
 xdg-user-dirs
 
 # Applications
@@ -60,7 +54,6 @@ archinstall
 # Fonts (console font is Terminus, as on stock Arch)
 terminus-font
 noto-fonts
-noto-fonts-emoji
 
 # Graphics drivers
 mesa

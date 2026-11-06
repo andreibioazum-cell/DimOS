@@ -51,5 +51,13 @@ find "$PROFILE/syslinux" -type f -name '*.cfg' \
 find "$PROFILE/efiboot" -type f -name '*.conf' \
     -exec sed -i -E 's/^(options .*)$/\1 nomodeset quiet loglevel=3 console=tty0 console=ttyS0,115200/' {} +
 
+# No boot menu: boot the default entry straight away (no waiting on a choice).
+find "$PROFILE/syslinux" -type f -name '*.cfg' \
+    -exec sed -i -E 's/^[[:space:]]*TIMEOUT[[:space:]].*$/TIMEOUT 1/; s/^[[:space:]]*PROMPT[[:space:]].*$/PROMPT 0/' {} +
+if [[ -f "$PROFILE/efiboot/loader/loader.conf" ]]; then
+    sed -i -E 's/^[[:space:]]*timeout[[:space:]].*$/timeout 0/' "$PROFILE/efiboot/loader/loader.conf"
+    grep -q '^timeout' "$PROFILE/efiboot/loader/loader.conf" || echo 'timeout 0' >> "$PROFILE/efiboot/loader/loader.conf"
+fi
+
 mkarchiso -v -w "$WORK/iso" -o "$OUT" "$PROFILE"
 echo "ISO written to $OUT"

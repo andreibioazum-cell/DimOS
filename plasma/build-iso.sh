@@ -47,9 +47,9 @@ find "$PROFILE/syslinux" "$PROFILE/efiboot" -type f \( -name '*.cfg' -o -name '*
 # Kernel: quiet boot (no ACPI/TDX info noise on screen), errors still reach the
 # screen and the serial port (COM1) so a hang remains visible in the emulator log.
 find "$PROFILE/syslinux" -type f -name '*.cfg' \
-    -exec sed -i -E 's/^([[:space:]]*APPEND.*)$/\1 console=tty0 console=ttyS0,115200/' {} +
+    -exec sed -i -E 's/^([[:space:]]*APPEND.*)$/\1 quiet loglevel=3 console=tty0 console=ttyS0,115200/' {} +
 find "$PROFILE/efiboot" -type f -name '*.conf' \
-    -exec sed -i -E 's/^(options .*)$/\1 console=tty0 console=ttyS0,115200/' {} +
+    -exec sed -i -E 's/^(options .*)$/\1 quiet loglevel=3 console=tty0 console=ttyS0,115200/' {} +
 
 mkarchiso -v -w "$WORK/iso" -o "$OUT" "$PROFILE"
 echo "ISO written to $OUT"

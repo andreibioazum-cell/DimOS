@@ -27,6 +27,14 @@ jobs:
         run: |
           pacman -Sy --noconfirm archiso
 
+      - name: Package sizes (installed, top level)
+        shell: bash
+        run: |
+          pacman -Sy --noconfirm >/dev/null
+          grep -vE '^\s*(#|$)' plasma/archiso/packages.x86_64 > /tmp/pk.txt
+          pacman -Si $(cat /tmp/pk.txt) 2>/dev/null | awk '/^Name/{n=$3} /^Installed Size/{v=$4; u=$5; if(u=="GiB") v=v*1024; else if(u=="KiB") v=v/1024; print v" MiB "n}' | sort -rn | head -45 > /tmp/sizes.txt
+          echo "::notice title=sizes::$(tr '\n' ';' < /tmp/sizes.txt)"
+
       - name: Build ISO
         id: build
         working-directory: plasma

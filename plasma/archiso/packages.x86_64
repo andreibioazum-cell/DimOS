@@ -50,7 +50,8 @@ konsole
 dolphin
 firefox
 
-# Fonts
+# Fonts (console font is Terminus, as on stock Arch)
+terminus-font
 noto-fonts
 noto-fonts-emoji
 

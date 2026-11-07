@@ -54,6 +54,20 @@ jobs:
           grep -iE 'error|failed|not found|unable|could not|target not found' build.log 2>/dev/null | head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
           echo
 
+      - name: Check archiso hook in initramfs
+        if: always()
+        working-directory: plasma
+        shell: bash
+        run: |
+          cat work/profile/airootfs/etc/mkinitcpio.conf.d/*.conf 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | tr '\n' ';' > /tmp/dropins.txt
+          img=$(find work -name 'initramfs-linux.img' | head -1)
+          echo "img=$img"
+          : > /tmp/hooks.txt
+          if [ -n "$img" ]; then
+            (unlz4 -c "$img" || zstd -dc "$img" || gzip -dc "$img" || cat "$img") 2>/dev/null | cpio -t 2>/dev/null | grep -i archiso | head -20 > /tmp/hooks.txt || true
+          fi
+          echo "::notice title=initramfs::img=$img; dropins=$(cut -c1-400 /tmp/dropins.txt); archiso_files=$(tr '\n' ' ' < /tmp/hooks.txt | cut -c1-800)"
+
       - name: Upload ISO
         uses: actions/upload-artifact@v6
         with:

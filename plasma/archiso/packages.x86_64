@@ -1,6 +1,5 @@
 # Live-ISO and bootloader packages (needed by mkarchiso)
 archiso
-lz4
 mkinitcpio-archiso
 syslinux
 edk2-shell

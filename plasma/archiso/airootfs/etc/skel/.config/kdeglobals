@@ -5,7 +5,7 @@ AccentColor=0,180,255
 XftAntialias=true
 XftHintStyle=hintslight
 XftSubPixel=rgb
-font=Noto Sans,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+font=DejaVu Sans,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 
 [Icons]
 Theme=breeze-dark

@@ -3,8 +3,6 @@ archiso
 lz4
 mkinitcpio-archiso
 syslinux
-memtest86+
-memtest86+-efi
 edk2-shell
 efibootmgr
 dosfstools
@@ -41,9 +39,10 @@ xdg-desktop-portal-kde
 xdg-user-dirs
 
 # Applications
+# NetSurf: small GTK browser with tabs (opens Google, tabs, basic pages)
+netsurf-gtk
 konsole
 dolphin
-falkon
 
 # Installing apps: Discover store (Flatpak/Flathub + pacman), and archinstall
 # to put the system on disk so installed programs persist after reboot.
@@ -52,9 +51,10 @@ packagekit-qt6
 flatpak
 archinstall
 
-# Fonts (console font is Terminus, as on stock Arch)
+# Fonts: DejaVu covers Latin, Cyrillic (RU/UK) and Ukrainian letters; small compared to Noto.
+# Console font is Terminus, as on stock Arch.
 terminus-font
-noto-fonts
+ttf-dejavu
 
 # Graphics: OpenGL only (Plasma renders with Mesa). No Vulkan.
 mesa

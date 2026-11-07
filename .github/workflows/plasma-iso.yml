@@ -30,6 +30,7 @@ jobs:
       - name: Compile Snake
         run: |
           pacman -Sy --noconfirm gcc
+          mkdir -p plasma/archiso/airootfs/usr/local/bin
           if ! gcc -std=c11 -Wall -Wextra -O2 -o plasma/archiso/airootfs/usr/local/bin/snake plasma/snake/snake.c > /tmp/gcc.log 2>&1; then
             tr '\n' ' ' < /tmp/gcc.log | cut -c1-1500 | sed 's/^/::error title=gcc::/'; echo; exit 1
           fi

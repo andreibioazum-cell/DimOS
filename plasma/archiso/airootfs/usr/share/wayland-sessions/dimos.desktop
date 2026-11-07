@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=DimOS Plasma (Wayland)
-Comment=KDE Plasma 6.8 on Wayland
-Exec=startplasma-wayland
-Type=Application
-DesktopNames=KDE

@@ -1,8 +1,0 @@
-[Plugins]
-blurEnabled=true
-contrastEnabled=false
-kwin4_effect_roundedcornersEnabled=true
-
-[org.kde.kdecoration2]
-theme=Breeze
-BorderSize=Normal

@@ -1,4 +1,4 @@
-name: Build DimOS Plasma 6.8 ISO (x86_64)
+name: Build DimOS Snake ISO (x86_64)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   iso:
-    name: Build archiso image
+    name: Build archiso image (Snake)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
@@ -27,14 +27,10 @@ jobs:
         run: |
           pacman -Sy --noconfirm archiso
 
-      - name: Package sizes (installed, top level)
-        shell: bash
+      - name: Compile Snake
         run: |
-          pacman -Sy --noconfirm >/dev/null
-          grep -vE '^\s*(#|$)' plasma/archiso/packages.x86_64 > /tmp/pk.txt
-          for p in $(cat /tmp/pk.txt); do pacman -Si "$p" >/dev/null 2>&1 || echo "::warning title=missing::$p"; done
-          pacman -Si $(cat /tmp/pk.txt | while read p; do pacman -Si "$p" >/dev/null 2>&1 && echo "$p"; done) 2>/dev/null | awk '/^Name/{n=$3} /^Installed Size/{v=$4; u=$5; if(u=="GiB") v=v*1024; else if(u=="KiB") v=v/1024; print v" MiB "n}' | sort -rn | head -45 > /tmp/sizes.txt
-          echo "::notice title=sizes::$(tr '\n' ';' < /tmp/sizes.txt)"
+          pacman -Sy --noconfirm gcc
+          gcc -std=c11 -Wall -Wextra -Werror -O2 -o plasma/archiso/airootfs/usr/local/bin/snake plasma/snake/snake.c
 
       - name: Build ISO
         id: build

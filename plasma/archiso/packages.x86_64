@@ -1,0 +1,60 @@
+# Live-ISO and bootloader packages (needed by mkarchiso)
+archiso
+lz4
+mkinitcpio-archiso
+syslinux
+edk2-shell
+efibootmgr
+dosfstools
+mtools
+libisoburn
+arch-install-scripts
+
+# Base system
+base
+linux
+# Split firmware: only the vendors that cover most laptops (the full linux-firmware package is large)
+linux-firmware-whence
+linux-firmware-intel
+linux-firmware-amdgpu
+linux-firmware-realtek
+linux-firmware-mediatek
+mkinitcpio
+sudo
+networkmanager
+
+# KDE Plasma 6.8 (Wayland session only)
+plasma-desktop
+plasma-workspace
+plasma-nm
+plasma-pa
+kwin
+kscreen
+powerdevil
+bluedevil
+breeze
+sddm
+sddm-kcm
+xdg-desktop-portal-kde
+xdg-user-dirs
+
+# Applications
+# NetSurf: small GTK browser with tabs (opens Google, tabs, basic pages)
+netsurf
+konsole
+dolphin
+
+# Installing apps: Discover store (Flatpak/Flathub + pacman), and archinstall
+# to put the system on disk so installed programs persist after reboot.
+discover
+packagekit-qt6
+flatpak
+archinstall
+
+# Fonts: DejaVu covers Latin, Cyrillic (RU/UK) and Ukrainian letters; small compared to Noto.
+# Console font is Terminus, as on stock Arch.
+terminus-font
+ttf-dejavu
+
+# Graphics: OpenGL only (Plasma renders with Mesa). No Vulkan.
+mesa

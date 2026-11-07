@@ -1,0 +1,64 @@
+name: Build DimOS Plasma 6.8 ISO (x86_64)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "plasma/**"
+      - ".github/workflows/plasma-iso.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  iso:
+    name: Build archiso image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install archiso
+        run: |
+          pacman -Sy --noconfirm archiso
+
+      - name: Package sizes (installed, top level)
+        shell: bash
+        run: |
+          pacman -Sy --noconfirm >/dev/null
+          grep -vE '^\s*(#|$)' plasma/archiso/packages.x86_64 > /tmp/pk.txt
+          for p in $(cat /tmp/pk.txt); do pacman -Si "$p" >/dev/null 2>&1 || echo "::warning title=missing::$p"; done
+          pacman -Si $(cat /tmp/pk.txt | while read p; do pacman -Si "$p" >/dev/null 2>&1 && echo "$p"; done) 2>/dev/null | awk '/^Name/{n=$3} /^Installed Size/{v=$4; u=$5; if(u=="GiB") v=v*1024; else if(u=="KiB") v=v/1024; print v" MiB "n}' | sort -rn | head -45 > /tmp/sizes.txt
+          echo "::notice title=sizes::$(tr '\n' ';' < /tmp/sizes.txt)"
+
+      - name: Build ISO
+        id: build
+        working-directory: plasma
+        shell: bash
+        run: |
+          set -o pipefail
+          pacman -Sy --noconfirm
+          pacman -Si plasma-desktop | head -3
+          ./build-iso.sh 2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
+        working-directory: plasma
+        run: |
+          tail -40 build.log 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-3000 | sed 's/^/::error title=build tail::/'
+          echo
+          grep -iE 'error|failed|not found|unable|could not|target not found' build.log 2>/dev/null | head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
+          echo
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v6
+        with:
+          name: dimos-plasma-x86_64
+          path: plasma/out/*.iso
+          if-no-files-found: error
+          retention-days: 14

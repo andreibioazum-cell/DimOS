@@ -42,7 +42,7 @@ xdg-user-dirs
 # Applications
 konsole
 dolphin
-firefox
+falkon
 
 # Installing apps: Discover store (Flatpak/Flathub + pacman), and archinstall
 # to put the system on disk so installed programs persist after reboot.

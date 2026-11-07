@@ -1,0 +1,17 @@
+# Live-ISO and bootloader packages (needed by mkarchiso)
+archiso
+mkinitcpio-archiso
+syslinux
+efibootmgr
+dosfstools
+mtools
+libisoburn
+arch-install-scripts
+
+# Base system: the only program on the image is Snake (plasma/snake)
+base
+linux
+mkinitcpio
+
+# Console font (Terminus, as on stock Arch)
+terminus-font

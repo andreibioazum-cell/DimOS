@@ -40,7 +40,7 @@ xdg-user-dirs
 
 # Applications
 # NetSurf: small GTK browser with tabs (opens Google, tabs, basic pages)
-netsurf-gtk
+netsurf
 konsole
 dolphin
 

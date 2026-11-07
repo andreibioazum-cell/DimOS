@@ -32,7 +32,8 @@ jobs:
         run: |
           pacman -Sy --noconfirm >/dev/null
           grep -vE '^\s*(#|$)' plasma/archiso/packages.x86_64 > /tmp/pk.txt
-          pacman -Si $(cat /tmp/pk.txt) 2>/dev/null | awk '/^Name/{n=$3} /^Installed Size/{v=$4; u=$5; if(u=="GiB") v=v*1024; else if(u=="KiB") v=v/1024; print v" MiB "n}' | sort -rn | head -45 > /tmp/sizes.txt
+          for p in $(cat /tmp/pk.txt); do pacman -Si "$p" >/dev/null 2>&1 || echo "::warning title=missing::$p"; done
+          pacman -Si $(cat /tmp/pk.txt | while read p; do pacman -Si "$p" >/dev/null 2>&1 && echo "$p"; done) 2>/dev/null | awk '/^Name/{n=$3} /^Installed Size/{v=$4; u=$5; if(u=="GiB") v=v*1024; else if(u=="KiB") v=v/1024; print v" MiB "n}' | sort -rn | head -45 > /tmp/sizes.txt
           echo "::notice title=sizes::$(tr '\n' ';' < /tmp/sizes.txt)"
 
       - name: Build ISO
@@ -53,20 +54,6 @@ jobs:
           echo
           grep -iE 'error|failed|not found|unable|could not|target not found' build.log 2>/dev/null | head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
           echo
-
-      - name: Check archiso hook in initramfs
-        if: always()
-        working-directory: plasma
-        shell: bash
-        run: |
-          cat work/profile/airootfs/etc/mkinitcpio.conf.d/*.conf 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | tr '\n' ';' > /tmp/dropins.txt
-          img=$(find work -name 'initramfs-linux.img' | head -1)
-          echo "img=$img"
-          : > /tmp/hooks.txt
-          if [ -n "$img" ]; then
-            (unlz4 -c "$img" || zstd -dc "$img" || gzip -dc "$img" || cat "$img") 2>/dev/null | cpio -t 2>/dev/null | grep -i archiso | head -20 > /tmp/hooks.txt || true
-          fi
-          echo "::notice title=initramfs::img=$img; dropins=$(cut -c1-400 /tmp/dropins.txt); archiso_files=$(tr '\n' ' ' < /tmp/hooks.txt | cut -c1-800)"
 
       - name: Upload ISO
         uses: actions/upload-artifact@v6

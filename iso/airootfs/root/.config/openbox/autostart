@@ -1,2 +1,7 @@
 # The one and only program on this system.
+#
+# DimOS takes the whole screen; when it finishes (Esc on the desktop) the
+# Openbox session is closed too, so .bash_profile starts a fresh one instead
+# of leaving the user on an empty desktop with nothing to click.
 /usr/local/bin/dimos --fullscreen --skip-boot
+openbox --exit

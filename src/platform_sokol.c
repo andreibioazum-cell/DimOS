@@ -29,15 +29,24 @@
 #include "app.h"
 #include "font_data.h"
 
-/* gl_VertexID 0..3 -> a full-viewport triangle strip, no vertex buffer. */
 static const char *quad_vertex_shader =
     "#version 330\n"
+    "in vec2 position;\n"
+    "in vec2 texcoord0;\n"
     "out vec2 uv;\n"
     "void main() {\n"
-    "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
-    "    uv = p * 0.5;\n"
-    "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+    "    uv = texcoord0;\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "}\n";
+
+/* Four vertices: the last geometry in the system, 64 bytes in total. */
+static const float quad_vertices[] = {
+    /* x     y    u    v */
+    -1.0f, 1.0f, 0.0f, 0.0f,
+    1.0f, 1.0f, 1.0f, 0.0f,
+    -1.0f, -1.0f, 0.0f, 1.0f,
+    1.0f, -1.0f, 1.0f, 1.0f,
+};
 
 static const char *quad_fragment_shader =
     "#version 330\n"
@@ -51,6 +60,7 @@ static const char *quad_fragment_shader =
 static struct {
     App *app;
     sg_image canvas_image;
+    sg_buffer quad_buffer;
     sg_pipeline pipeline;
     sg_pass_action pass_action;
     sg_bindings bindings;
@@ -94,10 +104,15 @@ static void init(void) {
         return;
     }
 
+    g.quad_buffer = sg_make_buffer(&(sg_buffer_desc){
+        .data = SG_RANGE(quad_vertices),
+        .label = "canvas-quad-vertices",
+    });
+
     g.canvas_image = sg_make_image(&(sg_image_desc){
         .width = APP_WIDTH,
         .height = APP_HEIGHT,
-        .pixel_format = SG_PIXELFORMAT_BGRA8,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
         .usage = SG_USAGE_STREAM,
         .min_filter = SG_FILTER_LINEAR,
         .mag_filter = SG_FILTER_LINEAR,
@@ -108,17 +123,28 @@ static void init(void) {
 
     g.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = sg_make_shader(&(sg_shader_desc){
+            .attrs = {
+                [0] = {.name = "position"},
+                [1] = {.name = "texcoord0"},
+            },
             .vs.source = quad_vertex_shader,
             .fs.source = quad_fragment_shader,
             .fs.images[0] = {.name = "tex", .image_type = SG_IMAGETYPE_2D},
             .label = "canvas-blit-shader",
         }),
+        .layout = {
+            .attrs = {
+                [0] = {.format = SG_VERTEXFORMAT_FLOAT2},
+                [1] = {.format = SG_VERTEXFORMAT_FLOAT2},
+            },
+        },
         .primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP,
         .label = "canvas-blit-pipeline",
     });
 
     g.pass_action.colors[0].load_action = SG_LOADACTION_CLEAR;
     g.pass_action.colors[0].clear_value = (sg_color){0.02f, 0.02f, 0.03f, 1.0f};
+    g.bindings.vertex_buffers[0] = g.quad_buffer;
     g.bindings.fs_images[0] = g.canvas_image;
 
     update_letterbox(sapp_width(), sapp_height());

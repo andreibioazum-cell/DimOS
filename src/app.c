@@ -186,10 +186,10 @@ static void build_wallpaper(App *app) {
             const float vx = ((float)x - (float)w * 0.5f) / ((float)w * 0.5f);
             const float vy = ((float)y - (float)h * 0.5f) / ((float)h * 0.5f);
             const float vignette = 1.0f - 0.30f * (vx * vx + vy * vy) * 0.5f;
-            const uint32_t r = (uint32_t)((float)((color >> 16) & 0xFFu) * vignette);
-            const uint32_t g = (uint32_t)((float)((color >> 8) & 0xFFu) * vignette);
-            const uint32_t b = (uint32_t)((float)(color & 0xFFu) * vignette);
-            app->wallpaper[y * w + x] = 0xFF000000u | (r << 16) | (g << 8) | b;
+            const uint32_t r = (uint32_t)((float)PIXEL_R(color) * vignette);
+            const uint32_t g = (uint32_t)((float)PIXEL_G(color) * vignette);
+            const uint32_t b = (uint32_t)((float)PIXEL_B(color) * vignette);
+            app->wallpaper[y * w + x] = PIXEL(0xFF, r, g, b);
         }
     }
 }

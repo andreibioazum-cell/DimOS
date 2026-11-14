@@ -53,22 +53,10 @@ static unsigned char *read_file(const char *path, size_t *out_size) {
 
 static int save_png(App *app, const char *directory, const char *name) {
     const Canvas *canvas = app_canvas(app);
-    const size_t count = (size_t)canvas->width * (size_t)canvas->height;
-    unsigned char *rgba = (unsigned char *)malloc(count * 4u);
-    if (!rgba) {
-        return 0;
-    }
-    for (size_t i = 0; i < count; ++i) {
-        const uint32_t px = canvas->pixels[i];
-        rgba[i * 4 + 0] = (unsigned char)((px >> 16) & 0xFFu);
-        rgba[i * 4 + 1] = (unsigned char)((px >> 8) & 0xFFu);
-        rgba[i * 4 + 2] = (unsigned char)(px & 0xFFu);
-        rgba[i * 4 + 3] = 255;
-    }
     char path[1024];
     snprintf(path, sizeof(path), "%s/%s", directory, name);
-    const int ok = stbi_write_png(path, canvas->width, canvas->height, 4, rgba, canvas->width * 4);
-    free(rgba);
+    /* The canvas is already RGBA8 in memory, so stb writes it as is. */
+    const int ok = stbi_write_png(path, canvas->width, canvas->height, 4, canvas->pixels, canvas->width * 4);
     if (!ok) {
         fprintf(stderr, "render-frames: could not write %s\n", path);
     } else {

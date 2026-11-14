@@ -12,18 +12,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ARGB(a, r, g, b) ((uint32_t)((((uint32_t)(a) & 0xFFu) << 24) | (((uint32_t)(r) & 0xFFu) << 16) | (((uint32_t)(g) & 0xFFu) << 8) | ((uint32_t)(b) & 0xFFu)))
-#define RGB(r, g, b) ARGB(0xFF, r, g, b)
-
-typedef enum {
-    CANVAS_BGRA = 0,
-    CANVAS_RGBA = 1
-} CanvasOrder;
+/* The canvas is stored in RGBA byte order -- red at the lowest address --
+ * which is exactly what the GPU texture format wants, so presenting a frame
+ * is a memcpy and never a per-pixel swizzle. */
+#define PIXEL(a, r, g, b) ((uint32_t)((((uint32_t)(a) & 0xFFu) << 24) | (((uint32_t)(b) & 0xFFu) << 16) | (((uint32_t)(g) & 0xFFu) << 8) | ((uint32_t)(r) & 0xFFu)))
+#define RGB(r, g, b) PIXEL(0xFF, r, g, b)
+#define PIXEL_R(c) ((uint8_t)((c) & 0xFFu))
+#define PIXEL_G(c) ((uint8_t)(((c) >> 8) & 0xFFu))
+#define PIXEL_B(c) ((uint8_t)(((c) >> 16) & 0xFFu))
+#define PIXEL_A(c) ((uint8_t)(((c) >> 24) & 0xFFu))
 
 typedef struct Canvas {
     int width;
     int height;
-    uint32_t *pixels; /* 0xAARRGGBB, the same layout sokol/OpenGL call BGRA8 */
+    uint32_t *pixels; /* RGBA8 in memory: R,G,B,A bytes, alpha in the top byte */
 } Canvas;
 
 uint32_t color_alpha(uint32_t color, uint8_t alpha);

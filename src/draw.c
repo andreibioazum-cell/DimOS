@@ -44,20 +44,20 @@ static inline float clamp01(float v) {
 }
 
 uint32_t color_alpha(uint32_t color, uint8_t alpha) {
-    const uint32_t a = (color >> 24) & 0xFFu;
+    const uint32_t a = PIXEL_A(color);
     const uint32_t scaled = (a * (uint32_t)alpha) / 255u;
     return (color & 0x00FFFFFFu) | (scaled << 24);
 }
 
 uint32_t color_lerp(uint32_t a, uint32_t b, float t) {
     t = clamp01(t);
-    const float ar = (float)((a >> 16) & 0xFFu), ag = (float)((a >> 8) & 0xFFu), ab = (float)(a & 0xFFu), aa = (float)((a >> 24) & 0xFFu);
-    const float br = (float)((b >> 16) & 0xFFu), bg = (float)((b >> 8) & 0xFFu), bb = (float)(b & 0xFFu), ba = (float)((b >> 24) & 0xFFu);
+    const float ar = (float)PIXEL_R(a), ag = (float)PIXEL_G(a), ab = (float)PIXEL_B(a), aa = (float)PIXEL_A(a);
+    const float br = (float)PIXEL_R(b), bg = (float)PIXEL_G(b), bb = (float)PIXEL_B(b), ba = (float)PIXEL_A(b);
     const uint8_t r = clamp_u8(ar + (br - ar) * t);
     const uint8_t g = clamp_u8(ag + (bg - ag) * t);
     const uint8_t bl = clamp_u8(ab + (bb - ab) * t);
     const uint8_t al = clamp_u8(aa + (ba - aa) * t);
-    return ARGB(al, r, g, bl);
+    return PIXEL(al, r, g, bl);
 }
 
 /* The canvas is always opaque, so a source-over blend is just a weighted
@@ -74,10 +74,10 @@ static inline void blend_pixel(Canvas *c, int x, int y, uint32_t color, uint8_t 
     }
     const uint32_t sa = alpha;
     const uint32_t da = 255u - sa;
-    const uint32_t r = ((((color >> 16) & 0xFFu) * sa) + (((dst >> 16) & 0xFFu) * da)) / 255u;
-    const uint32_t g = ((((color >> 8) & 0xFFu) * sa) + (((dst >> 8) & 0xFFu) * da)) / 255u;
-    const uint32_t b = (((color & 0xFFu) * sa) + ((dst & 0xFFu) * da)) / 255u;
-    *p = 0xFF000000u | (r << 16) | (g << 8) | b;
+    const uint32_t r = (((uint32_t)PIXEL_R(color) * sa) + ((uint32_t)PIXEL_R(dst) * da)) / 255u;
+    const uint32_t g = (((uint32_t)PIXEL_G(color) * sa) + ((uint32_t)PIXEL_G(dst) * da)) / 255u;
+    const uint32_t b = (((uint32_t)PIXEL_B(color) * sa) + ((uint32_t)PIXEL_B(dst) * da)) / 255u;
+    *p = PIXEL(0xFF, r, g, b);
 }
 
 /* ------------------------------------------------------------------ */

@@ -2,6 +2,7 @@
 #
 # DimOS takes the whole screen; when it finishes (Esc on the desktop) the
 # Openbox session is closed too, so .bash_profile starts a fresh one instead
-# of leaving the user on an empty desktop with nothing to click.
-/usr/local/bin/dimos --fullscreen
+# of leaving the user on an empty desktop with nothing to click. The log is
+# kept so a failed start can be read on the console.
+/usr/local/bin/dimos --fullscreen 2>/root/dimos.log
 openbox --exit

@@ -98,7 +98,10 @@ sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' '
 #     desktop. No boot menu, no "Arch Linux" banner, no kernel log, no serial
 #     output, no console text -- nothing but DimOS.
 # --------------------------------------------------------------------------
-BOOT_PARAMS="nomodeset quiet loglevel=0 vt.global_cursor_default=0 systemd.show_status=false"
+# No "nomodeset": the kernel's own KMS drivers (bochs-drm under an
+# emulator, i915/amdgpu/nouveau on real hardware) give X a framebuffer;
+# loglevel=3 still shows hard errors, everything else is silent.
+BOOT_PARAMS="quiet loglevel=3 vt.global_cursor_default=0 systemd.show_status=false nowatchdog"
 # mkarchiso substitutes %KERNEL_PARAMS% into every boot loader entry, so one
 # variable silences BIOS and UEFI alike.
 if grep -q '^kernel_params_x86_64=' "$PROFILE/profiledef.sh"; then
@@ -110,9 +113,17 @@ fi
 # BIOS. archiso_head.cfg is where releng puts the menu, the splash image and a
 # serial console (which is exactly the noise we do not want); replace it with
 # the three directives that mean "boot the default entry without a word".
+# ISOLINUX prints its version banner before it reads any config, so the only
+# way to get rid of it is to hand the screen to the graphical menu, which
+# clears the text mode and then draws nothing: the menu stays hidden, the
+# timeout line is transparent black on black, and the entry boots after 0.1 s.
 cat > "$PROFILE/syslinux/archiso_head.cfg" <<'CFG'
-# DimOS: silent boot. No menu, no banner, no text. TIMEOUT is in tenths of
-# a second; syslinux treats 0 as "wait forever", so it stays at one tick.
+# DimOS: silent boot. No menu, no banner, no text.
+UI vesamenu.c32
+MENU CLEAR
+MENU HIDDEN
+MENU COLOR timeout_msg 0;0 #00000000 #00000000 none
+MENU COLOR timeout     0;0 #00000000 #00000000 none
 SILENT 1
 PROMPT 0
 TIMEOUT 1

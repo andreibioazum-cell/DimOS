@@ -4,15 +4,10 @@
 # distribution, and the whole "operating system" on top of them is the
 # single DimOS binary (rendered with sokol) that starts on the first console.
 
-# Live-ISO tooling required by mkarchiso
-archiso
+# mkarchiso builds the initramfs inside this filesystem, so the archiso hook
+# has to be here; everything else the builder needs (xorriso, dosfstools,
+# mtools, syslinux modules) lives in the build container, not in the image.
 mkinitcpio-archiso
-syslinux
-efibootmgr
-dosfstools
-mtools
-libisoburn
-arch-install-scripts
 
 # Kernel and initramfs
 base

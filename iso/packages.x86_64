@@ -7,7 +7,10 @@
 # mkarchiso builds the initramfs inside this filesystem, so the archiso hook
 # has to be here; everything else the builder needs (xorriso, dosfstools,
 # mtools, syslinux modules) lives in the build container, not in the image.
+# `syslinux` itself must stay listed: mkarchiso refuses a bios.syslinux
+# profile without it (it ships the boot loader files used to boot).
 mkinitcpio-archiso
+syslinux
 
 # Kernel and initramfs
 base

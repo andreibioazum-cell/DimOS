@@ -1,45 +1,108 @@
-CC ?= gcc
+# Sokol OS -- one C application, one window, one game.
+#
+#   make            build bin/sokol-os (needs a window system)
+#   make run        build and launch it
+#   make frames     render PNG screenshots headlessly into build/frames
+#   make check      build the screenshots and verify they exist
+#   make clean      drop build/ and bin/
+
+CC ?= cc
 CFLAGS ?= -O2
-CPPFLAGS ?=
+PYTHON ?= python3
+
 WARNINGS := -Wall -Wextra -Wpedantic -Werror
-IMAGE_CHECKER := bin/dimos-image-check
-FONT_PREVIEW := bin/dimos-font-preview
+# The sokol headers are written against every compiler in existence and do
+# not survive -Wpedantic -Werror; everything we own is compiled strictly,
+# the two files that embed third-party implementation are compiled relaxed.
+STRICT := $(WARNINGS) -Wno-unused-parameter
+RELAXED := -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
 
-.PHONY: all iso emulator tools verify font clean
+INCLUDES := -Isrc -Ithird_party/sokol -Ithird_party/stb -Ibuild
+STD := -std=c11
+MATH := -lm
+# Let the compiler write header dependencies so editing a header (including
+# the generated font table) rebuilds exactly what uses it.
+DEPFLAGS := -MMD -MP
 
-all: iso
+UNAME := $(shell uname -s 2>/dev/null || echo Windows)
 
-iso: tools
-	./build-linux.sh
+ifeq ($(UNAME),Darwin)
+    PLATFORM_LIBS := -framework Cocoa -framework QuartzCore -framework OpenGL -framework IOKit
+    APP_SUFFIX :=
+else ifeq ($(OS),Windows_NT)
+    PLATFORM_LIBS := -lgl -lgdi32 -luser32 -lshell32 -lole32
+    APP_SUFFIX := .exe
+else
+    PLATFORM_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread
+    APP_SUFFIX :=
+endif
 
-# The economy profile needs both halves of the kernel to agree on it:
-# C selects the full output area and the real-mode VBE code selects the
-# smaller physical 640x480 mode. Passing the define only to C leaves a tiny
-# viewport inside a 1920x1080 VBE screen.
-emulator: tools
-	KERNEL_CFLAGS="$(strip $(KERNEL_CFLAGS) -DDIMOS_EMULATOR)" \
-	KERNEL_ASMFLAGS="$(strip $(KERNEL_ASMFLAGS) -DDIMOS_EMULATOR)" \
-		./build-linux.sh
+BUILD := build
+BIN := bin
+APP := $(BIN)/sokol-os$(APP_SUFFIX)
+RENDER := $(BIN)/render-frames$(APP_SUFFIX)
+FRAMES := $(BUILD)/frames
+FONT_HEADER := $(BUILD)/font_data.h
+FONT_SOURCE := fonts/font.ttf
 
-tools: $(IMAGE_CHECKER) $(FONT_PREVIEW)
+CORE_SOURCES := src/app.c src/snake.c
+CORE_OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE_SOURCES))
+DRAW_OBJECT := $(BUILD)/draw.o
+PLATFORM_OBJECT := $(BUILD)/platform_sokol.o
+RENDER_OBJECT := $(BUILD)/render_frames.o
 
-# The artifact checker is plain C, like the kernel: no C++ anywhere.
-$(IMAGE_CHECKER): tools/image_check.c
-	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -std=c11 $(CFLAGS) $(WARNINGS) $< -o $@
+.PHONY: all app run render frames check clean font
 
-# The font previewer compiles the kernel's own TrueType reader as a host
-# program, so `make font` shows exactly what the kernel will draw.
-$(FONT_PREVIEW): tools/font_preview.c src/kernel/font_ttf.c src/kernel/dimos.h
-	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -std=c11 $(CFLAGS) $(WARNINGS) -DDIMOS_HOST_TEST \
-		-I src/kernel tools/font_preview.c src/kernel/font_ttf.c -o $@
+all: app
 
-font: $(FONT_PREVIEW)
-	$(FONT_PREVIEW) fonts/font.ttf
+app: $(APP)
 
-verify: tools
-	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img disk_img/dimos.hdd disk_img/dimos.iso
+$(BUILD):
+	@mkdir -p $(BUILD)
+
+$(BIN):
+	@mkdir -p $(BIN)
+
+$(FONT_HEADER): $(FONT_SOURCE) tools/embed_font.py
+	@mkdir -p $(BUILD)
+	$(PYTHON) tools/embed_font.py $(FONT_SOURCE) $(FONT_HEADER)
+
+$(BUILD)/%.o: src/%.c | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(STRICT) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD)/draw.o: src/draw.c src/draw.h src/mono_font.h | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD)/platform_sokol.o: src/platform_sokol.c $(FONT_HEADER) | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+$(RENDER_OBJECT): tools/render_frames.c | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+
+$(APP): $(CORE_OBJECTS) $(DRAW_OBJECT) $(PLATFORM_OBJECT) | $(BIN)
+	$(CC) $(CFLAGS) $^ -o $@ $(MATH) $(PLATFORM_LIBS)
+
+$(RENDER): $(CORE_OBJECTS) $(DRAW_OBJECT) $(RENDER_OBJECT) | $(BIN)
+	$(CC) $(CFLAGS) $^ -o $@ $(MATH)
+
+render: $(RENDER)
+
+frames: $(RENDER)
+	@mkdir -p $(FRAMES)
+	$(RENDER) $(FONT_SOURCE) $(FRAMES)
+
+check: frames
+	@test -s $(FRAMES)/03-desktop.png
+	@test -s $(FRAMES)/05-snake-play.png
+	@echo "frames ok: $(FRAMES)"
+
+run: $(APP)
+	./$(APP)
+
+font: | $(BUILD)
+	$(PYTHON) tools/make_mono_font.py src/mono_font.h
 
 clean:
-	rm -rf bin disk_img
+	rm -rf $(BUILD) $(BIN)
+
+-include $(wildcard $(BUILD)/*.d)

@@ -35,7 +35,15 @@ jobs:
             imagemagick
 
       - name: Build the application
-        run: make app
+        run: |
+          set +e
+          make app 2>&1 | tee build/app.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E "error|undefined reference" build/app.log | head -25 |
+              while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit "$rc"
+          fi
 
       - name: Render the screenshots headlessly
         run: make check
@@ -79,7 +87,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: make app
+      - name: Build the application
+        run: |
+          set +e
+          make app 2>&1 | tee build/app.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E "error|undefined reference" build/app.log | head -25 |
+              while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit "$rc"
+          fi
       - run: make frames
       - uses: actions/upload-artifact@v4
         with:
@@ -99,10 +116,16 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build, bin | Out-Null
           python tools/embed_font.py fonts/font.ttf build/font_data.h
-          cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
+          $out = cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
              src/app.c src/snake.c src/draw.c src/platform_sokol.c `
              /Fe:bin/sokol-os.exe /Fo:build/ `
-             opengl32.lib user32.lib gdi32.lib shell32.lib ole32.lib
+             opengl32.lib user32.lib gdi32.lib shell32.lib ole32.lib 2>&1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) {
+            $out -split "`n" | Where-Object { $_ -match "error" } | Select-Object -First 25 |
+              ForEach-Object { Write-Output "::error::$_" }
+            exit 1
+          }
       - name: Render the screenshots headlessly
         shell: pwsh
         run: |

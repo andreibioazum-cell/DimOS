@@ -138,7 +138,6 @@ static AppKey map_key(sapp_keycode code) {
     case SAPP_KEYCODE_ESCAPE:
         return KEY_ESCAPE;
     case SAPP_KEYCODE_ENTER:
-    case SAPP_KEYCODE_KP_ENTER:
         return KEY_ENTER;
     case SAPP_KEYCODE_SPACE:
         return KEY_SPACE;
@@ -267,7 +266,6 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .high_dpi = true,
         .swap_interval = 1,
         .sample_count = 1,
-        .depth_format = SAPP_PIXELFORMAT_NONE,
         .icon.sokol_default = true,
         .logger.func = slog_func,
     };

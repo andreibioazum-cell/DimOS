@@ -21,7 +21,9 @@ STRICT := $(WARNINGS) -Wno-unused-parameter
 RELAXED := -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
 
 INCLUDES := -Isrc -Ithird_party/sokol -Ithird_party/stb -Ibuild
-STD := -std=c11
+# gnu11 rather than c11: sokol_app needs POSIX (clock_gettime, dlopen) and
+# a strict -std=c11 would hide those declarations on glibc.
+STD := -std=gnu11
 MATH := -lm
 
 UNAME := $(shell uname -s 2>/dev/null || echo Windows)

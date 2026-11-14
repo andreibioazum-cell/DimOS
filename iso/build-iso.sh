@@ -66,7 +66,7 @@ fi
 log "Compiling the DimOS binary for the live image"
 mkdir -p "$ROOT/build" "$(dirname "$APP_BIN")"
 python3 "$ROOT/tools/embed_font.py" "$ROOT/fonts/font.ttf" "$ROOT/build/font_data.h"
-cc -std=c11 -O2 \
+cc -std=gnu11 -O2 \
     -I"$ROOT/src" -I"$ROOT/third_party/sokol" -I"$ROOT/third_party/stb" -I"$ROOT/build" \
     "$ROOT/src/app.c" "$ROOT/src/snake.c" "$ROOT/src/draw.c" "$ROOT/src/platform_sokol.c" \
     -o "$APP_BIN" \

@@ -1,0 +1,39 @@
+# Packages of the DimOS live image.
+#
+# The image is a normal Arch Linux: the kernel, udev and X come from the
+# distribution, and the whole "operating system" on top of them is the
+# single DimOS binary (rendered with sokol) that starts on the first console.
+
+# mkarchiso builds the initramfs inside this filesystem, so the archiso hook
+# has to be here; everything else the builder needs (xorriso, dosfstools,
+# mtools, syslinux modules) lives in the build container, not in the image.
+# `syslinux` itself must stay listed: mkarchiso refuses a bios.syslinux
+# profile without it (it ships the boot loader files used to boot).
+mkinitcpio-archiso
+syslinux
+
+# Kernel and initramfs
+base
+linux
+mkinitcpio
+
+# The graphics stack the DimOS binary talks to: X11 + OpenGL (llvmpipe,
+# software, because the live image boots with nomodeset)
+xorg-server
+xorg-xinit
+xorg-xset
+xorg-xrandr
+xf86-input-libinput
+xf86-video-vesa
+xf86-video-fbdev
+mesa
+libx11
+libxi
+libxcursor
+
+# A window manager only so the app can go fullscreen and keep the keyboard
+# focus; it draws nothing of its own.
+openbox
+
+# Console font (Terminus, as on stock Arch)
+terminus-font

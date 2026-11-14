@@ -1,45 +1,97 @@
-CC ?= gcc
+# DimOS -- one C program, one window, one game, rendered with sokol.
+#
+#   make            build bin/dimos (needs a window system while running)
+#   make run        build and launch it
+#   make iso        build dist/dimos.iso and dist/dimos.img (Arch or Docker)
+#   make clean      drop build/, bin/ and dist/
+#
+# The ISO is an Arch Linux live image that boots straight into the DimOS
+# desktop; see iso/README.md. `make iso` needs a Linux with archiso/Docker,
+# which is what CI uses.
+
+CC ?= cc
 CFLAGS ?= -O2
-CPPFLAGS ?=
+PYTHON ?= python3
+
 WARNINGS := -Wall -Wextra -Wpedantic -Werror
-IMAGE_CHECKER := bin/dimos-image-check
-FONT_PREVIEW := bin/dimos-font-preview
+# The sokol headers are written for every compiler in existence and do not
+# survive -Wpedantic -Werror; everything we own is compiled strictly, the two
+# files that embed third-party implementation are compiled relaxed.
+STRICT := $(WARNINGS) -Wno-unused-parameter
+RELAXED := -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
 
-.PHONY: all iso emulator tools verify font clean
+INCLUDES := -Isrc -Ithird_party/sokol -Ithird_party/stb -Ibuild
+# gnu11 rather than c11: sokol_app needs POSIX (clock_gettime, dlopen) and
+# a strict -std=c11 would hide those declarations on glibc.
+STD := -std=gnu11
+MATH := -lm
 
-all: iso
+UNAME := $(shell uname -s 2>/dev/null || echo Windows)
 
-iso: tools
-	./build-linux.sh
+ifeq ($(UNAME),Darwin)
+    PLATFORM_LIBS := -framework Cocoa -framework QuartzCore -framework OpenGL -framework IOKit
+    APP_SUFFIX :=
+    # sokol_app's macOS backend is Objective-C (NSWindow, NSApplication), so
+    # the one file that includes its implementation is compiled as ObjC.
+    PLATFORM_LANG := -x objective-c
+else ifeq ($(OS),Windows_NT)
+    PLATFORM_LIBS := -lgl -lgdi32 -luser32 -lshell32 -lole32
+    APP_SUFFIX := .exe
+else
+    PLATFORM_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread
+    APP_SUFFIX :=
+endif
 
-# The economy profile needs both halves of the kernel to agree on it:
-# C selects the full output area and the real-mode VBE code selects the
-# smaller physical 640x480 mode. Passing the define only to C leaves a tiny
-# viewport inside a 1920x1080 VBE screen.
-emulator: tools
-	KERNEL_CFLAGS="$(strip $(KERNEL_CFLAGS) -DDIMOS_EMULATOR)" \
-	KERNEL_ASMFLAGS="$(strip $(KERNEL_ASMFLAGS) -DDIMOS_EMULATOR)" \
-		./build-linux.sh
+BUILD := build
+BIN := bin
+DIST := dist
+APP := $(BIN)/dimos$(APP_SUFFIX)
+FONT_HEADER := $(BUILD)/font_data.h
+FONT_SOURCE := fonts/font.ttf
 
-tools: $(IMAGE_CHECKER) $(FONT_PREVIEW)
+CORE_SOURCES := src/app.c src/snake.c
+CORE_OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE_SOURCES))
+DRAW_OBJECT := $(BUILD)/draw.o
+PLATFORM_OBJECT := $(BUILD)/platform_sokol.o
 
-# The artifact checker is plain C, like the kernel: no C++ anywhere.
-$(IMAGE_CHECKER): tools/image_check.c
-	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -std=c11 $(CFLAGS) $(WARNINGS) $< -o $@
+.PHONY: all app run iso clean
 
-# The font previewer compiles the kernel's own TrueType reader as a host
-# program, so `make font` shows exactly what the kernel will draw.
-$(FONT_PREVIEW): tools/font_preview.c src/kernel/font_ttf.c src/kernel/dimos.h
-	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -std=c11 $(CFLAGS) $(WARNINGS) -DDIMOS_HOST_TEST \
-		-I src/kernel tools/font_preview.c src/kernel/font_ttf.c -o $@
+all: app
 
-font: $(FONT_PREVIEW)
-	$(FONT_PREVIEW) fonts/font.ttf
+app: $(APP)
 
-verify: tools
-	$(IMAGE_CHECKER) bin/BOOT.BIN bin/KERNEL.BIN disk_img/dimos.img disk_img/dimos.hdd disk_img/dimos.iso
+$(BUILD):
+	@mkdir -p $(BUILD)
+
+$(BIN):
+	@mkdir -p $(BIN)
+
+$(FONT_HEADER): $(FONT_SOURCE) tools/embed_font.py
+	@mkdir -p $(BUILD)
+	$(PYTHON) tools/embed_font.py $(FONT_SOURCE) $(FONT_HEADER)
+
+$(BUILD)/%.o: src/%.c | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(STRICT) -MMD -MP $(INCLUDES) -c $< -o $@
+
+$(BUILD)/draw.o: src/draw.c src/draw.h | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) -MMD -MP $(INCLUDES) -c $< -o $@
+
+$(BUILD)/platform_sokol.o: src/platform_sokol.c $(FONT_HEADER) | $(BUILD)
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) -MMD -MP $(PLATFORM_LANG) $(INCLUDES) -c $< -o $@
+
+$(APP): $(CORE_OBJECTS) $(DRAW_OBJECT) $(PLATFORM_OBJECT) | $(BIN)
+	$(CC) $(CFLAGS) $^ -o $@ $(MATH) $(PLATFORM_LIBS)
+
+run: $(APP)
+	./$(APP)
+
+# Builds the live ISO and the dd-able image. Runs on Arch Linux directly or
+# through Docker on any other Linux; CI does the same in an archlinux
+# container.
+iso:
+	./iso/build-iso.sh
 
 clean:
-	rm -rf bin disk_img
+	rm -rf $(BUILD) $(BIN) $(DIST)
+
+-include $(wildcard $(BUILD)/*.d)

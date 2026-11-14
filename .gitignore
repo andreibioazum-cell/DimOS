@@ -30,3 +30,8 @@ disk_img/
 lpt/
 __pycache__/
 *.pyc
+
+# Build artifacts: the live image, never the binary inside the profile
+dist/
+iso/work/
+iso/airootfs/usr/local/bin/dimos

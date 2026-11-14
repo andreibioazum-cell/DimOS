@@ -1,4 +1,4 @@
-name: Build and validate DimOS
+name: Build DimOS
 
 on:
   push:
@@ -13,99 +13,143 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build and validate bootable images
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+  iso:
+    name: Live ISO + IMG (archiso)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: archlinux:latest
+      options: --privileged
 
     steps:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Install build dependencies
+      - name: Install toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends \
-            build-essential \
-            binutils \
-            dosfstools \
-            mtools \
-            nasm \
-            qemu-system-x86 \
-            python3-venv \
-            xorriso \
-            zip
+          pacman -Syu --noconfirm --needed \
+            archiso base-devel python libx11 libxi libxcursor mesa
 
-      - name: Build PC profile
+      - name: Build ISO and IMG
+        id: build
+        shell: bash
         run: |
-          make clean
-          make iso
-          mkdir -p release/PC
-          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/PC/
+          set -o pipefail
+          ./iso/build-iso.sh 2>&1 | tee iso/build.log
 
-      - name: Validate PC profile
-        run: make verify
-
-      - name: Build emulator profile
+      - name: Report build errors
+        if: failure()
+        shell: bash
         run: |
-          make clean
-          make emulator
-          mkdir -p release/Emulator
-          cp disk_img/dimos.iso disk_img/dimos.img disk_img/dimos.hdd release/Emulator/
+          tail -40 iso/build.log 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-3000 |
+            sed 's/^/::error title=build tail::/'
+          echo
+          grep -iE 'error|failed|not found|unable|could not|target not found' iso/build.log 2>/dev/null |
+            head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
+          echo
 
-      - name: Validate emulator profile
-        run: make verify
-
-      - name: Boot PC profile in QEMU
+      - name: Checksums
+        if: success()
         run: |
-          status=0
-          timeout 10s qemu-system-x86_64 \
-            -machine pc,accel=tcg -m 32M \
-            -drive file=release/PC/dimos.hdd,format=raw,if=ide \
-            -boot c -display none -serial none -monitor none \
-            -no-reboot -no-shutdown -debugcon file:qemu-debug.log || status=$?
-          test "$status" -eq 124
-          grep -F "DIMOS:PROTECTED" qemu-debug.log
-          grep -F "DIMOS:READY:VBE" qemu-debug.log
+          cd dist
+          sha256sum dimos.iso dimos.img > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      # The sandbox runs the real kernel against a fake PC, so the phone
-      # shell can be exercised (and screenshotted) on a build machine.
-      - name: Phone shell smoke test
-        run: |
-          python3 -m venv /tmp/venv
-          /tmp/venv/bin/pip install --quiet unicorn pillow
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --build
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --frames 30
-          test -s tools/sandbox/out/kernel.bin
-          test -s tools/sandbox/out/00-smoke.png
-          file tools/sandbox/out/00-smoke.png
-
-      # The 1.5K panel and the disk are the two things a build machine can
-      # prove without hardware: the canvas has to scale into 2712x1220, and
-      # files have to survive a reboot.
-      - name: 1.5K display and disk test
-        run: |
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --display 2712x1220
-          test -s tools/sandbox/out/display-2712x1220-home.png
-          /tmp/venv/bin/python tools/sandbox/run_kernel.py --disk
-          test -s tools/sandbox/out/26-reboot-load.png
-
-      - name: Upload sandbox screenshots
+      - name: Upload ISO and IMG
         uses: actions/upload-artifact@v6
         with:
-          name: DimOS-screenshots
-          path: tools/sandbox/out/*.png
-          retention-days: 14
-
-      - name: Create DimOS zip package
-        run: |
-          (cd release && zip -qr "../DimOS-${{ github.sha }}.zip" PC Emulator)
-
-      - name: Upload DimOS package
-        uses: actions/upload-artifact@v6
-        with:
-          name: DimOS-${{ github.sha }}
-          path: DimOS-${{ github.sha }}.zip
+          name: dimos-x86_64
+          path: |
+            dist/dimos.iso
+            dist/dimos.img
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+  linux:
+    name: Linux -- build and run the desktop program
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build and window dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libgl1-mesa-dev \
+            libgl1-mesa-dri \
+            xvfb
+
+      - name: Build the application
+        run: |
+          set +e
+          mkdir -p build
+          make app 2>&1 | tee build/app.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E "error|undefined reference" build/app.log | head -25 |
+              while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit "$rc"
+          fi
+
+      - name: Smoke-test the real window in a virtual X server
+        run: |
+          export LIBGL_ALWAYS_SOFTWARE=1
+          set +e
+          xvfb-run -a -s "-screen 0 1280x720x24" bash -c '
+            ./bin/dimos > build/xvfb.log 2>&1 &
+            app=$!
+            sleep 8
+            if kill -0 "$app" 2>/dev/null; then
+              kill "$app"; wait "$app" 2>/dev/null
+              echo "dimos stayed alive for 8s"
+              exit 0
+            fi
+            echo "dimos exited early"
+            exit 1
+          '
+          rc=$?
+          echo "---- dimos log ----"
+          cat build/xvfb.log || true
+          if [ "$rc" -ne 0 ]; then
+            head -20 build/xvfb.log | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit 1
+          fi
+
+  macos:
+    name: macOS -- compile check
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: make app
+
+  windows:
+    name: Windows -- compile check
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build with MSVC
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build, bin | Out-Null
+          python tools/embed_font.py fonts/font.ttf build/font_data.h
+          $out = cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
+             src/app.c src/snake.c src/draw.c src/platform_sokol.c `
+             /Fe:bin/dimos.exe /Fo:build/ `
+             opengl32.lib user32.lib gdi32.lib shell32.lib ole32.lib 2>&1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) {
+            $out -split "`n" | Where-Object { $_ -match "error" } | Select-Object -First 25 |
+              ForEach-Object { Write-Output "::error::$_" }
+            exit 1
+          }

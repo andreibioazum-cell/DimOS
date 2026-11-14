@@ -54,7 +54,7 @@ CORE_OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(CORE_SOURCES))
 DRAW_OBJECT := $(BUILD)/draw.o
 PLATFORM_OBJECT := $(BUILD)/platform_sokol.o
 
-.PHONY: all app run iso clean font
+.PHONY: all app run iso clean
 
 all: app
 
@@ -73,7 +73,7 @@ $(FONT_HEADER): $(FONT_SOURCE) tools/embed_font.py
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(STD) $(CFLAGS) $(STRICT) -MMD -MP $(INCLUDES) -c $< -o $@
 
-$(BUILD)/draw.o: src/draw.c src/draw.h src/mono_font.h | $(BUILD)
+$(BUILD)/draw.o: src/draw.c src/draw.h | $(BUILD)
 	$(CC) $(STD) $(CFLAGS) $(RELAXED) -MMD -MP $(INCLUDES) -c $< -o $@
 
 $(BUILD)/platform_sokol.o: src/platform_sokol.c $(FONT_HEADER) | $(BUILD)
@@ -90,9 +90,6 @@ run: $(APP)
 # container.
 iso:
 	./iso/build-iso.sh
-
-font: | $(BUILD)
-	$(PYTHON) tools/make_mono_font.py src/mono_font.h
 
 clean:
 	rm -rf $(BUILD) $(BIN) $(DIST)

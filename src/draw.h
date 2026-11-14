@@ -50,8 +50,7 @@ void canvas_radial_glow(Canvas *c, float cx, float cy, float radius, uint32_t co
 void canvas_ring_arc(Canvas *c, float cx, float cy, float radius, float thickness, float start_deg, float end_deg,
                      uint32_t color, uint8_t alpha);
 
-/* Text: the UI font is a real TrueType file rasterized on demand, the
- * monospace font is the public-domain IBM VGA 8x8 set. */
+/* Text: a real TrueType file, rasterized on demand and cached. */
 int text_init(const unsigned char *ttf, size_t ttf_size);
 void text_ui(Canvas *c, float x, float y, int px, uint32_t color, const char *text);
 void text_ui_alpha(Canvas *c, float x, float y, int px, uint32_t color, uint8_t alpha, const char *text);
@@ -59,9 +58,5 @@ void text_ui_bold(Canvas *c, float x, float y, int px, uint32_t color, uint8_t a
 void text_ui_centered(Canvas *c, float cx, float y, int px, uint32_t color, uint8_t alpha, const char *text);
 float text_ui_width(int px, const char *text);
 float text_ui_height(int px);
-
-void text_mono(Canvas *c, float x, float y, float scale, uint32_t color, uint8_t alpha, const char *text);
-float mono_width(const float scale, const char *text);
-float mono_height(float scale);
 
 #endif

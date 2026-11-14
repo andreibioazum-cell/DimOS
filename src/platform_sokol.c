@@ -61,7 +61,6 @@ static const char *quad_fragment_shader =
 
 static struct {
     App *app;
-    bool skip_boot;
     sg_image canvas_image;
     sg_buffer quad_buffer;
     sg_pipeline pipeline;
@@ -101,11 +100,8 @@ static void init(void) {
     });
 
     g.app = app_create(font_ttf, font_ttf_size);
-    if (g.app && g.skip_boot) {
-        app_skip_boot(g.app);
-    }
     if (!g.app) {
-        fprintf(stderr, "sokol-os: out of memory\n");
+        fprintf(stderr, "dimos: out of memory\n");
         sapp_request_quit();
         return;
     }
@@ -124,7 +120,7 @@ static void init(void) {
         .mag_filter = SG_FILTER_LINEAR,
         .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
         .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
-        .label = "sokol-os-canvas",
+        .label = "dimos-canvas",
     });
 
     g.pipeline = sg_make_pipeline(&(sg_pipeline_desc){
@@ -296,10 +292,9 @@ static bool has_flag(int argc, char *argv[], const char *name) {
 }
 
 sapp_desc sokol_main(int argc, char *argv[]) {
-    /* --fullscreen and --skip-boot are used by the live ISO, where the real
-     * kernel has already printed its boot log on the first console. */
+    /* --fullscreen is used by the live ISO, which has no window manager
+     * decorations of its own. */
     const bool fullscreen = has_flag(argc, argv, "--fullscreen") || getenv("DIMOS_FULLSCREEN") != NULL;
-    g.skip_boot = has_flag(argc, argv, "--skip-boot") || getenv("DIMOS_SKIP_BOOT") != NULL;
     return (sapp_desc){
         .init_cb = init,
         .frame_cb = frame,

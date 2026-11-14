@@ -1,5 +1,5 @@
 /*
- * app.h -- DimOS itself: a boot sequence, a desktop and one application.
+ * app.h -- DimOS itself: a desktop and one application.
  *
  * The whole operating system is a single process with one window. The
  * platform layer (sokol_app + a two-triangle blit) only supplies a window,
@@ -19,9 +19,8 @@
 #define APP_HEIGHT 720
 
 typedef enum {
-    APP_SCREEN_BOOT = 0,
-    APP_SCREEN_DESKTOP = 1,
-    APP_SCREEN_SNAKE = 2
+    APP_SCREEN_DESKTOP = 0,
+    APP_SCREEN_SNAKE = 1
 } AppScreen;
 
 typedef enum {
@@ -75,8 +74,6 @@ void app_input(App *app, const InputEvent *event);
 Canvas *app_canvas(App *app);
 AppScreen app_screen(const App *app);
 void app_goto(App *app, AppScreen screen);
-/* Skip the built-in console: used by the live ISO, which boots a real kernel. */
-void app_skip_boot(App *app);
 int app_quit_requested(const App *app);
 
 #endif

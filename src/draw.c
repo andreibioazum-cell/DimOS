@@ -3,17 +3,14 @@
  *
  * Everything is anti-aliased by evaluating a signed distance per pixel
  * instead of drawing into a mask first: at 1280x720 the cost is small and
- * the code stays readable. Text has two paths: a real TrueType file
- * (fonts/font.ttf, embedded at build time) for the UI, and the classic
- * 8x8 IBM VGA glyphs for the boot console.
+ * the code stays readable. Text is a real TrueType file (fonts/font.ttf,
+ * embedded at build time) rasterized on demand and cached.
  */
 #include "draw.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "mono_font.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
@@ -585,73 +582,4 @@ void text_ui_bold(Canvas *c, float x, float y, int px, uint32_t color, uint8_t a
 void text_ui_centered(Canvas *c, float cx, float y, int px, uint32_t color, uint8_t alpha, const char *text) {
     const float width = text_ui_width(px, text);
     text_ui_alpha(c, cx - width * 0.5f, y, px, color, alpha, text);
-}
-
-/* ------------------------------------------------------------------ */
-/* Text: monospace console                                             */
-/* ------------------------------------------------------------------ */
-
-float mono_height(float scale) {
-    return 8.0f * scale;
-}
-
-float mono_width(const float scale, const char *text) {
-    if (!text) {
-        return 0.0f;
-    }
-    return (float)strlen(text) * 8.0f * scale;
-}
-
-void text_mono(Canvas *c, float x, float y, float scale, uint32_t color, uint8_t alpha, const char *text) {
-    if (!text || scale <= 0.0f) {
-        return;
-    }
-    const float cell = 8.0f * scale;
-    const int integral = (fabsf(cell - roundf(cell)) < 0.001f);
-    float pen = x;
-    for (const unsigned char *s = (const unsigned char *)text; *s; ++s) {
-        const int code = (*s >= MONO_FONT_FIRST && *s <= MONO_FONT_LAST) ? *s : '?';
-        const unsigned char *glyph = &mono_font_8x8[code * 8];
-        const int px0 = (int)floorf(pen);
-        const int py0 = (int)floorf(y);
-        const int px1 = (int)ceilf(pen + cell);
-        const int py1 = (int)ceilf(y + cell);
-        for (int py = py0; py < py1; ++py) {
-            if (py < 0 || py >= c->height) {
-                continue;
-            }
-            for (int px = px0; px < px1; ++px) {
-                if (px < 0 || px >= c->width) {
-                    continue;
-                }
-                float coverage = 0.0f;
-                if (integral) {
-                    const int sx = (int)(((float)px - pen) / cell * 8.0f);
-                    const int sy = (int)(((float)py - y) / cell * 8.0f);
-                    if (sx < 0 || sx > 7 || sy < 0 || sy > 7) {
-                        continue;
-                    }
-                    coverage = (glyph[sy] & (0x80u >> sx)) ? 1.0f : 0.0f;
-                } else {
-                    /* 4x supersampling keeps fractional scales readable. */
-                    for (int sub_y = 0; sub_y < 2; ++sub_y) {
-                        for (int sub_x = 0; sub_x < 2; ++sub_x) {
-                            const float fx = (((float)px + ((float)sub_x + 0.5f) * 0.5f) - pen) / cell * 8.0f;
-                            const float fy = (((float)py + ((float)sub_y + 0.5f) * 0.5f) - y) / cell * 8.0f;
-                            const int sx = (int)fx;
-                            const int sy = (int)fy;
-                            if (sx >= 0 && sx < 8 && sy >= 0 && sy < 8 && (glyph[sy] & (0x80u >> sx))) {
-                                coverage += 0.25f;
-                            }
-                        }
-                    }
-                }
-                if (coverage <= 0.0f) {
-                    continue;
-                }
-                blend_pixel(c, px, py, color, (uint8_t)clamp_u8((float)alpha * coverage));
-            }
-        }
-        pen += cell;
-    }
 }

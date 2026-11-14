@@ -1,13 +1,14 @@
 /*
- * app.c -- DimOS: the boot console, the desktop and the window manager.
+ * app.c -- DimOS: the desktop and one application.
  *
- * Three screens share one 1280x720 canvas:
+ * Two screens share one 1280x720 canvas:
  *
- *   1. BOOT     an Arch Linux style console: kernel messages, systemd's
- *               green [  OK  ] lines, then a login prompt that types itself.
- *   2. DESKTOP  a wallpaper, a top bar with a live clock, and exactly one
+ *   1. DESKTOP  a wallpaper, a top bar with a live clock, and exactly one
  *               application icon in the middle of the screen.
- *   3. SNAKE    the one installed application (see snake.c).
+ *   2. SNAKE    the one installed application (see snake.c).
+ *
+ * There is no console and no boot log anywhere: the machine goes straight
+ * from firmware to this desktop.
  *
  * There is no 3D here at all: no depth buffer, no matrices, no perspective.
  * Every pixel is painted on the CPU into one ARGB canvas, and the platform
@@ -22,64 +23,6 @@
 #include <time.h>
 
 #include "snake.h"
-
-/* ------------------------------------------------------------------ */
-/* Boot script                                                         */
-/* ------------------------------------------------------------------ */
-
-typedef enum {
-    BOOT_STYLE_BANNER = 0,
-    BOOT_STYLE_KERNEL,
-    BOOT_STYLE_OK,
-    BOOT_STYLE_INFO
-} BootStyle;
-
-typedef struct {
-    float at;
-    BootStyle style;
-    const char *text;
-} BootLine;
-
-static const BootLine boot_lines[] = {
-    {0.10f, BOOT_STYLE_BANNER, "Arch Linux 6.12.9-arch1-1 (tty1)"},
-    {0.45f, BOOT_STYLE_KERNEL, "[    0.000000] Linux version 6.12.9-arch1-1 (linux@archlinux)"},
-    {0.58f, BOOT_STYLE_KERNEL, "[    0.000000] Command line: BOOT_IMAGE=/vmlinuz-linux root=UUID=6f1c"},
-    {0.71f, BOOT_STYLE_KERNEL, "[    0.000014] BIOS-provided physical RAM map:"},
-    {0.84f, BOOT_STYLE_KERNEL, "[    0.000057] ACPI: RSDP 0x00000000000F05B0 000024 (v02 SOKOL )"},
-    {0.97f, BOOT_STYLE_KERNEL, "[    0.000092] Memory: 3298612K/4194304K available"},
-    {1.10f, BOOT_STYLE_KERNEL, "[    0.000131] smpboot: CPU0: AMD Ryzen 7 5800X 8-Core"},
-    {1.24f, BOOT_STYLE_KERNEL, "[    0.024418] sokol: window 1280x720, 32-bit canvas, 60 Hz"},
-    {1.37f, BOOT_STYLE_KERNEL, "[    0.024492] dimos: software renderer ready"},
-    {1.50f, BOOT_STYLE_KERNEL, "[    0.024530] dimos: input devices: mouse, keyboard"},
-    {1.68f, BOOT_STYLE_KERNEL, "[    0.061208] dimos: 964.3 MB/s canvas blit, 0 dropped"},
-    {1.90f, BOOT_STYLE_INFO,   "systemd[1]: systemd 256.9-1-arch running in system mode"},
-    {2.15f, BOOT_STYLE_OK,     " Created slice User and Session Slice."},
-    {2.35f, BOOT_STYLE_OK,     " Started Journal Service."},
-    {2.55f, BOOT_STYLE_OK,     " Mounted /boot."},
-    {2.75f, BOOT_STYLE_OK,     " Started udev Kernel Device Manager."},
-    {2.95f, BOOT_STYLE_OK,     " Reached target Local File Systems."},
-    {3.15f, BOOT_STYLE_OK,     " Started Sokol Compositor."},
-    {3.35f, BOOT_STYLE_OK,     " Started Snake."},
-    {3.55f, BOOT_STYLE_OK,     " Reached target Graphical Interface."},
-};
-
-#define BOOT_LINE_COUNT ((int)(sizeof(boot_lines) / sizeof(boot_lines[0])))
-
-static const char login_block[] =
-    "Arch Linux 6.12.9-arch1-1 (tty1)\n"
-    "\n"
-    "archlinux login: root\n"
-    "Password: ******\n"
-    "\n"
-    "Last login: Fri Nov 14 08:57:31 on tty1\n"
-    "\n"
-    "[root@archlinux ~]# snake --desktop\n"
-    "\n";
-
-typedef enum {
-    BOOT_PHASE_LOG = 0,
-    BOOT_PHASE_LOGIN
-} BootPhase;
 
 /* ------------------------------------------------------------------ */
 /* Application state                                                   */
@@ -109,11 +52,6 @@ struct App {
 
     float mouse_x;
     float mouse_y;
-
-    /* boot */
-    BootPhase boot_phase;
-    float login_start;
-    float login_chars;
 
     /* desktop */
     Rect icon_rect;
@@ -229,8 +167,7 @@ App *app_create(const unsigned char *ttf, size_t ttf_size) {
     app->back_button.h = 40;
 
     snake_reset(&app->snake, 0);
-    app->screen = APP_SCREEN_BOOT;
-    app->boot_phase = BOOT_PHASE_LOG;
+    app->screen = APP_SCREEN_DESKTOP;
     app->first_frame = 1;
     app->input_pending = 1;
     app->fade = 1.0f;
@@ -258,14 +195,6 @@ AppScreen app_screen(const App *app) {
 
 int app_quit_requested(const App *app) {
     return app->quit_requested;
-}
-
-/* The live ISO boots a real kernel that prints a real log on tty1, so the
- * shell skips its own console and opens straight on the desktop. */
-void app_skip_boot(App *app) {
-    if (app->screen == APP_SCREEN_BOOT) {
-        app_goto(app, APP_SCREEN_DESKTOP);
-    }
 }
 
 void app_goto(App *app, AppScreen screen) {
@@ -304,23 +233,6 @@ void app_update(App *app, float dt) {
     }
 
     switch (app->screen) {
-    case APP_SCREEN_BOOT: {
-        if (app->boot_phase == BOOT_PHASE_LOG) {
-            const float last = boot_lines[BOOT_LINE_COUNT - 1].at;
-            if (app->time > last + 1.1f) {
-                app->boot_phase = BOOT_PHASE_LOGIN;
-                app->login_start = app->time;
-            }
-        } else {
-            const float revealed = (app->time - app->login_start) * 68.0f;
-            app->login_chars = revealed;
-            const float total = (float)strlen(login_block);
-            if (revealed > total + 45.0f) {
-                app_goto(app, APP_SCREEN_DESKTOP);
-            }
-        }
-        break;
-    }
     case APP_SCREEN_DESKTOP: {
         const int hovered = hover_in(app, &app->icon_rect, 10.0f);
         const float target = hovered ? 1.0f : 0.0f;
@@ -349,8 +261,6 @@ int app_needs_frame(const App *app) {
         return 1;
     }
     switch (app->screen) {
-    case APP_SCREEN_BOOT:
-        return 1; /* the console is always typing something */
     case APP_SCREEN_DESKTOP: {
         /* An idle desktop animates nothing: the platform may skip the whole
          * frame. Only the rising/settling hover animation and a new minute
@@ -389,10 +299,6 @@ void app_input(App *app, const InputEvent *event) {
             app_goto(app, APP_SCREEN_DESKTOP);
             return;
         }
-        if (app->screen == APP_SCREEN_BOOT) {
-            app_goto(app, APP_SCREEN_DESKTOP);
-            return;
-        }
         if (app->screen == APP_SCREEN_DESKTOP && hover_in(app, &app->icon_rect, 10.0f)) {
             app->icon_pressed = 1;
         }
@@ -416,9 +322,6 @@ void app_input(App *app, const InputEvent *event) {
     }
 
     switch (app->screen) {
-    case APP_SCREEN_BOOT:
-        app_goto(app, APP_SCREEN_DESKTOP);
-        break;
     case APP_SCREEN_DESKTOP:
         if (event->key == KEY_ENTER || event->key == KEY_SPACE) {
             app_goto(app, APP_SCREEN_SNAKE);
@@ -471,106 +374,6 @@ void app_input(App *app, const InputEvent *event) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Boot screen                                                         */
-/* ------------------------------------------------------------------ */
-
-static void draw_boot_log(App *app) {
-    Canvas *c = &app->canvas;
-    const float scale = 2.0f;
-    const float line_height = 20.0f;
-    const float top = 46.0f;
-
-    int printed = 0;
-    for (int i = 0; i < BOOT_LINE_COUNT; ++i) {
-        if (app->time + 0.0001f < boot_lines[i].at) {
-            break;
-        }
-        printed = i + 1;
-    }
-
-    for (int i = 0; i < printed; ++i) {
-        const BootLine *line = &boot_lines[i];
-        const float alpha = clampf((app->time - line->at) / 0.10f, 0.0f, 1.0f);
-        const uint8_t a = (uint8_t)(alpha * 255.0f);
-        const float y = top + (float)i * line_height;
-        switch (line->style) {
-        case BOOT_STYLE_BANNER:
-            text_mono(c, 26.0f, y, scale, RGB(0xF2, 0xF4, 0xF8), a, line->text);
-            break;
-        case BOOT_STYLE_KERNEL: {
-            /* Timestamp in dim grey, the message itself in near white. */
-            char stamp[16];
-            memcpy(stamp, line->text, 13);
-            stamp[13] = '\0';
-            text_mono(c, 26.0f, y, scale, RGB(0x5B, 0x66, 0x77), a, stamp);
-            text_mono(c, 26.0f + 13.0f * 8.0f * scale, y, scale, RGB(0xC3, 0xCC, 0xD9), a, line->text + 13);
-            break;
-        }
-        case BOOT_STYLE_INFO:
-            text_mono(c, 26.0f, y, scale, RGB(0x56, 0xB6, 0xE0), a, line->text);
-            break;
-        case BOOT_STYLE_OK: {
-            text_mono(c, 26.0f, y, scale, RGB(0x6B, 0x77, 0x88), a, "[  ");
-            text_mono(c, 26.0f + 3.0f * 16.0f, y, scale, RGB(0x35, 0xD0, 0x5F), a, "OK");
-            text_mono(c, 26.0f + 5.0f * 16.0f, y, scale, RGB(0x6B, 0x77, 0x88), a, "  ]");
-            text_mono(c, 26.0f + 8.0f * 16.0f, y, scale, RGB(0xD7, 0xDE, 0xE8), a, line->text);
-            break;
-        }
-        default:
-            break;
-        }
-    }
-
-    /* Blinking block cursor right after the newest line. */
-    if (((int)(app->time * 2.0f) & 1) == 0 && printed > 0) {
-        const float y = top + (float)printed * line_height;
-        text_mono(c, 26.0f, y, scale, RGB(0xC3, 0xCC, 0xD9), 200, "_");
-    }
-
-    text_ui(c, 26.0f, (float)APP_HEIGHT - 34.0f, 13, RGB(0x64, 0x74, 0x8B), "any key or click skips the boot log");
-}
-
-static void draw_boot_login(App *app) {
-    Canvas *c = &app->canvas;
-    const float scale = 2.0f;
-    const float line_height = 26.0f;
-    const float left = 46.0f;
-    const float top = 60.0f;
-
-    const int len = (int)strlen(login_block);
-    int visible = (int)app->login_chars;
-    if (visible > len) {
-        visible = len;
-    }
-
-    int col = 0;
-    int row = 0;
-    for (int i = 0; i < visible; ++i) {
-        const char ch = login_block[i];
-        if (ch == '\n') {
-            col = 0;
-            row += 1;
-            continue;
-        }
-        char glyph[2] = {ch, '\0'};
-        uint32_t color = RGB(0xC9, 0xD1, 0xDB);
-        if (i < 13) {
-            color = RGB(0xF2, 0xF4, 0xF8);
-        } else if (ch == '*' || ch == '#') {
-            color = RGB(0x86, 0xEF, 0xAC);
-        }
-        text_mono(c, left + (float)col * 16.0f, top + (float)row * line_height, scale, color, 255, glyph);
-        col += 1;
-    }
-
-    if (((int)(app->time * 2.4f) & 1) == 0) {
-        text_mono(c, left + (float)col * 16.0f, top + (float)row * line_height, scale, RGB(0xE8, 0xEE, 0xF6), 220, "_");
-    }
-
-    text_ui(c, 46.0f, (float)APP_HEIGHT - 34.0f, 13, RGB(0x64, 0x74, 0x8B), "starting the desktop...");
-}
-
-/* ------------------------------------------------------------------ */
 /* Desktop                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -608,11 +411,6 @@ static void draw_top_bar_base(Canvas *c) {
     canvas_fill_alpha(c, 0.0f, 0.0f, (float)APP_WIDTH, 40.0f, RGB(0x04, 0x07, 0x0C), 120);
     canvas_fill_alpha(c, 0.0f, 39.0f, (float)APP_WIDTH, 1.0f, RGB(0xFF, 0xFF, 0xFF), 18);
     text_ui(c, 26.0f, 11.0f, 16, RGB(0xF2, 0xF4, 0xF8), "DimOS");
-
-    /* a small arch-shaped mark, drawn with three strokes */
-    canvas_line(c, 106.0f, 30.0f, 112.0f, 12.0f, 2.0f, RGB(0x4A, 0xDE, 0x80), 230);
-    canvas_line(c, 112.0f, 12.0f, 118.0f, 30.0f, 2.0f, RGB(0x4A, 0xDE, 0x80), 230);
-    canvas_line(c, 109.0f, 24.0f, 115.0f, 24.0f, 1.8f, RGB(0x4A, 0xDE, 0x80), 160);
 
     draw_status_icons(c, (float)APP_WIDTH - 26.0f);
 }
@@ -851,14 +649,6 @@ static void draw_snake_screen(App *app) {
 void app_draw_frame(App *app) {
     Canvas *c = &app->canvas;
     switch (app->screen) {
-    case APP_SCREEN_BOOT:
-        canvas_clear(c, RGB(0x04, 0x06, 0x09));
-        if (app->boot_phase == BOOT_PHASE_LOG) {
-            draw_boot_log(app);
-        } else {
-            draw_boot_login(app);
-        }
-        break;
     case APP_SCREEN_DESKTOP:
         draw_desktop(app);
         break;

@@ -87,25 +87,58 @@ chmod 755 "$PROFILE/airootfs/root/.xinitrc" "$PROFILE/airootfs/root/.bash_profil
 
 sed -i 's/^iso_name=.*/iso_name="dimos"/' "$PROFILE/profiledef.sh"
 sed -i 's/^iso_label=.*/iso_label="DIMOS"/' "$PROFILE/profiledef.sh"
-sed -i 's/^iso_application=.*/iso_application="DimOS live"/' "$PROFILE/profiledef.sh"
+sed -i 's/^iso_publisher=.*/iso_publisher="DimOS"/' "$PROFILE/profiledef.sh"
+sed -i 's/^iso_application=.*/iso_application="DimOS"/' "$PROFILE/profiledef.sh"
 # zstd at a high level: fast enough to build on CI, small enough to download.
 sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '19' '-b' '1M')/" \
     "$PROFILE/profiledef.sh"
 
-# Kernel command line: keep the console visible (the Arch boot log is the
-# "startup screen") and force the safe VESA path so the image also boots on
-# machines without a KMS driver.
-find "$PROFILE/syslinux" -type f -name '*.cfg' -exec \
-    sed -i -E 's/^([[:space:]]*APPEND.*)$/\1 nomodeset console=tty0 console=ttyS0,115200/' {} +
-find "$PROFILE/efiboot" -type f -name '*.conf' -exec \
-    sed -i -E 's/^(options .*)$/\1 nomodeset console=tty0 console=ttyS0,115200/' {} +
+# --------------------------------------------------------------------------
+# 2b. Silent boot: the machine goes from firmware straight to the DimOS
+#     desktop. No boot menu, no "Arch Linux" banner, no kernel log, no serial
+#     output, no console text -- nothing but DimOS.
+# --------------------------------------------------------------------------
+BOOT_PARAMS="nomodeset quiet loglevel=0 vt.global_cursor_default=0 systemd.show_status=false"
+# mkarchiso substitutes %KERNEL_PARAMS% into every boot loader entry, so one
+# variable silences BIOS and UEFI alike.
+if grep -q '^kernel_params_x86_64=' "$PROFILE/profiledef.sh"; then
+    sed -i "s|^kernel_params_x86_64=.*|kernel_params_x86_64=\"$BOOT_PARAMS\"|" "$PROFILE/profiledef.sh"
+else
+    printf 'kernel_params_x86_64="%s"\n' "$BOOT_PARAMS" >> "$PROFILE/profiledef.sh"
+fi
 
-# No boot menu: go straight to the kernel.
-find "$PROFILE/syslinux" -type f -name '*.cfg' -exec \
-    sed -i -E 's/^[[:space:]]*TIMEOUT[[:space:]].*$/TIMEOUT 1/; s/^[[:space:]]*PROMPT[[:space:]].*$/PROMPT 0/' {} +
-if [[ -f "$PROFILE/efiboot/loader/loader.conf" ]]; then
-    sed -i -E 's/^[[:space:]]*timeout[[:space:]].*/timeout 0/' "$PROFILE/efiboot/loader/loader.conf"
-    grep -q '^timeout' "$PROFILE/efiboot/loader/loader.conf" || echo 'timeout 0' >> "$PROFILE/efiboot/loader/loader.conf"
+# BIOS. archiso_head.cfg is where releng puts the menu, the splash image and a
+# serial console (which is exactly the noise we do not want); replace it with
+# the three directives that mean "boot the default entry without a word".
+cat > "$PROFILE/syslinux/archiso_head.cfg" <<'CFG'
+# DimOS: silent boot. No menu, no banner, no text. TIMEOUT is in tenths of
+# a second; syslinux treats 0 as "wait forever", so it stays at one tick.
+SILENT 1
+PROMPT 0
+TIMEOUT 1
+CFG
+cat > "$PROFILE/syslinux/syslinux.cfg" <<'CFG'
+# DimOS: hand control straight to the one boot entry.
+SILENT 1
+PROMPT 0
+TIMEOUT 1
+DEFAULT dimos
+LABEL dimos
+CONFIG archiso_sys.cfg
+CFG
+sed -i -E 's/^[[:space:]]*TIMEOUT[[:space:]].*/TIMEOUT 1/; s/^[[:space:]]*DEFAULT[[:space:]].*/DEFAULT arch/' \
+    "$PROFILE/syslinux/archiso_sys.cfg"
+rm -f "$PROFILE/syslinux/splash.png"
+# The LABEL blocks themselves stay untouched: they carry the archiso
+# placeholders (archisosearchuuid, install dir) that mkarchiso fills in.
+
+# UEFI. systemd-boot with a zero timeout, no beep, no editor, and only the
+# DimOS entry -- no memtest, no speech, nothing to choose from.
+if [[ -d "$PROFILE/efiboot/loader" ]]; then
+    printf 'timeout 0\ndefault 01-archiso-linux.conf\nbeep off\neditor 0\nconsole-mode keep\n' \
+        > "$PROFILE/efiboot/loader/loader.conf"
+    find "$PROFILE/efiboot/loader/entries" -type f -name '*.conf' ! -name '01-archiso-linux.conf' -delete
+    sed -i -E 's|^title[[:space:]].*|title    DimOS|' "$PROFILE/efiboot/loader/entries/01-archiso-linux.conf"
 fi
 
 # --------------------------------------------------------------------------

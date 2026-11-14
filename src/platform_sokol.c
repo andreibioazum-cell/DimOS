@@ -118,10 +118,7 @@ static void init(void) {
     });
 
     g.pass_action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    g.pass_action.colors[0].clear_value[0] = 0.02f;
-    g.pass_action.colors[0].clear_value[1] = 0.02f;
-    g.pass_action.colors[0].clear_value[2] = 0.03f;
-    g.pass_action.colors[0].clear_value[3] = 1.0f;
+    g.pass_action.colors[0].clear_value = (sg_color){0.02f, 0.02f, 0.03f, 1.0f};
     g.bindings.fs_images[0] = g.canvas_image;
 
     update_letterbox(sapp_width(), sapp_height());
@@ -243,7 +240,7 @@ static void frame(void) {
         sapp_request_quit();
     }
 
-    sg_begin_pass(&(sg_pass){.action = g.pass_action, .swapchain = sglue_swapchain()});
+    sg_begin_default_pass(&g.pass_action, width, height);
     sg_apply_viewportf(g.offset_x, g.offset_y, (float)APP_WIDTH * g.scale, (float)APP_HEIGHT * g.scale, true);
     sg_apply_pipeline(g.pipeline);
     sg_apply_bindings(&g.bindings);

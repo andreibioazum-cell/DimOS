@@ -37,6 +37,7 @@ jobs:
       - name: Build the application
         run: |
           set +e
+          mkdir -p build
           make app 2>&1 | tee build/app.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
@@ -90,6 +91,7 @@ jobs:
       - name: Build the application
         run: |
           set +e
+          mkdir -p build
           make app 2>&1 | tee build/app.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then

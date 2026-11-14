@@ -142,7 +142,7 @@ static void init(void) {
         /* No depth test, no depth writes: this pipeline is 2D by contract. */
         .depth = {
             .write_enabled = false,
-            .compare_func = SG_COMPAREFUNC_ALWAYS,
+            .compare = SG_COMPAREFUNC_ALWAYS,
         },
         .label = "canvas-blit-pipeline",
     });

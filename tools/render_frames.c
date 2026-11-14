@@ -71,6 +71,8 @@ static int save_png(App *app, const char *directory, const char *name) {
     free(rgba);
     if (!ok) {
         fprintf(stderr, "render-frames: could not write %s\n", path);
+    } else {
+        printf("render-frames: wrote %s\n", path);
     }
     return ok;
 }

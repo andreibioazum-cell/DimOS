@@ -29,6 +29,10 @@ UNAME := $(shell uname -s 2>/dev/null || echo Windows)
 ifeq ($(UNAME),Darwin)
     PLATFORM_LIBS := -framework Cocoa -framework QuartzCore -framework OpenGL -framework IOKit
     APP_SUFFIX :=
+    # sokol_app's macOS backend is Objective-C (NSWindow, NSApplication),
+    # so the one file that includes its implementation must be compiled as
+    # Objective-C. Everything else stays plain C11.
+    PLATFORM_LANG := -x objective-c
 else ifeq ($(OS),Windows_NT)
     PLATFORM_LIBS := -lgl -lgdi32 -luser32 -lshell32 -lole32
     APP_SUFFIX := .exe
@@ -74,7 +78,7 @@ $(BUILD)/draw.o: src/draw.c src/draw.h src/mono_font.h | $(BUILD)
 	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD)/platform_sokol.o: src/platform_sokol.c $(FONT_HEADER) | $(BUILD)
-	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(PLATFORM_LANG) $(INCLUDES) -c $< -o $@
 
 $(RENDER_OBJECT): tools/render_frames.c | $(BUILD)
 	$(CC) $(STD) $(CFLAGS) $(RELAXED) $(DEPFLAGS) $(INCLUDES) -c $< -o $@

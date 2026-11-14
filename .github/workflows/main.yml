@@ -58,20 +58,30 @@ jobs:
 
       - name: Smoke-test the real window in a virtual X server
         run: |
-          set -o pipefail
           export LIBGL_ALWAYS_SOFTWARE=1
+          set +e
           xvfb-run -a -s "-screen 0 1280x720x24" bash -c '
             ./bin/sokol-os > build/xvfb.log 2>&1 &
             app=$!
-            sleep 7
-            if ! kill -0 "$app" 2>/dev/null; then
-              echo "sokol-os exited early:"; cat build/xvfb.log; exit 1
+            sleep 8
+            if kill -0 "$app" 2>/dev/null; then
+              kill "$app"; wait "$app" 2>/dev/null
+              echo "sokol-os stayed alive for 8s"
+              import -window root build/xvfb-window.png
+              exit 0
             fi
-            import -window root build/xvfb-window.png || true
-            kill "$app"
-            wait "$app" 2>/dev/null || true
+            echo "sokol-os exited early"
+            exit 1
           '
-          cat build/xvfb.log
+          rc=$?
+          echo "---- sokol-os log ----"
+          cat build/xvfb.log || true
+          echo "---- glxinfo ----"
+          xvfb-run -a glxinfo -B 2>&1 | head -20 || true
+          if [ "$rc" -ne 0 ]; then
+            head -20 build/xvfb.log | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+            exit 1
+          fi
 
       - name: Upload the window screenshot
         uses: actions/upload-artifact@v4
@@ -131,11 +141,14 @@ jobs:
       - name: Render the screenshots headlessly
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path build/frames | Out-Null
           cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
              tools/render_frames.c src/app.c src/snake.c src/draw.c `
-             /Fe:bin/render-frames.exe /Fo:build/render- `
-          New-Item -ItemType Directory -Force -Path build/frames | Out-Null
+             /Fe:bin/render-frames.exe 2>&1 | Out-String | Write-Output
+          if (-not (Test-Path bin/render-frames.exe)) { Write-Output "::error::render-frames.exe was not built"; exit 1 }
           .\bin\render-frames.exe fonts/font.ttf build/frames
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::render-frames exited with $LASTEXITCODE"; exit 1 }
+          Get-ChildItem build/frames
       - uses: actions/upload-artifact@v4
         with:
           name: sokol-os-frames-windows

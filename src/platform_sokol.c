@@ -139,6 +139,11 @@ static void init(void) {
             },
         },
         .primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP,
+        /* No depth test, no depth writes: this pipeline is 2D by contract. */
+        .depth = {
+            .write_enabled = false,
+            .compare_func = SG_COMPAREFUNC_ALWAYS,
+        },
         .label = "canvas-blit-pipeline",
     });
 
@@ -231,7 +236,7 @@ static void event(const sapp_event *ev) {
         app_input(g.app, &in);
         break;
     case SAPP_EVENTTYPE_RESIZED:
-        update_letterbox(ev->window_width, ev->window_height);
+        update_letterbox(ev->framebuffer_width, ev->framebuffer_height);
         break;
     default:
         break;

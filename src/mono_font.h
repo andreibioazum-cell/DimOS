@@ -7,8 +7,8 @@
  * bit 7 is the leftmost pixel.
  */
 
-#ifndef SOKOLOS_MONO_FONT_H
-#define SOKOLOS_MONO_FONT_H
+#ifndef DIMOS_MONO_FONT_H
+#define DIMOS_MONO_FONT_H
 
 #define MONO_FONT_FIRST 0x20
 #define MONO_FONT_LAST 0x7E

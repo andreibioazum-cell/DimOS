@@ -1,5 +1,5 @@
 /*
- * draw.c -- software rasterizer for Sokol OS.
+ * draw.c -- software rasterizer for DimOS.
  *
  * Everything is anti-aliased by evaluating a signed distance per pixel
  * instead of drawing into a mask first: at 1280x720 the cost is small and

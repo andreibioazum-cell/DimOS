@@ -1,5 +1,5 @@
 /*
- * app.c -- Sokol OS: the boot console, the desktop and the window manager.
+ * app.c -- DimOS: the boot console, the desktop and the window manager.
  *
  * Three screens share one 1280x720 canvas:
  *
@@ -49,9 +49,9 @@ static const BootLine boot_lines[] = {
     {0.97f, BOOT_STYLE_KERNEL, "[    0.000092] Memory: 3298612K/4194304K available"},
     {1.10f, BOOT_STYLE_KERNEL, "[    0.000131] smpboot: CPU0: AMD Ryzen 7 5800X 8-Core"},
     {1.24f, BOOT_STYLE_KERNEL, "[    0.024418] sokol: window 1280x720, 32-bit canvas, 60 Hz"},
-    {1.37f, BOOT_STYLE_KERNEL, "[    0.024492] sokolos: software renderer ready"},
-    {1.50f, BOOT_STYLE_KERNEL, "[    0.024530] sokolos: input devices: mouse, keyboard"},
-    {1.68f, BOOT_STYLE_KERNEL, "[    0.061208] sokolos: 964.3 MB/s canvas blit, 0 dropped"},
+    {1.37f, BOOT_STYLE_KERNEL, "[    0.024492] dimos: software renderer ready"},
+    {1.50f, BOOT_STYLE_KERNEL, "[    0.024530] dimos: input devices: mouse, keyboard"},
+    {1.68f, BOOT_STYLE_KERNEL, "[    0.061208] dimos: 964.3 MB/s canvas blit, 0 dropped"},
     {1.90f, BOOT_STYLE_INFO,   "systemd[1]: systemd 256.9-1-arch running in system mode"},
     {2.15f, BOOT_STYLE_OK,     " Created slice User and Session Slice."},
     {2.35f, BOOT_STYLE_OK,     " Started Journal Service."},
@@ -214,7 +214,7 @@ App *app_create(const unsigned char *ttf, size_t ttf_size) {
         return NULL;
     }
     if (!text_init(ttf, ttf_size)) {
-        fprintf(stderr, "sokol-os: warning: could not load the UI font\n");
+        fprintf(stderr, "dimos: warning: could not load the UI font\n");
     }
     build_wallpaper(app);
 
@@ -252,16 +252,20 @@ Canvas *app_canvas(App *app) {
     return &app->canvas;
 }
 
-const Snake *app_snake(const App *app) {
-    return &app->snake;
-}
-
 AppScreen app_screen(const App *app) {
     return app->screen;
 }
 
 int app_quit_requested(const App *app) {
     return app->quit_requested;
+}
+
+/* The live ISO boots a real kernel that prints a real log on tty1, so the
+ * shell skips its own console and opens straight on the desktop. */
+void app_skip_boot(App *app) {
+    if (app->screen == APP_SCREEN_BOOT) {
+        app_goto(app, APP_SCREEN_DESKTOP);
+    }
 }
 
 void app_goto(App *app, AppScreen screen) {
@@ -334,18 +338,6 @@ void app_update(App *app, float dt) {
     }
     default:
         break;
-    }
-}
-
-void app_advance(App *app, float seconds, float step) {
-    if (step <= 0.0f) {
-        step = 1.0f / 60.0f;
-    }
-    float left = seconds;
-    while (left > 0.0f) {
-        const float dt = (left < step) ? left : step;
-        app_update(app, dt);
-        left -= dt;
     }
 }
 
@@ -615,7 +607,7 @@ static void draw_status_icons(Canvas *c, float right) {
 static void draw_top_bar_base(Canvas *c) {
     canvas_fill_alpha(c, 0.0f, 0.0f, (float)APP_WIDTH, 40.0f, RGB(0x04, 0x07, 0x0C), 120);
     canvas_fill_alpha(c, 0.0f, 39.0f, (float)APP_WIDTH, 1.0f, RGB(0xFF, 0xFF, 0xFF), 18);
-    text_ui(c, 26.0f, 11.0f, 16, RGB(0xF2, 0xF4, 0xF8), "Sokol OS");
+    text_ui(c, 26.0f, 11.0f, 16, RGB(0xF2, 0xF4, 0xF8), "DimOS");
 
     /* a small arch-shaped mark, drawn with three strokes */
     canvas_line(c, 106.0f, 30.0f, 112.0f, 12.0f, 2.0f, RGB(0x4A, 0xDE, 0x80), 230);
@@ -742,7 +734,7 @@ static void prepare_desktop(App *app) {
     text_ui_centered(c, cx, 604.0f, 14, RGB(0xE8, 0xEE, 0xF6), 130,
                      "one application installed  \xc2\xb7  click it or press Enter");
 
-    text_ui_alpha(c, 26.0f, (float)APP_HEIGHT - 30.0f, 12, RGB(0xCB, 0xD5, 0xE1), 90, "Sokol OS 1.0");
+    text_ui_alpha(c, 26.0f, (float)APP_HEIGHT - 30.0f, 12, RGB(0xCB, 0xD5, 0xE1), 90, "DimOS 1.0");
     const char *right = "software renderer  \xc2\xb7  no 3D, no GPU pipeline";
     const float right_w = text_ui_width(12, right);
     text_ui_alpha(c, (float)APP_WIDTH - 26.0f - right_w, (float)APP_HEIGHT - 30.0f, 12, RGB(0xCB, 0xD5, 0xE1), 90, right);

@@ -2,7 +2,7 @@
 """Turn the public-domain IBM VGA 8x8 glyph table into a C header.
 
 The table lives in the old bare-metal tree (legacy/tools/sandbox/font8x8.py)
-because that is where it was first needed. Sokol OS uses the same glyphs for
+because that is where it was first needed. DimOS uses the same glyphs for
 the boot console and every monospace label, so the header is regenerated from
 that single source of truth instead of being copied by hand.
 
@@ -42,8 +42,8 @@ def render(table: dict[int, bytes]) -> str:
         " * bit 7 is the leftmost pixel.",
         " */",
         "",
-        "#ifndef SOKOLOS_MONO_FONT_H",
-        "#define SOKOLOS_MONO_FONT_H",
+        "#ifndef DIMOS_MONO_FONT_H",
+        "#define DIMOS_MONO_FONT_H",
         "",
         "#define MONO_FONT_FIRST 0x20",
         "#define MONO_FONT_LAST 0x7E",

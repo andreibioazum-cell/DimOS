@@ -1,6 +1,6 @@
 /*
  * platform_sokol.c -- the only file that knows about windows, input and
- * presenting pixels.
+ * presenting pixels. Everything visible is rendered by sokol.
  *
  * Sokol is used for three things here: create a window (sokol_app), receive
  * input events, and blit one canvas-sized texture onto the screen. There is
@@ -16,7 +16,9 @@
  * That is the whole GPU workload of the system: 1280x720 pixels stretched
  * into the window with a single bilinear sample per pixel.
  */
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SOKOL_GLCORE33
@@ -59,6 +61,7 @@ static const char *quad_fragment_shader =
 
 static struct {
     App *app;
+    bool skip_boot;
     sg_image canvas_image;
     sg_buffer quad_buffer;
     sg_pipeline pipeline;
@@ -98,6 +101,9 @@ static void init(void) {
     });
 
     g.app = app_create(font_ttf, font_ttf_size);
+    if (g.app && g.skip_boot) {
+        app_skip_boot(g.app);
+    }
     if (!g.app) {
         fprintf(stderr, "sokol-os: out of memory\n");
         sapp_request_quit();
@@ -280,9 +286,20 @@ static void frame(void) {
     sg_commit();
 }
 
+static bool has_flag(int argc, char *argv[], const char *name) {
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] && strcmp(argv[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 sapp_desc sokol_main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
+    /* --fullscreen and --skip-boot are used by the live ISO, where the real
+     * kernel has already printed its boot log on the first console. */
+    const bool fullscreen = has_flag(argc, argv, "--fullscreen") || getenv("DIMOS_FULLSCREEN") != NULL;
+    g.skip_boot = has_flag(argc, argv, "--skip-boot") || getenv("DIMOS_SKIP_BOOT") != NULL;
     return (sapp_desc){
         .init_cb = init,
         .frame_cb = frame,
@@ -290,7 +307,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
         .event_cb = event,
         .width = 1280,
         .height = 720,
-        .window_title = "Sokol OS -- Snake",
+        .window_title = "DimOS",
+        .fullscreen = fullscreen,
         .high_dpi = true,
         .swap_interval = 1,
         .sample_count = 1,

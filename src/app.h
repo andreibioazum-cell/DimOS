@@ -1,13 +1,13 @@
 /*
- * app.h -- Sokol OS itself: a boot sequence, a desktop and one application.
+ * app.h -- DimOS itself: a boot sequence, a desktop and one application.
  *
  * The whole operating system is a single process with one window. The
  * platform layer (sokol_app + a two-triangle blit) only supplies a window,
  * input events and one texture; every pixel of the interface is produced by
  * draw.c on the CPU.
  */
-#ifndef SOKOLOS_APP_H
-#define SOKOLOS_APP_H
+#ifndef DIMOS_APP_H
+#define DIMOS_APP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -73,15 +73,10 @@ void app_draw_frame(App *app);
 void app_input(App *app, const InputEvent *event);
 
 Canvas *app_canvas(App *app);
-/* Read-only view of the running game, used by tools/render_frames.c to play
- * a scripted demo for the screenshots (and by tests). */
-const Snake *app_snake(const App *app);
 AppScreen app_screen(const App *app);
 void app_goto(App *app, AppScreen screen);
+/* Skip the built-in console: used by the live ISO, which boots a real kernel. */
+void app_skip_boot(App *app);
 int app_quit_requested(const App *app);
-
-/* Deterministic stepping for tools/render_frames.c: advances time and
- * returns 1 when the boot sequence is over. */
-void app_advance(App *app, float seconds, float step);
 
 #endif

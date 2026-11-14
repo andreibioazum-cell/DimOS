@@ -1,0 +1,41 @@
+# Packages of the DimOS live image.
+#
+# The image is a normal Arch Linux: the kernel, udev and X come from the
+# distribution, and the whole "operating system" on top of them is the
+# single DimOS binary (rendered with sokol) that starts on the first console.
+
+# Live-ISO tooling required by mkarchiso
+archiso
+mkinitcpio-archiso
+syslinux
+efibootmgr
+dosfstools
+mtools
+libisoburn
+arch-install-scripts
+
+# Kernel and initramfs
+base
+linux
+mkinitcpio
+
+# The graphics stack the DimOS binary talks to: X11 + OpenGL (llvmpipe,
+# software, because the live image boots with nomodeset)
+xorg-server
+xorg-xinit
+xorg-xset
+xorg-xrandr
+xf86-input-libinput
+xf86-video-vesa
+xf86-video-fbdev
+mesa
+libx11
+libxi
+libxcursor
+
+# A window manager only so the app can go fullscreen and keep the keyboard
+# focus; it draws nothing of its own.
+openbox
+
+# Console font (Terminus, as on stock Arch)
+terminus-font

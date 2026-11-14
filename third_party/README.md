@@ -5,18 +5,20 @@
 | Каталог | Что это | Версия / источник | Лицензия |
 | --- | --- | --- | --- |
 | `sokol/` | `sokol_app.h`, `sokol_gfx.h`, `sokol_glue.h`, `sokol_log.h`, `sokol_time.h` — окно, ввод и вывод текстуры | `floooh/sokol`, тег `pre-separate-samplers`, коммит `8d5d9929cc559cc6ec087fb621bfbe58c9ccc028` | zlib/libpng (`sokol/LICENSE`) |
-| `stb/` | `stb_truetype.h` (растеризация TTF) и `stb_image_write.h` (PNG для скриншотов) | `nothings/stb`, master | public domain / MIT (`stb/LICENSE`) |
+| `stb/` | `stb_truetype.h` — растеризация TTF в рантайме | `nothings/stb`, master | public domain / MIT (`stb/LICENSE`) |
 
 Что используется осознанно:
 
 * **sokol_app** — окно, мышь, клавиатура, размеры кадра.
-* **sokol_gfx** — одна текстура 1280×720 и один пайплайн, который рисует её
-  двумя треугольниками на весь экран. Никаких буферов вершин, глубины,
-  матриц и второй текстуры нет.
+* **sokol_gfx** — одна текстура 1280×720 и один пайплайн с четырьмя
+  вершинами (треугольная полоса), который растягивает её на весь экран.
+  Никаких матриц, камеры, моделей, теста глубины и второй текстуры нет.
 * **sokol_glue / sokol_log** — три строки склейки и лог в stderr.
 * **stb_truetype** — интерфейсный шрифт (`fonts/font.ttf`, Inter, подмножество
-  ASCII) растеризуется в рантайме; **stb_image_write** нужен только
-  инструменту `tools/render_frames.c`.
+  ASCII) растеризуется в рантайме.
+
+PNG-вывода и скриншотов в проекте нет: сборка даёт только `dist/dimos.iso` и
+`dist/dimos.img`.
 
 `sokol_time.h` подключён для полноты набора; кадры считаются по
 `sapp_frame_duration()`, поэтому отдельный таймер не нужен.

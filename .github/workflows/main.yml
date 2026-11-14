@@ -1,4 +1,4 @@
-name: Build Sokol OS
+name: Build DimOS
 
 on:
   push:
@@ -9,12 +9,66 @@ permissions:
   contents: read
 
 concurrency:
-  group: sokolos-${{ github.workflow }}-${{ github.ref }}
+  group: dimos-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  iso:
+    name: Live ISO + IMG (archiso)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: archlinux:latest
+      options: --privileged
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: |
+          pacman -Syu --noconfirm --needed \
+            archiso base-devel python libx11 libxi libxcursor mesa
+
+      - name: Build ISO and IMG
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          ./iso/build-iso.sh 2>&1 | tee iso/build.log
+
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          tail -40 iso/build.log 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-3000 |
+            sed 's/^/::error title=build tail::/'
+          echo
+          grep -iE 'error|failed|not found|unable|could not|target not found' iso/build.log 2>/dev/null |
+            head -30 | tr '\n' ' ' | cut -c1-3000 | sed 's/^/::error title=build errors::/'
+          echo
+
+      - name: Checksums
+        if: success()
+        run: |
+          cd dist
+          sha256sum dimos.iso dimos.img > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload ISO and IMG
+        uses: actions/upload-artifact@v6
+        with:
+          name: dimos-x86_64
+          path: |
+            dist/dimos.iso
+            dist/dimos.img
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
   linux:
-    name: Linux -- build, screenshots, window under Xvfb
+    name: Linux -- build and run the desktop program
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -31,8 +85,7 @@ jobs:
             libxcursor-dev \
             libgl1-mesa-dev \
             libgl1-mesa-dri \
-            xvfb \
-            imagemagick
+            xvfb
 
       - name: Build the application
         run: |
@@ -46,51 +99,29 @@ jobs:
             exit "$rc"
           fi
 
-      - name: Render the screenshots headlessly
-        run: make check
-
-      - name: Upload the screenshots
-        uses: actions/upload-artifact@v4
-        with:
-          name: sokol-os-frames
-          path: build/frames/*.png
-          if-no-files-found: error
-
       - name: Smoke-test the real window in a virtual X server
         run: |
           export LIBGL_ALWAYS_SOFTWARE=1
           set +e
           xvfb-run -a -s "-screen 0 1280x720x24" bash -c '
-            ./bin/sokol-os > build/xvfb.log 2>&1 &
+            ./bin/dimos > build/xvfb.log 2>&1 &
             app=$!
             sleep 8
             if kill -0 "$app" 2>/dev/null; then
               kill "$app"; wait "$app" 2>/dev/null
-              echo "sokol-os stayed alive for 8s"
-              import -window root build/xvfb-window.png
+              echo "dimos stayed alive for 8s"
               exit 0
             fi
-            echo "sokol-os exited early"
+            echo "dimos exited early"
             exit 1
           '
           rc=$?
-          echo "---- sokol-os log ----"
+          echo "---- dimos log ----"
           cat build/xvfb.log || true
-          echo "---- glxinfo ----"
-          xvfb-run -a glxinfo -B 2>&1 | head -20 || true
           if [ "$rc" -ne 0 ]; then
             head -20 build/xvfb.log | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
             exit 1
           fi
-
-      - name: Upload the window screenshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: sokol-os-window
-          path: |
-            build/xvfb-window.png
-            build/xvfb.log
-          if-no-files-found: warn
 
   macos:
     name: macOS -- compile check
@@ -98,23 +129,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Build the application
-        run: |
-          set +e
-          mkdir -p build
-          make app 2>&1 | tee build/app.log
-          rc=${PIPESTATUS[0]}
-          if [ "$rc" -ne 0 ]; then
-            grep -E "error|undefined reference" build/app.log | head -25 |
-              while IFS= read -r line; do printf '::error::%s\n' "$line"; done
-            exit "$rc"
-          fi
-      - run: make frames
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sokol-os-frames-macos
-          path: build/frames/*.png
-          if-no-files-found: error
+      - run: make app
 
   windows:
     name: Windows -- compile check
@@ -130,7 +145,7 @@ jobs:
           python tools/embed_font.py fonts/font.ttf build/font_data.h
           $out = cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
              src/app.c src/snake.c src/draw.c src/platform_sokol.c `
-             /Fe:bin/sokol-os.exe /Fo:build/ `
+             /Fe:bin/dimos.exe /Fo:build/ `
              opengl32.lib user32.lib gdi32.lib shell32.lib ole32.lib 2>&1 | Out-String
           Write-Output $out
           if ($LASTEXITCODE -ne 0) {
@@ -138,19 +153,3 @@ jobs:
               ForEach-Object { Write-Output "::error::$_" }
             exit 1
           }
-      - name: Render the screenshots headlessly
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path build/frames | Out-Null
-          cl /nologo /O2 /W3 /Isrc /Ithird_party/sokol /Ithird_party/stb /Ibuild `
-             tools/render_frames.c src/app.c src/snake.c src/draw.c `
-             /Fe:bin/render-frames.exe 2>&1 | Out-String | Write-Output
-          if (-not (Test-Path bin/render-frames.exe)) { Write-Output "::error::render-frames.exe was not built"; exit 1 }
-          .\bin\render-frames.exe fonts/font.ttf build/frames
-          if ($LASTEXITCODE -ne 0) { Write-Output "::error::render-frames exited with $LASTEXITCODE"; exit 1 }
-          Get-ChildItem build/frames
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sokol-os-frames-windows
-          path: build/frames/*.png
-          if-no-files-found: error

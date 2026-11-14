@@ -1,12 +1,12 @@
 /*
- * snake.h -- the one application Sokol OS ships with.
+ * snake.h -- the one application DimOS ships with.
  *
  * The board is a fixed 30x18 grid of 28 pixel cells, drawn by the software
  * renderer; the game logic itself never touches a pixel, which is what lets
  * the headless renderer play it too.
  */
-#ifndef SOKOLOS_SNAKE_H
-#define SOKOLOS_SNAKE_H
+#ifndef DIMOS_SNAKE_H
+#define DIMOS_SNAKE_H
 
 #include <stdint.h>
 

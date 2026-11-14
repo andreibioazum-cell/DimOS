@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# Build Sokol OS. The same script works on Linux and macOS; on Windows use
-# the command in README.md (there is nothing to configure, just one .c file
-# that includes sokol).
+# Build DimOS.
 #
-#   ./build.sh              release build -> bin/sokol-os
-#   ./build.sh frames       render the PNG screenshots -> build/frames
-#   ./build.sh run          build and start
+#   ./build.sh            the desktop program  -> bin/dimos
+#   ./build.sh run        build and start it
+#   ./build.sh iso        live ISO + disk image -> dist/dimos.iso, dist/dimos.img
+#   ./build.sh clean      remove build/, bin/ and dist/
 #
 set -Eeuo pipefail
 
@@ -14,44 +13,31 @@ cd "$(dirname "$0")"
 
 target="${1:-app}"
 
-case "$(uname -s)" in
-    Linux)
-        for tool in cc make; do
-            command -v "$tool" >/dev/null 2>&1 || {
-                printf 'missing build tool: %s\n' "$tool" >&2
-                exit 1
-            }
-        done
-        if [ ! -f /usr/include/X11/Xlib.h ] && ! pkg-config --exists x11 2>/dev/null; then
-            printf 'note: install the window dev packages, e.g.\n'
-            printf '      sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev\n'
-        fi
-        ;;
-    Darwin)
-        printf 'macOS: using the bundled Cocoa/OpenGL frameworks\n'
-        ;;
-    *)
-        printf 'unknown platform %s, trying make anyway\n' "$(uname -s)"
-        ;;
-esac
-
 case "$target" in
-    app|all)
-        make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" app
-        printf '\nbuilt %s\nrun it with: ./bin/sokol-os\n' "bin/sokol-os"
-        ;;
-    run)
-        make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" app
-        exec ./bin/sokol-os
-        ;;
-    frames|check)
-        make "$target"
+    iso)
+        exec ./iso/build-iso.sh
         ;;
     clean)
         make clean
         ;;
+    app|run)
+        if [ "$(uname -s)" = "Linux" ]; then
+            if [ ! -f /usr/include/X11/Xlib.h ] && ! pkg-config --exists x11 2>/dev/null; then
+                printf 'note: install the window dev packages, e.g.\n'
+                printf '      sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev\n'
+            fi
+        fi
+        if [ "$target" = "run" ]; then
+            make app
+            exec ./bin/dimos
+        fi
+        make app
+        printf '\nbuilt bin/dimos\n  ./bin/dimos               -- desktop app\n'
+        printf '  ./bin/dimos --fullscreen  -- for a live system\n'
+        printf '  ./build.sh iso            -- bootable ISO + IMG (needs Arch or Docker)\n'
+        ;;
     *)
-        printf 'usage: %s [app|run|frames|check|clean]\n' "$0" >&2
+        printf 'usage: %s [app|run|iso|clean]\n' "$0" >&2
         exit 2
         ;;
 esac

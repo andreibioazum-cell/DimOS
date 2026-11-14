@@ -1,5 +1,5 @@
 /*
- * snake.c -- Snake, the single application installed in Sokol OS.
+ * snake.c -- Snake, the single application installed in DimOS.
  *
  * Classic rules: the board is walled, every apple grows the snake by one
  * cell and shortens the step interval, and the run ends when the head hits a
@@ -289,7 +289,7 @@ static void draw_head_eyes(Canvas *c, float cx, float cy, int dir_x, int dir_y, 
     canvas_circle(c, cx + ex - sx, cy + ey - sy, 2.6f, RGB(0x05, 0x2E, 0x16));
 }
 
-/* The frame, the grid and the shadow never change, so Sokol OS builds them
+/* The frame, the grid and the shadow never change, so DimOS builds them
  * once into the static layer instead of repainting 400k pixels per frame. */
 void snake_draw_background(Canvas *c) {
     const float bx = (float)SNAKE_BOARD_X;

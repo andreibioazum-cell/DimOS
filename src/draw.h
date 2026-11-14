@@ -1,13 +1,13 @@
 /*
- * draw.h -- the tiny software renderer every Sokol OS screen is made of.
+ * draw.h -- the tiny software renderer every DimOS screen is made of.
  *
  * The application never talks to the GPU directly: it paints 32-bit ARGB
  * pixels into one 1280x720 canvas, which the sokol backend uploads as a
  * texture and stretches over the window. That keeps the UI code identical
  * for the real window, for the headless PNG renderer and for the tests.
  */
-#ifndef SOKOLOS_DRAW_H
-#define SOKOLOS_DRAW_H
+#ifndef DIMOS_DRAW_H
+#define DIMOS_DRAW_H
 
 #include <stddef.h>
 #include <stdint.h>
